@@ -295,8 +295,12 @@ impl SharedFileManager {
         );
 
         // Initialize auth framework
+        // Centralize the token lifetime so the same value is used when
+        // constructing AuthConfig and when RealAuthProvider builds AuthToken
+        // instances.
+        let token_lifetime_secs: u64 = 3600; // 1 hour
         let auth_config = auth_framework::AuthConfig::new()
-            .token_lifetime(Duration::from_secs(3600))
+            .token_lifetime(Duration::from_secs(token_lifetime_secs))
             .refresh_token_lifetime(Duration::from_secs(86400 * 7));
 
         let mut auth_fw = AuthFramework::new(auth_config);
@@ -326,12 +330,15 @@ impl SharedFileManager {
         // are orchestrated at a higher level
 
         // Wrap the real auth framework in the RealAuthProvider and expose it as
-        // an Arc<dyn AuthProvider> so the manager depends on the abstraction.
-        let auth_provider = RealAuthProvider::new(Arc::new(RwLock::new(auth_fw)));
-        let auth_arc: std::sync::Arc<dyn AuthProvider> = std::sync::Arc::new(auth_provider);
-
+        // an `Arc<dyn AuthProvider>` so the manager depends on the abstraction.
+        // Pass the configured token lifetime so the provider constructs tokens
+        // that align with the framework's expectations. Create the Arc directly
+        // and coerce to the trait object type.
         Ok(Self {
-            auth: auth_arc,
+            auth: std::sync::Arc::new(RealAuthProvider::new(
+                Arc::new(RwLock::new(auth_fw)),
+                token_lifetime_secs,
+            )),
             config: Arc::new(RwLock::new(dist_config)),
             memory_map_manager,
             active_files: Arc::new(DashMap::new()),
