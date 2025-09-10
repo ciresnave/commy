@@ -1,0 +1,40 @@
+/target
+
+# Test artifacts and temporary files
+*.profraw
+*.mmap
+*.bin
+test_files_ThreadId*/
+temp/
+test_integration_files/
+test_phase2_cleanup/
+test_*.sqlite*
+db.sqlite*
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# SDKs and package managers
+sdks/
+**/node_modules/
+**/package-lock.json
+**/yarn.lock
+
+# Build outputs
+build/
+**/target/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Backup files
+*~
+*.bak

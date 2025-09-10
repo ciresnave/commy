@@ -1,0 +1,599 @@
+//! Commy Shared File Manager
+//!
+//! The foundation layer that orchestrates memory-mapped file creation, access control,
+//! and lifecycle management. This is the core component that transforms Commy into
+///// Status of a shared file
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FileStatus {
+    /// File is active and available for connections
+    Active,
+    /// File is inactive (no connections)
+    Inactive,
+    /// File is being created
+    Creating,
+    /// File is being cleaned up
+    Cleaning,
+    /// File has been marked for deletion
+    PendingDeletion,
+    /// File is in error state
+    Error(String),
+}
+
+/// Manager module for Commy distributed service mesh.
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::Duration;
+
+#[cfg(feature = "manager")]
+use {
+    anyhow::Result,
+    auth_framework::AuthFramework,
+    chrono::{DateTime, Utc},
+    dashmap::DashMap,
+    distributed_config::ConfigManager,
+    serde::{Deserialize, Serialize},
+    std::sync::Arc,
+    tokio::sync::{broadcast, RwLock},
+    tracing::{debug, error, info},
+    uuid::Uuid,
+};
+
+pub mod core;
+pub mod network;
+pub mod protocol;
+pub mod shared_memory;
+pub mod transport;
+pub mod transport_impl;
+
+/// Core request to create or connect to a shared file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedFileRequest {
+    /// Unique identifier for the file
+    pub identifier: String,
+
+    /// Optional custom file path
+    pub file_path: Option<PathBuf>,
+
+    /// Maximum size in bytes
+    pub max_size_bytes: Option<u64>,
+
+    /// How to handle file existence
+    pub existence_policy: ExistencePolicy,
+
+    /// Required permissions
+    pub required_permissions: Vec<Permission>,
+}
+
+/// Data flow characteristics
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Directionality {
+    /// Only read access
+    ReadOnly,
+    /// Only write access
+    WriteOnly,
+    /// Both read and write access
+    ReadWrite,
+    /// Write once, then read-only
+    WriteOnce,
+}
+
+/// Connection topology patterns
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Topology {
+    /// One writer, one reader
+    OneToOne,
+    /// One writer, multiple readers
+    OneToMany,
+    /// Multiple writers, one reader
+    ManyToOne,
+    /// Multiple writers, multiple readers
+    ManyToMany,
+    /// Broadcast pattern (one writer, many readers with notification)
+    Broadcast,
+    /// Sequential processing pipeline
+    Pipeline,
+}
+
+/// Serialization formats supported
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SerializationFormat {
+    Json,
+    Binary,
+    MessagePack,
+    Compact,
+    Cbor,
+    ZeroCopy,
+    Custom(String),
+}
+
+/// Which side of the communication the requester represents
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConnectionSide {
+    /// This process will produce/write data
+    Producer,
+    /// This process will consume/read data
+    Consumer,
+    /// This process will both produce and consume
+    ProducerConsumer,
+    /// The side doesn't matter for this connection
+    Agnostic,
+}
+
+/// Policy for handling file existence
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ExistencePolicy {
+    /// Create file if needed, connect if exists
+    CreateOrConnect,
+    /// Only create new files
+    CreateOnly,
+    /// Only connect to existing files, never create
+    ConnectOnly,
+}
+
+/// Basic permission types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Permission {
+    Read,
+    Write,
+    Admin,
+}
+
+/// Policy for file creation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CreationPolicy {
+    /// Create the file if it doesn't exist
+    Create,
+    /// Never create files
+    NeverCreate,
+    /// Create only if authorized to do so
+    CreateIfAuthorized,
+}
+
+/// Transport selection preferences
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TransportPreference {
+    /// Prefer shared memory, fall back to network
+    PreferLocal,
+    /// Require shared memory only, fail if not possible
+    RequireLocal,
+    /// Prefer network communication
+    PreferNetwork,
+    /// Require network only
+    RequireNetwork,
+    /// Let the mesh decide based on performance
+    AutoOptimize,
+    /// Dynamically adapt based on real-time performance
+    Adaptive,
+}
+
+/// Performance requirements for the connection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceRequirements {
+    /// Maximum acceptable latency in milliseconds
+    pub max_latency_ms: Option<u32>,
+    /// Minimum required throughput in MB/s
+    pub min_throughput_mbps: Option<u32>,
+    /// Consistency requirements
+    pub consistency_level: ConsistencyLevel,
+    /// Whether durability is required
+    pub durability_required: bool,
+}
+
+/// Consistency levels for distributed operations
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConsistencyLevel {
+    /// No consistency guarantees
+    None,
+    /// Eventually consistent
+    Eventual,
+    /// Strong consistency
+    Strong,
+    /// Linearizable consistency
+    Linearizable,
+}
+
+/// Response when a shared file is allocated
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedFileResponse {
+    /// Unique identifier for this file allocation
+    pub file_id: u64,
+    /// Local path to the memory-mapped file
+    pub file_path: PathBuf,
+    /// Metadata about the allocated file
+    pub metadata: FileMetadata,
+    /// Information about the active transport
+    pub transport: ActiveTransport,
+    /// Performance characteristics of this connection
+    pub performance_profile: PerformanceProfile,
+    /// Security context for this connection
+    pub security_context: SecurityContext,
+}
+
+/// Metadata about an allocated shared file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileMetadata {
+    /// Original request that created this file
+    pub original_request: SharedFileRequest,
+    /// When the file was created
+    pub created_at: DateTime<Utc>,
+    /// Current number of connected clients
+    pub connection_count: u32,
+    /// Total size of the file in bytes
+    pub size_bytes: u64,
+    /// Current status of the file
+    pub status: FileStatus,
+    /// Performance statistics
+    pub stats: FileStatistics,
+}
+
+/// Current status of a shared file
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FileStatus {
+    /// File is active and available for connections
+    Active,
+    /// File is being created
+    Creating,
+    /// File is being cleaned up
+    Cleaning,
+    /// File has been marked for deletion
+    PendingDeletion,
+    /// File is in error state
+    Error(String),
+}
+
+/// Performance statistics for a shared file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileStatistics {
+    /// Total number of read operations
+    pub read_count: u64,
+    /// Total number of write operations
+    pub write_count: u64,
+    /// Total bytes read
+    pub bytes_read: u64,
+    /// Total bytes written
+    pub bytes_written: u64,
+    /// Average latency in microseconds
+    pub avg_latency_us: f64,
+    /// Peak concurrent connections
+    pub peak_connections: u32,
+    /// Last access time
+    pub last_access: DateTime<Utc>,
+}
+
+/// Information about the active transport
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ActiveTransport {
+    /// Local shared memory only
+    SharedMemory {
+        /// Path to the memory-mapped file
+        file_path: PathBuf,
+        /// List of local peer process IDs
+        local_peers: Vec<u32>,
+    },
+    /// Network communication only
+    Network {
+        /// Network endpoints for remote peers
+        endpoints: Vec<NetworkEndpoint>,
+        /// Encryption information
+        encryption: EncryptionInfo,
+    },
+    /// Hybrid: both local and network
+    Hybrid {
+        /// Local shared memory path
+        local_path: PathBuf,
+        /// Local peer process IDs
+        local_peers: Vec<u32>,
+        /// Remote network endpoints
+        remote_peers: Vec<NetworkEndpoint>,
+        /// Routing strategy for hybrid mode
+        routing_strategy: RoutingStrategy,
+    },
+}
+
+/// Network endpoint information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkEndpoint {
+    /// Host address
+    pub host: String,
+    /// Port number
+    pub port: u16,
+    /// Protocol used
+    pub protocol: NetworkProtocol,
+    /// Whether this endpoint is currently healthy
+    pub healthy: bool,
+}
+
+/// Network protocols supported
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum NetworkProtocol {
+    /// TCP with TLS encryption
+    TcpTls,
+    /// UDP with DTLS encryption
+    UdpDtls,
+    /// gRPC over HTTP/2
+    Grpc,
+    /// WebSocket with TLS
+    WebSocketTls,
+}
+
+/// Encryption information for network transport
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionInfo {
+    /// Encryption algorithm used
+    pub algorithm: EncryptionAlgorithm,
+    /// Key exchange method
+    pub key_exchange: KeyExchangeMethod,
+    /// Whether perfect forward secrecy is enabled
+    pub perfect_forward_secrecy: bool,
+}
+
+/// Encryption algorithms
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum EncryptionAlgorithm {
+    /// AES-256-GCM
+    Aes256Gcm,
+    /// ChaCha20-Poly1305
+    ChaCha20Poly1305,
+    /// AES-128-GCM
+    Aes128Gcm,
+}
+
+/// Key exchange methods
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum KeyExchangeMethod {
+    /// Elliptic Curve Diffie-Hellman
+    Ecdh,
+    /// RSA key exchange
+    Rsa,
+    /// Diffie-Hellman
+    Dh,
+}
+
+/// Routing strategies for hybrid transport
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RoutingStrategy {
+    /// Always prefer local, fallback to network
+    LocalFirst,
+    /// Load balance between local and network
+    LoadBalance,
+    /// Route based on message size
+    SizeBased { threshold_bytes: u64 },
+    /// Route based on performance requirements
+    PerformanceBased,
+}
+
+/// Performance profile for a connection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceProfile {
+    /// Expected latency in microseconds
+    pub expected_latency_us: u32,
+    /// Expected throughput in MB/s
+    pub expected_throughput_mbps: u32,
+    /// Whether this is a high-performance connection
+    pub high_performance: bool,
+    /// Performance tier
+    pub tier: PerformanceTier,
+}
+
+/// Performance tiers
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PerformanceTier {
+    /// Ultra-low latency (< 10 microseconds)
+    UltraLow,
+    /// Low latency (< 100 microseconds)
+    Low,
+    /// Medium latency (< 1 millisecond)
+    Medium,
+    /// High latency (< 10 milliseconds)
+    High,
+    /// Best effort (no guarantees)
+    BestEffort,
+}
+
+/// Security context for a connection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityContext {
+    /// Authentication token
+    pub auth_token: String,
+    /// Authorized permissions
+    pub permissions: Vec<String>,
+    /// User/service identity
+    pub identity: String,
+    /// Session ID
+    pub session_id: String,
+    /// Security level
+    pub security_level: SecurityLevel,
+}
+
+/// Security levels
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SecurityLevel {
+    /// No security required
+    None,
+    /// Basic authentication
+    Basic,
+    /// Standard security with encryption
+    Standard,
+    /// High security with additional protections
+    High,
+    /// Maximum security for sensitive data
+    Maximum,
+}
+
+impl Default for PerformanceRequirements {
+    fn default() -> Self {
+        Self {
+            max_latency_ms: None,
+            min_throughput_mbps: None,
+            consistency_level: ConsistencyLevel::Eventual,
+            durability_required: false,
+        }
+    }
+}
+
+impl Default for TransportPreference {
+    fn default() -> Self {
+        TransportPreference::PreferLocal
+    }
+}
+
+impl Default for FileStatistics {
+    fn default() -> Self {
+        Self {
+            read_count: 0,
+            write_count: 0,
+            bytes_read: 0,
+            bytes_written: 0,
+            avg_latency_us: 0.0,
+            peak_connections: 0,
+            last_access: Utc::now(),
+        }
+    }
+}
+
+/// File operations that can be performed on shared files
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SharedFileOperation {
+    /// Create a new shared file
+    Create {
+        path: PathBuf,
+        size: u64,
+        initial_data: Option<Vec<u8>>,
+        permissions: FilePermissions,
+    },
+
+    /// Read data from a shared file
+    Read {
+        path: PathBuf,
+        offset: u64,
+        length: Option<u64>,
+    },
+
+    /// Write data to a shared file
+    Write {
+        path: PathBuf,
+        offset: u64,
+        data: Vec<u8>,
+    },
+
+    /// Append data to a shared file
+    Append { path: PathBuf, data: Vec<u8> },
+
+    /// Delete a shared file
+    Delete { path: PathBuf },
+
+    /// Copy a shared file
+    Copy {
+        source: PathBuf,
+        destination: PathBuf,
+    },
+
+    /// Move a shared file
+    Move {
+        source: PathBuf,
+        destination: PathBuf,
+    },
+
+    /// List files in a directory
+    List {
+        directory: Option<PathBuf>,
+        pattern: Option<String>,
+    },
+
+    /// Get file information
+    GetInfo { path: PathBuf },
+
+    /// Set file permissions
+    SetPermissions {
+        path: PathBuf,
+        permissions: FilePermissions,
+    },
+}
+
+/// File permissions
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FilePermissions {
+    /// Read-only access
+    ReadOnly,
+    /// Write-only access
+    WriteOnly,
+    /// Read and write access
+    ReadWrite,
+}
+
+/// File type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum FileType {
+    /// Regular file
+    Regular,
+    /// Directory
+    Directory,
+    /// Symbolic link
+    SymbolicLink,
+}
+
+/// Response from shared file operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SharedFileOperationResponse {
+    /// Successful write operation
+    WriteSuccess {
+        bytes_written: u64,
+        timestamp: std::time::SystemTime,
+    },
+
+    /// Successful read operation
+    ReadSuccess {
+        data: Vec<u8>,
+        timestamp: std::time::SystemTime,
+    },
+
+    /// Successful create operation
+    CreateSuccess {
+        file_size: u64,
+        timestamp: std::time::SystemTime,
+    },
+
+    /// Successful delete operation
+    DeleteSuccess { timestamp: std::time::SystemTime },
+
+    /// Successful resize operation
+    ResizeSuccess {
+        new_size: u64,
+        timestamp: std::time::SystemTime,
+    },
+
+    /// Successful info operation
+    InfoSuccess {
+        file_size: u64,
+        created_at: Option<std::time::SystemTime>,
+        modified_at: Option<std::time::SystemTime>,
+        timestamp: std::time::SystemTime,
+    },
+
+    /// Successful list operation
+    ListSuccess {
+        files: Vec<PathBuf>,
+        timestamp: std::time::SystemTime,
+    },
+
+    /// Successful copy operation
+    CopySuccess { timestamp: std::time::SystemTime },
+
+    /// Successful move operation
+    MoveSuccess { timestamp: std::time::SystemTime },
+
+    /// Successful append operation
+    AppendSuccess {
+        bytes_written: u64,
+        timestamp: std::time::SystemTime,
+    },
+
+    /// Successful permission set operation
+    SetPermissionsSuccess { timestamp: std::time::SystemTime },
+}
+
+// Re-export transport types for easier access
+pub use transport::{
+    FallbackBehavior, NetworkConfig, PerformanceThresholds, RoutingDecision, RoutingReason,
+    SelectedTransport, SharedMemoryConfig, TransportConfig, TransportManager,
+};

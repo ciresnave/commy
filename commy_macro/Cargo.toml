@@ -1,0 +1,16 @@
+[package]
+edition = "2021"
+name = "commy_macro"
+version = "0.1.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+commy_common = { path = "../commy_common" }
+proc-macro2 = "1.0.86"
+quote = "1.0.36"
+syn = { version = "2.0.68", features = ["full"] }
+
+[dev-dependencies]
+rkyv = { version = "0.8" }
