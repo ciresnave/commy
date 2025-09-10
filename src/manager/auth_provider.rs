@@ -1,11 +1,8 @@
 use async_trait::async_trait;
-use chrono::Duration;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-// Focused change: small marker comment to create an isolated auth-provider commit
 // This file contains the `AuthProvider` trait and test-friendly providers.
-use crate::manager::ManagerError;
 
 /// Trait for pluggable auth providers so tests can inject a mock.
 #[async_trait]
@@ -16,11 +13,24 @@ pub trait AuthProvider: Send + Sync + 'static {
 /// Real provider that wraps the existing AuthFramework implementation
 pub struct RealAuthProvider {
     inner: Arc<RwLock<auth_framework::AuthFramework>>,
+    default_lifetime_secs: u64,
 }
 
 impl RealAuthProvider {
-    pub fn new(inner: Arc<RwLock<auth_framework::AuthFramework>>) -> Self {
-        Self { inner }
+    /// Create a new RealAuthProvider.
+    ///
+    /// `default_lifetime_secs` is used when the incoming token does not include
+    /// an explicit lifetime. This value should be taken from the AuthFramework
+    /// configuration so constructed AuthToken instances match the framework's
+    /// expectations.
+    pub fn new(
+        inner: Arc<RwLock<auth_framework::AuthFramework>>,
+        default_lifetime_secs: u64,
+    ) -> Self {
+        Self {
+            inner,
+            default_lifetime_secs,
+        }
     }
 }
 
@@ -28,11 +38,20 @@ impl RealAuthProvider {
 impl AuthProvider for RealAuthProvider {
     async fn validate(&self, token: &str) -> Result<bool, String> {
         let guard = self.inner.read().await;
-        // Build AuthToken using documented constructor
+        // Accept tokens of the form "Bearer <token>" or raw token strings.
+        // Strip the optional bearer prefix so the framework receives the raw token.
+        let token_trimmed = token.trim();
+        let token_value = if token_trimmed.to_lowercase().starts_with("bearer ") {
+            token_trimmed[7..].trim().to_string()
+        } else {
+            token_trimmed.to_string()
+        };
+
+        // Build AuthToken using the configured default lifetime (in seconds).
         let auth_token = auth_framework::tokens::AuthToken::new(
             "".to_string(),
-            token.to_string(),
-            std::time::Duration::from_secs(3600),
+            token_value,
+            std::time::Duration::from_secs(self.default_lifetime_secs),
             "bearer".to_string(),
         );
         match guard.validate_token(&auth_token).await {
