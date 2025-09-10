@@ -19,6 +19,26 @@ param(
   [switch]$WhatIfMode
 )
 
+# Determine repository
+$DefaultRepo = 'ciresnave/commy'
+$Repo = $env:GITHUB_REPO
+if (-not $Repo) {
+    $Repo = $DefaultRepo
+    Write-Warning "No GITHUB_REPO environment variable set. Using default repository: $DefaultRepo. This may create issues in the default repo."
+    if ($WhatIfMode) {
+        Write-Host "[DRY-RUN] Would use default repository: $DefaultRepo"
+    }
+} else {
+    if ($WhatIfMode) {
+        Write-Host "[DRY-RUN] Would use repository: $Repo"
+    }
+}
+
+# If dry-run, print a summary and skip actual issue creation
+if ($WhatIfMode) {
+    Write-Host "[DRY-RUN] No issues will be created. All side effects are suppressed."
+}
+
 if (-not $env:GITHUB_TOKEN) {
   Write-Error "GITHUB_TOKEN environment variable not found. Set it to a Personal Access Token with 'repo' scope, e.g.:`n$env:GITHUB_TOKEN = '<token>'"
   exit 1
