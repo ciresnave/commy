@@ -325,10 +325,13 @@ impl SharedFileManager {
         // This allows SharedFileManager to focus on core functionality while mesh capabilities
         // are orchestrated at a higher level
 
+        // Wrap the real auth framework in the RealAuthProvider and expose it as
+        // an Arc<dyn AuthProvider> so the manager depends on the abstraction.
         let auth_provider = RealAuthProvider::new(Arc::new(RwLock::new(auth_fw)));
+        let auth_arc: std::sync::Arc<dyn AuthProvider> = std::sync::Arc::new(auth_provider);
 
         Ok(Self {
-            auth: std::sync::Arc::new(auth_provider),
+            auth: auth_arc,
             config: Arc::new(RwLock::new(dist_config)),
             memory_map_manager,
             active_files: Arc::new(DashMap::new()),

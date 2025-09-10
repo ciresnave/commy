@@ -3,6 +3,8 @@ use chrono::Duration;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// Focused change: small marker comment to create an isolated auth-provider commit
+// This file contains the `AuthProvider` trait and test-friendly providers.
 use crate::manager::ManagerError;
 
 /// Trait for pluggable auth providers so tests can inject a mock.
