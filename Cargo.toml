@@ -50,6 +50,8 @@ parking_lot = { version = "0.12", optional = true }
 rand = { version = "0.9.2", optional = true }
 
 async-trait = "0.1"
+base64 = "0.21"
+num-bigint-dig = "=0.8.4"
 
 [features]
 default = ["manager", "mesh", "ffi"]
@@ -136,3 +138,11 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 tracing-subscriber = { version = "0.3" }
 rcgen = "0.9"
 proptest = "1.0"
+
+[patch.crates-io]
+# Temporary override: point to upstream commit that fixes `div_ceil` usage
+# (replaces method-style `x.div_ceil(&y)` with `Integer::div_ceil(&x, &y)`).
+# This targets the upstream rust-num/num-bigint commit which contains the
+# div_ceil/int-roundings fixes. Remove this override once a fixed crates.io
+# release is published.
+num-bigint-dig = { git = "https://github.com/rust-num/num-bigint.git", package = "num-bigint", rev = "1469ed68d16bcaa069965dcecf4cab0dbcde3b92" }
