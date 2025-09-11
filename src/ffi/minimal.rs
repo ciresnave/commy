@@ -491,7 +491,7 @@ pub extern "C" fn commy_ffi_version() -> *const c_char {
 
 /// Create a new mesh coordinator
 #[no_mangle]
-pub extern "C" fn commy_create_mesh(node_id: *const c_char, port: u16) -> CommyHandle {
+pub unsafe extern "C" fn commy_create_mesh(node_id: *const c_char, port: u16) -> CommyHandle {
     if node_id.is_null() {
         return CommyHandle {
             instance_id: 0,
@@ -621,7 +621,7 @@ pub extern "C" fn commy_configure_mesh_minimal(
 
 /// Register a service with the mesh
 #[no_mangle]
-pub extern "C" fn commy_register_service(
+pub unsafe extern "C" fn commy_register_service(
     handle: CommyHandle,
     config: *const CommyServiceConfig,
 ) -> i32 {
@@ -668,7 +668,7 @@ pub extern "C" fn commy_register_service(
 
 /// Unregister a service from the mesh
 #[no_mangle]
-pub extern "C" fn commy_unregister_service(
+pub unsafe extern "C" fn commy_unregister_service(
     handle: CommyHandle,
     service_name: *const c_char,
 ) -> i32 {
@@ -696,7 +696,7 @@ pub extern "C" fn commy_unregister_service(
 
 /// Discover services by name
 #[no_mangle]
-pub extern "C" fn commy_discover_services(
+pub unsafe extern "C" fn commy_discover_services(
     handle: CommyHandle,
     service_name: *const c_char,
     services: *mut *mut CommyServiceInfo,
@@ -728,7 +728,7 @@ pub extern "C" fn commy_discover_services(
 
 /// Select a service using load balancer
 #[no_mangle]
-pub extern "C" fn commy_select_service(
+pub unsafe extern "C" fn commy_select_service(
     handle: CommyHandle,
     service_name: *const c_char,
     _client_id: *const c_char,
@@ -767,7 +767,7 @@ pub extern "C" fn commy_select_service(
 
 /// Get node ID
 #[no_mangle]
-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
     let instances = GLOBAL_INSTANCES.read();
     if let Some(node_info) = instances.get(&handle.instance_id) {
         // Extract node ID from stored info (format: "node_id:port")
@@ -783,7 +783,10 @@ pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
 
 /// Get mesh statistics
 #[no_mangle]
-pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMeshStats) -> i32 {
+pub unsafe extern "C" fn commy_get_mesh_stats(
+    handle: CommyHandle,
+    stats: *mut CommyMeshStats,
+) -> i32 {
     if stats.is_null() {
         return CommyError::InvalidParameter as i32;
     }
@@ -810,7 +813,7 @@ pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMes
 
 /// Free a string allocated by the FFI
 #[no_mangle]
-pub extern "C" fn commy_free_string(ptr: *mut c_char) {
+pub unsafe extern "C" fn commy_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
         unsafe {
             let _ = CString::from_raw(ptr);
@@ -820,7 +823,7 @@ pub extern "C" fn commy_free_string(ptr: *mut c_char) {
 
 /// Allocate memory (simple wrapper around malloc)
 #[no_mangle]
-pub extern "C" fn commy_malloc(size: usize) -> *mut c_void {
+pub unsafe extern "C" fn commy_malloc(size: usize) -> *mut c_void {
     if size == 0 {
         return ptr::null_mut();
     }
@@ -830,7 +833,7 @@ pub extern "C" fn commy_malloc(size: usize) -> *mut c_void {
 
 /// Free memory allocated by commy_malloc
 #[no_mangle]
-pub extern "C" fn commy_free(ptr: *mut c_void) {
+pub unsafe extern "C" fn commy_free(ptr: *mut c_void) {
     if !ptr.is_null() {
         unsafe {
             libc::free(ptr);
@@ -840,7 +843,7 @@ pub extern "C" fn commy_free(ptr: *mut c_void) {
 
 /// Duplicate a string
 #[no_mangle]
-pub extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
     if src.is_null() {
         return ptr::null_mut();
     }
@@ -856,7 +859,7 @@ pub extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
 
 /// Allocate a service info array
 #[no_mangle]
-pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
+pub unsafe extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
     if count == 0 {
         return ptr::null_mut();
     }
@@ -874,7 +877,7 @@ pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServ
 
 /// Free a service info array
 #[no_mangle]
-pub extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
+pub unsafe extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
     if ptr.is_null() || count == 0 {
         return;
     }
@@ -901,7 +904,7 @@ pub extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, coun
 
 /// Simple service registration that koffi can handle
 #[no_mangle]
-pub extern "C" fn commy_register_service_simple(
+pub unsafe extern "C" fn commy_register_service_simple(
     handle: CommyHandle,
     name: *const c_char,
     version: *const c_char,
@@ -943,7 +946,7 @@ pub extern "C" fn commy_register_service_simple(
 
 /// Simple service discovery count that koffi can handle
 #[no_mangle]
-pub extern "C" fn commy_discover_services_count(
+pub unsafe extern "C" fn commy_discover_services_count(
     handle: CommyHandle,
     service_name: *const c_char,
 ) -> i32 {
@@ -969,7 +972,7 @@ pub extern "C" fn commy_discover_services_count(
 
 /// Get active service count that koffi can handle
 #[no_mangle]
-pub extern "C" fn commy_get_active_service_count(handle: CommyHandle) -> u32 {
+pub unsafe extern "C" fn commy_get_active_service_count(handle: CommyHandle) -> u32 {
     // Check if we have a valid mesh instance
     let instances = GLOBAL_INSTANCES.read();
     if instances.contains_key(&handle.instance_id) {
@@ -987,7 +990,7 @@ pub extern "C" fn commy_get_active_service_count(handle: CommyHandle) -> u32 {
 /// Create a new SharedFileManager instance
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_create_file_manager(
+pub unsafe extern "C" fn commy_create_file_manager(
     config: *const CommyManagerConfig,
 ) -> CommyFileManagerHandle {
     if config.is_null() {
@@ -1151,7 +1154,7 @@ pub extern "C" fn commy_create_file_manager(
 /// Request a shared file allocation
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_request_shared_file(
+pub unsafe extern "C" fn commy_request_shared_file(
     ___manager_handle: CommyFileManagerHandle,
     request: *const CommySharedFileRequest,
     response: *mut CommySharedFileResponse,
@@ -1207,7 +1210,7 @@ pub extern "C" fn commy_request_shared_file(
 /// Disconnect from a shared file
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_disconnect_shared_file(
+pub unsafe extern "C" fn commy_disconnect_shared_file(
     ____manager_handle: CommyFileManagerHandle,
     file_id: u64,
 ) -> i32 {
@@ -1220,7 +1223,7 @@ pub extern "C" fn commy_disconnect_shared_file(
 /// List active shared files
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_list_active_files(
+pub unsafe extern "C" fn commy_list_active_files(
     ____manager_handle: CommyFileManagerHandle,
     files_out: *mut *mut CommyFileInfo,
     count_out: *mut u32,
@@ -1243,7 +1246,7 @@ pub extern "C" fn commy_list_active_files(
 /// Get file information by ID
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_get_file_info(
+pub unsafe extern "C" fn commy_get_file_info(
     ____manager_handle: CommyFileManagerHandle,
     file_id: u64,
     info_out: *mut CommyFileInfo,
@@ -1289,7 +1292,7 @@ pub extern "C" fn commy_shutdown_file_manager(manager_handle: CommyFileManagerHa
 /// Free a shared file response structure
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_free_shared_file_response(response: *mut CommySharedFileResponse) {
+pub unsafe extern "C" fn commy_free_shared_file_response(response: *mut CommySharedFileResponse) {
     if response.is_null() {
         return;
     }
@@ -1307,7 +1310,7 @@ pub extern "C" fn commy_free_shared_file_response(response: *mut CommySharedFile
 /// Free a file info structure
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_free_file_info(info: *mut CommyFileInfo) {
+pub unsafe extern "C" fn commy_free_file_info(info: *mut CommyFileInfo) {
     if info.is_null() {
         return;
     }
@@ -1325,7 +1328,7 @@ pub extern "C" fn commy_free_file_info(info: *mut CommyFileInfo) {
 /// Free array of file info structures
 #[cfg(feature = "manager")]
 #[no_mangle]
-pub extern "C" fn commy_free_file_info_array(files: *mut CommyFileInfo, count: u32) {
+pub unsafe extern "C" fn commy_free_file_info_array(files: *mut CommyFileInfo, count: u32) {
     if files.is_null() {
         return;
     }
@@ -1348,7 +1351,7 @@ pub extern "C" fn commy_free_file_info_array(files: *mut CommyFileInfo, count: u
 
 /// Create a default manager configuration
 #[no_mangle]
-pub extern "C" fn commy_create_default_manager_config() -> *mut CommyManagerConfig {
+pub unsafe extern "C" fn commy_create_default_manager_config() -> *mut CommyManagerConfig {
     let config = Box::new(CommyManagerConfig {
         listen_port: 8080,
         bind_address: commy_strdup("127.0.0.1\0".as_ptr() as *const c_char),
@@ -1369,7 +1372,7 @@ pub extern "C" fn commy_create_default_manager_config() -> *mut CommyManagerConf
 
 /// Free manager configuration
 #[no_mangle]
-pub extern "C" fn commy_free_manager_config(config: *mut CommyManagerConfig) {
+pub unsafe extern "C" fn commy_free_manager_config(config: *mut CommyManagerConfig) {
     if config.is_null() {
         return;
     }
@@ -1397,7 +1400,7 @@ pub extern "C" fn commy_free_manager_config(config: *mut CommyManagerConfig) {
 
 /// Generate a compliance report
 #[no_mangle]
-pub extern "C" fn commy_generate_compliance_report(
+pub unsafe extern "C" fn commy_generate_compliance_report(
     ____manager_handle: CommyFileManagerHandle,
     report_type: CommyComplianceReportType,
     report_out: *mut CommyComplianceReport,
@@ -1473,7 +1476,7 @@ pub extern "C" fn commy_generate_compliance_report(
 
 /// Get audit events for a time period
 #[no_mangle]
-pub extern "C" fn commy_get_audit_events(
+pub unsafe extern "C" fn commy_get_audit_events(
     ____manager_handle: CommyFileManagerHandle,
     start_timestamp: u64,
     end_timestamp: u64,
@@ -1559,7 +1562,7 @@ pub extern "C" fn commy_get_audit_events(
 
 /// Record an audit event
 #[no_mangle]
-pub extern "C" fn commy_record_audit_event(
+pub unsafe extern "C" fn commy_record_audit_event(
     ____manager_handle: CommyFileManagerHandle,
     event_type: *const c_char,
     _user_id: *const c_char,
@@ -1601,7 +1604,7 @@ pub extern "C" fn commy_record_audit_event(
 
 /// Free compliance report
 #[no_mangle]
-pub extern "C" fn commy_free_compliance_report(report: *mut CommyComplianceReport) {
+pub unsafe extern "C" fn commy_free_compliance_report(report: *mut CommyComplianceReport) {
     if report.is_null() {
         return;
     }
@@ -1621,7 +1624,7 @@ pub extern "C" fn commy_free_compliance_report(report: *mut CommyComplianceRepor
 
 /// Free audit events array
 #[no_mangle]
-pub extern "C" fn commy_free_audit_events(events: *mut CommyAuditEvent, count: u32) {
+pub unsafe extern "C" fn commy_free_audit_events(events: *mut CommyAuditEvent, count: u32) {
     if events.is_null() {
         return;
     }
@@ -1664,7 +1667,7 @@ pub extern "C" fn commy_free_audit_events(events: *mut CommyAuditEvent, count: u
 
 /// Start a distributed trace span
 #[no_mangle]
-pub extern "C" fn commy_start_trace_span(
+pub unsafe extern "C" fn commy_start_trace_span(
     _manager_handle: CommyFileManagerHandle,
     operation_name: *const c_char,
     parent_span_id: *const c_char,
@@ -1715,7 +1718,7 @@ pub extern "C" fn commy_start_trace_span(
 
 /// Finish a distributed trace span
 #[no_mangle]
-pub extern "C" fn commy_finish_trace_span(
+pub unsafe extern "C" fn commy_finish_trace_span(
     ___manager_handle: CommyFileManagerHandle,
     span: *mut CommyTraceSpan,
     status: CommyTraceStatus,
@@ -1744,7 +1747,7 @@ pub extern "C" fn commy_finish_trace_span(
 
 /// Export metrics to external systems
 #[no_mangle]
-pub extern "C" fn commy_export_metrics(
+pub unsafe extern "C" fn commy_export_metrics(
     ___manager_handle: CommyFileManagerHandle,
     export_format: *const c_char, // "prometheus", "influxdb", "otlp"
     endpoint: *const c_char,
@@ -1786,7 +1789,7 @@ pub extern "C" fn commy_export_metrics(
 
 /// Record a custom metric
 #[no_mangle]
-pub extern "C" fn commy_record_metric(
+pub unsafe extern "C" fn commy_record_metric(
     ___manager_handle: CommyFileManagerHandle,
     name: *const c_char,
     metric_type: CommyMetricType,
@@ -1824,7 +1827,7 @@ pub extern "C" fn commy_record_metric(
 
 /// Configure multi-region federation
 #[no_mangle]
-pub extern "C" fn commy_configure_federation(
+pub unsafe extern "C" fn commy_configure_federation(
     ___manager_handle: CommyFileManagerHandle,
     federation_config: *const CommyFederationConfig,
 ) -> i32 {
@@ -1859,7 +1862,7 @@ pub extern "C" fn commy_configure_federation(
 
 /// Discover services across regions
 #[no_mangle]
-pub extern "C" fn commy_discover_cross_region_services(
+pub unsafe extern "C" fn commy_discover_cross_region_services(
     ___manager_handle: CommyFileManagerHandle,
     target_region: *const c_char,
     _service_name: *const c_char,
@@ -1891,7 +1894,7 @@ pub extern "C" fn commy_discover_cross_region_services(
 
 /// Get region health status
 #[no_mangle]
-pub extern "C" fn commy_get_region_health(
+pub unsafe extern "C" fn commy_get_region_health(
     ___manager_handle: CommyFileManagerHandle,
     region_id: *const c_char,
     region_out: *mut CommyRegion,
@@ -1931,7 +1934,7 @@ pub extern "C" fn commy_get_region_health(
 
 /// Create a policy rule
 #[no_mangle]
-pub extern "C" fn commy_create_policy_rule(
+pub unsafe extern "C" fn commy_create_policy_rule(
     ___manager_handle: CommyFileManagerHandle,
     rule: *const CommyPolicyRule,
     rule_id_out: *mut *mut c_char,
@@ -1973,7 +1976,7 @@ pub extern "C" fn commy_create_policy_rule(
 
 /// Evaluate policy rules against a request
 #[no_mangle]
-pub extern "C" fn commy_evaluate_policies(
+pub unsafe extern "C" fn commy_evaluate_policies(
     ___manager_handle: CommyFileManagerHandle,
     context: *const c_char, // JSON context
     violations_out: *mut *mut c_char,

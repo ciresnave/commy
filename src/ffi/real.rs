@@ -65,9 +65,6 @@ pub extern "C" fn commy_ffi_version() -> *const c_char {
 
 /// Create a real mesh coordinator instance
 ///
-/// Safety: `node_id` must be a valid, non-null, NUL-terminated C string pointer.
-/// The caller must ensure the pointer points to memory valid for reads.
-#[no_mangle]
 /// # Safety
 ///
 /// `node_id` must be a valid, non-null, NUL-terminated C string pointer. The
@@ -238,7 +235,7 @@ pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
 
 /// Get node ID
 #[no_mangle]
-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
     if handle.instance_id == 0 {
         return std::ptr::null_mut();
     }
