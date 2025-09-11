@@ -432,10 +432,12 @@ macro_rules! deserialize_field {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
     use std::collections::HashMap;
 
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Clone, Default)]
+    #[allow(dead_code)]
     struct TestData {
         name: String,
         values: Vec<i32>,

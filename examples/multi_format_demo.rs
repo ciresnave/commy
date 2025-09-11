@@ -50,10 +50,11 @@ enum PrivacyLevel {
 
 impl UserProfile {
     fn new(id: u64, username: &str, email: &str) -> Self {
-        let mut tags = Vec::new();
-        tags.push("rust".to_string());
-        tags.push("developer".to_string());
-        tags.push("performance".to_string());
+        let tags = vec![
+            "rust".to_string(),
+            "developer".to_string(),
+            "performance".to_string(),
+        ];
 
         let mut settings = HashMap::new();
         settings.insert("theme".to_string(), "dark".to_string());
@@ -115,23 +116,24 @@ async fn test_format_performance(
     for (i, profile) in profiles.iter().enumerate() {
         // Map serde errors into the crate-local CommyError to demonstrate
         // the adapter/mapping pattern during migration.
-        let serialized_data = match format {
-            SerializationFormat::Json => serde_json::to_vec(profile)
-                .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?,
-            SerializationFormat::Binary => serde_json::to_vec(profile)
-                .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?, // Use JSON instead of bincode
-            SerializationFormat::MessagePack => serde_json::to_vec(profile)
-                .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?, // Use JSON instead of rmp_serde
-            SerializationFormat::Cbor => serde_json::to_vec(profile)
-                .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?, // Use JSON instead of serde_cbor
-            SerializationFormat::ZeroCopy => {
-                // For demo purposes, use JSON
-                serde_json::to_vec(profile)
-                    .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?
-            }
-            _ => serde_json::to_vec(profile)
-                .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?,
-        };
+        let serialized_data =
+            match format {
+                SerializationFormat::Json => serde_json::to_vec(profile)
+                    .map_err(commy::errors::CommyError::JsonSerialization)?,
+                SerializationFormat::Binary => serde_json::to_vec(profile)
+                    .map_err(commy::errors::CommyError::JsonSerialization)?, // Use JSON instead of bincode
+                SerializationFormat::MessagePack => serde_json::to_vec(profile)
+                    .map_err(commy::errors::CommyError::JsonSerialization)?, // Use JSON instead of rmp_serde
+                SerializationFormat::Cbor => serde_json::to_vec(profile)
+                    .map_err(commy::errors::CommyError::JsonSerialization)?, // Use JSON instead of serde_cbor
+                SerializationFormat::ZeroCopy => {
+                    // For demo purposes, use JSON
+                    serde_json::to_vec(profile)
+                        .map_err(commy::errors::CommyError::JsonSerialization)?
+                }
+                _ => serde_json::to_vec(profile)
+                    .map_err(commy::errors::CommyError::JsonSerialization)?,
+            };
 
         total_size += serialized_data.len();
 
@@ -186,7 +188,7 @@ async fn test_format_performance(
         let decision = transport_manager
             .route_request(&request)
             .await
-            .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+            .map_err(Box::<dyn std::error::Error>::from)?;
 
         // Execute request (handle NotImplemented gracefully)
         match transport_manager.execute_request(request, &decision).await {
@@ -302,8 +304,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (scenario, recommended_format) in scenarios {
         let profile = &profiles[0];
-        let data = serde_json::to_vec(profile)
-            .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?; // Use JSON for size calculation
+        let data =
+            serde_json::to_vec(profile).map_err(commy::errors::CommyError::JsonSerialization)?; // Use JSON for size calculation
 
         let request = SharedFileRequest {
             identifier: format!("scenario_{}", scenario.replace(" ", "_")),

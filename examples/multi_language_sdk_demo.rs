@@ -47,7 +47,7 @@ enum FfiLayer {
     Direct,      // Direct Rust library usage
     CFfi,        // C FFI interface
     WebAssembly, // WASM binding
-    JNI,         // Java Native Interface
+    Jni,         // Java Native Interface
     PInvoke,     // .NET P/Invoke
 }
 
@@ -250,7 +250,7 @@ fn initialize_language_bindings() -> Vec<LanguageBinding> {
         LanguageBinding {
             language: SupportedLanguage::Java,
             version: "1.0.0".to_string(),
-            ffi_layer: FfiLayer::JNI,
+            ffi_layer: FfiLayer::Jni,
             wrapper_features: vec![
                 WrapperFeature::AsyncAwait,
                 WrapperFeature::TypeSafety,

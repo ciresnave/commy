@@ -49,6 +49,11 @@ if (-not $repo) { $repo = 'ciresnave/commy' }
 
 Write-Host "Creating issues on repository: $repo"
 
+# Retry/backoff settings
+$maxAttempts = 5
+$baseDelaySeconds = 1
+
+
 $issues = @(
   @{ title = 'Add property-based tests for manager invariants'; body = "Add proptest suites for core manager invariants such as file ID allocation and reuse, concurrent creates, and behavior under race conditions. Reference: docs/issues_from_proposed_improvements.md"; labels = @('test', 'enhancement') },
   @{ title = 'Implement a simple object pool for frequently allocated structures'; body = "Add a small object pool utility (zero-allocation where possible) for frequently allocated items such as buffers and transport objects. Include benchmarks and tests. Reference: docs/issues_from_proposed_improvements.md"; labels = @('performance', 'enhancement') },
@@ -66,35 +71,52 @@ foreach ($issue in $issues) {
     continue
   }
 
-  try {
-    $response = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$repo/issues" -Headers @{ Authorization = "token $env:GITHUB_TOKEN"; Accept = 'application/vnd.github.v3+json' } -Body $payload -ContentType 'application/json'
-    if ($response -and $response.html_url) {
-      Write-Host "Created: $($response.html_url)"
-    }
-    else {
-      Write-Warning "Unexpected response while creating issue: $($response | ConvertTo-Json -Depth 3)"
-    }
-  }
-  catch {
-    # Try to inspect HTTP response when available (status code, headers)
-    $ex = $_.Exception
-    if ($ex.Response -is [System.Net.HttpWebResponse]) {
-      $http = $ex.Response
-      $status = [int]$http.StatusCode
-      $body = ""
-      try { $body = (New-Object System.IO.StreamReader($http.GetResponseStream())).ReadToEnd() } catch { }
-
-      switch ($status) {
-        401 { Write-Error "Authentication error (401) when creating issue '$($issue.title)'. Check GITHUB_TOKEN permissions." }
-        403 { Write-Error "Forbidden (403) when creating issue '$($issue.title)'. You may lack repository permissions or be rate-limited. Response body: $body" }
-        429 { $retry = $http.Headers['Retry-After']; Write-Warning "Rate limited (429) when creating issue '$($issue.title)'. Retry-After: $retry" }
-        default { Write-Warning "HTTP $status creating issue '$($issue.title)'. Response body: $body" }
+  $attempt = 0
+  while ($true) {
+    $attempt++
+    try {
+      $response = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$repo/issues" -Headers @{ Authorization = "token $env:GITHUB_TOKEN"; Accept = 'application/vnd.github.v3+json' } -Body $payload -ContentType 'application/json'
+      if ($response -and $response.html_url) {
+        Write-Host "Created: $($response.html_url)"
+        break
+      }
+      else {
+        Write-Warning "Unexpected response while creating issue: $($response | ConvertTo-Json -Depth 3)"
+        # Treat unexpected response as non-retryable
+        break
       }
     }
-    else {
+    catch {
+      $ex = $_.Exception
+      $status = $null
+      if ($ex.Response -is [System.Net.HttpWebResponse]) {
+        $http = $ex.Response
+        $status = [int]$http.StatusCode
+      }
+
+      # If rate limited (429) or transient network error, retry with backoff
+      if ($status -eq 429 -or $ex -is [System.Net.WebException]) {
+        if ($attempt -ge $maxAttempts) {
+          Write-Error "Failed to create issue '$($issue.title)' after $attempt attempts: $($_.Exception.Message)"
+          break
+        }
+
+        # Determine wait time: exponential backoff with jitter
+        $delay = [math]::Pow(2, $attempt - 1) * $baseDelaySeconds
+        # Add small jitter (0..0.5s)
+        $jitter = (Get-Random -Minimum 0 -Maximum 0.5)
+        $wait = [math]::Round($delay + $jitter, 2)
+        Write-Warning "Transient error creating issue '$($issue.title)'. Attempt $attempt/$maxAttempts. Waiting $wait seconds before retrying..."
+        Start-Sleep -Seconds $wait
+        continue
+      }
+
+      # Non-retryable: map common statuses
+      if ($status -eq 401) { Write-Error "Authentication error (401) when creating issue '$($issue.title)'. Check GITHUB_TOKEN permissions."; break }
+      if ($status -eq 403) { Write-Error "Forbidden (403) when creating issue '$($issue.title)'. You may lack repository permissions or be rate-limited."; break }
       Write-Warning "Error creating issue '$($issue.title)': $($_.Exception.Message)"
+      break
     }
-    continue
   }
 }
 

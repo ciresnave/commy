@@ -35,7 +35,7 @@ enum EncryptionAlgorithm {
     ChaCha20Poly1305,
     XChaCha20Poly1305,
     AES256GCMSiv,
-    Post_Quantum_Kyber,
+    PostQuantumKyber,
 }
 
 #[cfg(feature = "manager")]
@@ -128,11 +128,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Misuse-resistant, extra safety",
         ),
         (
-            EncryptionAlgorithm::Post_Quantum_Kyber,
+            EncryptionAlgorithm::PostQuantumKyber,
             "Future-proof, quantum resistant",
         ),
     ];
-
     for (algorithm, description) in encryption_tests {
         println!("\n🔑 Algorithm: {:?}", algorithm);
         println!("   📝 {}", description);
@@ -473,7 +472,7 @@ async fn test_encryption_performance(
         EncryptionAlgorithm::ChaCha20Poly1305 => (950.0, 980.0, 3.1, 8),
         EncryptionAlgorithm::XChaCha20Poly1305 => (920.0, 940.0, 3.1, 8),
         EncryptionAlgorithm::AES256GCMSiv => (800.0, 850.0, 3.5, 9),
-        EncryptionAlgorithm::Post_Quantum_Kyber => (150.0, 180.0, 8.5, 10),
+        EncryptionAlgorithm::PostQuantumKyber => (150.0, 180.0, 8.5, 10),
     };
 
     // Simulate actual performance test
@@ -836,7 +835,7 @@ fn create_secret_security_profile() -> SecurityProfile {
 fn create_top_secret_security_profile() -> SecurityProfile {
     SecurityProfile {
         level: SecurityLevel::TopSecret,
-        encryption_algorithm: EncryptionAlgorithm::Post_Quantum_Kyber,
+        encryption_algorithm: EncryptionAlgorithm::PostQuantumKyber,
         require_mutual_auth: true,
         enable_perfect_forward_secrecy: true,
         audit_level: AuditLevel::Forensic,

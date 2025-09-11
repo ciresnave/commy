@@ -172,6 +172,19 @@ pub fn allocate_string(s: &str) -> *mut c_char {
     c_string.into_raw()
 }
 
+// Ownership / lifetime notes for FFI consumers:
+// - `allocate_string` returns a pointer created via `CString::into_raw()`. The
+//   caller (foreign code) becomes the owner and must call `commy_free_string`
+//   to reclaim the memory. Do NOT use `commy_free` to free pointers produced
+//   by `allocate_string` as that mismatches allocation/deallocation semantics.
+// - `commy_strdup` allocates memory via the C allocator (malloc) and should be
+//   freed with `commy_free` (or equivalent C free). The contract for string
+//   allocation functions is documented alongside each symbol to avoid misuse.
+// - For arrays of `CommyServiceInfo` produced by `commy_alloc_service_info_array`,
+//   each string pointer inside the struct is separately allocated and the
+//   caller must use `commy_free_service_info_array` to free both the inner
+//   strings and the array itself.
+
 /// Convert C string to Rust string safely
 #[cfg(feature = "ffi")]
 /// # Safety

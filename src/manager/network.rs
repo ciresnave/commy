@@ -1,10 +1,10 @@
 //! Network Transport Implementation
 
 use super::{
-    protocol::*, transport::*, transport_impl::TransportError, NetworkEndpoint,
-    SharedFileOperationResponse, SharedFileRequest,
+    transport::*, transport_impl::TransportError, SharedFileOperationResponse, SharedFileRequest,
 };
-use std::time::{Duration, Instant};
+// Duration isn't used in the current non-network implementation; keep imports
+// minimal to avoid clippy warnings.
 
 // Types used by both network-gated and non-gated implementations
 use chrono::Utc;
@@ -13,12 +13,10 @@ use tokio::sync::RwLock;
 
 #[cfg(feature = "network")]
 use {
-    chrono::Utc,
     dashmap::DashMap,
     std::net::SocketAddr,
-    std::sync::{Arc, Arc as StdArc},
+    std::sync::Arc as StdArc,
     tokio::net::{TcpListener, TcpStream},
-    tokio::sync::RwLock,
     tokio::time::{timeout, Duration as TokioDuration},
     tokio_rustls::TlsConnector,
 };

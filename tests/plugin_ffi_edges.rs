@@ -59,7 +59,7 @@ fn plugin_ffi_edge_cases() {
                 let p = get_schema(desc.ctx);
                 assert!(!p.is_null());
                 let txt = CStr::from_ptr(p).to_string_lossy();
-                assert!(txt.len() > 0);
+                assert!(!txt.is_empty());
             }
 
             // serialize_into should handle null pointers safely (our plugin returns 0)

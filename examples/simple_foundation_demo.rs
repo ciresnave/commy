@@ -80,15 +80,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔄 Testing Serialization Formats:");
 
     // JSON serialization
-    let json_data = serde_json::to_string(&list_response).map_err(|e| {
-        Box::<dyn std::error::Error>::from(commy::errors::CommyError::JsonSerialization(e))
-    })?;
+    let json_data = serde_json::to_string(&list_response)
+        .map_err(commy::errors::CommyError::JsonSerialization)
+        .map_err(Box::<dyn std::error::Error>::from)?;
     println!("   JSON size: {} bytes", json_data.len());
 
     // Binary serialization (using JSON as fallback)
-    let binary_data = serde_json::to_vec(&list_response).map_err(|e| {
-        Box::<dyn std::error::Error>::from(commy::errors::CommyError::JsonSerialization(e))
-    })?;
+    let binary_data = serde_json::to_vec(&list_response)
+        .map_err(commy::errors::CommyError::JsonSerialization)
+        .map_err(Box::<dyn std::error::Error>::from)?;
     println!("   Binary size: {} bytes", binary_data.len());
 
     println!("\n✨ Foundation Demo Complete!");

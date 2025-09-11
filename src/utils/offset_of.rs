@@ -2,6 +2,7 @@
 
 /// Calculate the byte offset of a field in a struct
 /// This is a simplified version for our shared memory demo
+#[allow(unused_macros)]
 macro_rules! offset_of {
     ($type:ty, $field:ident) => {{
         let dummy = std::mem::MaybeUninit::<$type>::uninit();
@@ -11,4 +12,5 @@ macro_rules! offset_of {
     }};
 }
 
+#[allow(unused_imports)]
 pub(crate) use offset_of;

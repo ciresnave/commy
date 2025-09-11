@@ -349,7 +349,7 @@ async fn test_mesh_architecture_concepts() {
     println!("    ✅ Health checking framework");
     println!("    ✅ Multi-language SDK readiness");
 
-    assert!(true, "Core mesh architecture concepts validated");
+    // Intentionally no runtime assertion here; this test documents architecture concepts.
 }
 
 // Fallback tests for when the manager feature is not enabled

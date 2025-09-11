@@ -64,20 +64,21 @@ async fn demonstrate_serialization_format(
     // Serialize the data - use JSON for all formats since we don't have all dependencies
     // Map underlying serde errors into the crate-local CommyError so examples
     // demonstrate the adapter/mapping pattern used in production code.
-    let serialized_data = match format {
-        SerializationFormat::Json => serde_json::to_vec(test_data)
-            .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?,
-        SerializationFormat::Binary => serde_json::to_vec(test_data)
-            .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?, // Use JSON instead of bincode
-        SerializationFormat::MessagePack => serde_json::to_vec(test_data)
-            .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?, // Use JSON instead of MessagePack
-        SerializationFormat::Cbor => serde_json::to_vec(test_data)
-            .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?, // Use JSON instead of CBOR
-        SerializationFormat::ZeroCopy => serde_json::to_vec(test_data)
-            .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?,
-        _ => serde_json::to_vec(test_data)
-            .map_err(|e| commy::errors::CommyError::JsonSerialization(e))?,
-    };
+    let serialized_data =
+        match format {
+            SerializationFormat::Json => serde_json::to_vec(test_data)
+                .map_err(commy::errors::CommyError::JsonSerialization)?,
+            SerializationFormat::Binary => serde_json::to_vec(test_data)
+                .map_err(commy::errors::CommyError::JsonSerialization)?, // Use JSON instead of bincode
+            SerializationFormat::MessagePack => serde_json::to_vec(test_data)
+                .map_err(commy::errors::CommyError::JsonSerialization)?, // Use JSON instead of MessagePack
+            SerializationFormat::Cbor => serde_json::to_vec(test_data)
+                .map_err(commy::errors::CommyError::JsonSerialization)?, // Use JSON instead of CBOR
+            SerializationFormat::ZeroCopy => serde_json::to_vec(test_data)
+                .map_err(commy::errors::CommyError::JsonSerialization)?,
+            _ => serde_json::to_vec(test_data)
+                .map_err(commy::errors::CommyError::JsonSerialization)?,
+        };
 
     println!("  📊 Serialized size: {} bytes", serialized_data.len());
 
@@ -137,7 +138,7 @@ async fn demonstrate_serialization_format(
     // Test deserialization
     println!("  📖 Testing deserialization...");
     match serde_json::from_slice::<ComplexData>(&serialized_data)
-        .map_err(|e| commy::errors::CommyError::JsonSerialization(e))
+        .map_err(commy::errors::CommyError::JsonSerialization)
     {
         Ok(deserialized) => {
             println!("    ✅ Deserialization successful");

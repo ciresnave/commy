@@ -4,7 +4,8 @@
 //! integration points without starting actual network services.
 
 #[cfg(test)]
-mod tests {
+mod mesh_tests {
+    #[allow(unused_imports)]
     use super::*;
     use crate::config::MeshConfiguration;
     use crate::manager::core::ManagerConfig;
@@ -191,7 +192,7 @@ mod tests {
         let health_config = HealthMonitorConfig::default();
         let load_balancer_config = LoadBalancerConfig::default();
         let mesh_config = MeshConfiguration::default();
-        let manager_config = ManagerConfig::default();
+        let _manager_config = ManagerConfig::default();
 
         // Verify defaults are reasonable
         assert!(health_config.check_interval.as_secs() > 0);

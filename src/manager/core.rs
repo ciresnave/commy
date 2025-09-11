@@ -327,7 +327,9 @@ impl SharedFileManager {
             if std::env::var("TEST_ENV").unwrap_or_default() != "1" {
                 panic!("MockAuthProvider should only be used in test environments! Set TEST_ENV=1 to allow.");
             } else {
-                eprintln!("WARNING: Using MockAuthProvider. This should only be enabled for testing.");
+                eprintln!(
+                    "WARNING: Using MockAuthProvider. This should only be enabled for testing."
+                );
             }
             std::sync::Arc::new(MockAuthProvider::new(true))
         };
@@ -663,10 +665,16 @@ impl SharedFileManager {
                     let active_files = Arc::clone(&self.active_files);
                     let event_broadcaster = self.event_broadcaster.clone();
                     let manager_config = self.manager_config.clone();
-                    // `Option<TlsAcceptor>` is Copy when the network feature is
-                    // disabled (TlsAcceptor = ()), so calling `clone()` triggers
-                    // clippy::clone_on_copy. Copy the field instead which is
-                    // a no-op for Copy types and avoids an extra clone call.
+                    // Clone the TLS acceptor so we can move it into the spawned
+                    // task without borrowing `self`. `TlsAcceptor` is a
+                    // reference-counted type when the `network` feature is
+                    // enabled, so cloning the `Option<TlsAcceptor>` is cheap and
+                    // necessary to avoid moving out of `self`.
+                    // Avoid `clone_on_copy` when `TlsAcceptor` is `()` (network disabled).
+                    // Use cfg to select the correct expansion at compile time.
+                    #[cfg(feature = "network")]
+                    let tls_acceptor = self.tls_acceptor.clone();
+                    #[cfg(not(feature = "network"))]
                     let tls_acceptor = self.tls_acceptor;
 
                     // Handle connection in a separate task

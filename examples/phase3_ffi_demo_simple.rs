@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize the FFI layer
     println!("📡 Initializing FFI layer...");
-    let init_result = unsafe { commy_ffi_init() };
+    let init_result = commy_ffi_init();
     if init_result != 0 {
         eprintln!("❌ Failed to initialize FFI layer: {}", init_result);
         return Err("FFI initialization failed".into());
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ FFI layer initialized successfully");
 
     // Get and display version
-    let version_ptr = unsafe { commy_ffi_version() };
+    let version_ptr = commy_ffi_version();
     if !version_ptr.is_null() {
         let version = unsafe { CStr::from_ptr(version_ptr) };
         println!("📖 Commy version: {}", version.to_string_lossy());
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 Testing basic FFI functionality...");
 
     // Check if mesh is running (should be false initially)
-    let is_running = unsafe { commy_is_mesh_running(handle) };
+    let is_running = commy_is_mesh_running(handle);
     match is_running {
         0 => println!("✅ Mesh is not running (expected)"),
         1 => println!("⚠️ Mesh is unexpectedly running"),
@@ -57,11 +57,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get node ID
     println!("\n🏷️ Getting node ID...");
-    let node_id_ptr = unsafe { commy_get_node_id(handle) };
+    let node_id_ptr = commy_get_node_id(handle);
     if !node_id_ptr.is_null() {
         let node_id_str = unsafe { CStr::from_ptr(node_id_ptr) };
         println!("✅ Node ID: {}", node_id_str.to_string_lossy());
-        unsafe { commy_free_string(node_id_ptr) };
+        unsafe {
+            commy_free_string(node_id_ptr);
+        }
     } else {
         println!("⚠️ Failed to get node ID");
     }
@@ -75,7 +77,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !duplicated.is_null() {
         let dup_str = unsafe { CStr::from_ptr(duplicated) };
         println!("✅ String duplication: {}", dup_str.to_string_lossy());
-        unsafe { commy_free(duplicated as *mut std::ffi::c_void) };
+        unsafe {
+            commy_free(duplicated as *mut std::ffi::c_void);
+        }
         println!("✅ String freed successfully");
     } else {
         println!("❌ String duplication failed");
@@ -86,7 +90,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let test_array = unsafe { commy_alloc_service_info_array(3) };
     if !test_array.is_null() {
         println!("✅ Allocated service info array for 3 services");
-        unsafe { commy_free_service_info_array(test_array, 3) };
+        unsafe {
+            commy_free_service_info_array(test_array, 3);
+        }
         println!("✅ Freed service info array");
     } else {
         println!("❌ Service info array allocation failed");
@@ -136,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cleanup FFI layer
     println!("\n🧹 Cleaning up FFI layer...");
-    let cleanup_result = unsafe { commy_ffi_cleanup() };
+    let cleanup_result = commy_ffi_cleanup();
     if cleanup_result != 0 {
         println!("⚠️ FFI cleanup returned code: {}", cleanup_result);
     } else {

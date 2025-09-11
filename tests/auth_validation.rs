@@ -8,8 +8,10 @@ use tempfile::tempdir;
 #[tokio::test]
 async fn empty_token_is_denied() {
     let temp = tempdir().unwrap();
-    let mut cfg = ManagerConfig::default();
-    cfg.files_directory = temp.path().to_path_buf();
+    let cfg = ManagerConfig {
+        files_directory: temp.path().to_path_buf(),
+        ..Default::default()
+    };
 
     // Use a mock provider that rejects tokens for strict validation
     let mock = commy::manager::auth_provider::MockAuthProvider::new(false);
@@ -56,8 +58,10 @@ async fn empty_token_is_denied() {
 #[tokio::test]
 async fn non_empty_token_is_allowed() {
     let temp = tempdir().unwrap();
-    let mut cfg = ManagerConfig::default();
-    cfg.files_directory = temp.path().to_path_buf();
+    let cfg = ManagerConfig {
+        files_directory: temp.path().to_path_buf(),
+        ..Default::default()
+    };
 
     // Use a mock provider that accepts tokens for strict validation
     let mock = commy::manager::auth_provider::MockAuthProvider::new(true);

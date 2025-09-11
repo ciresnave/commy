@@ -204,8 +204,8 @@ fn print_language_support() {
     ];
 
     println!(
-        "{:<15} {:<15} {:<18} {}",
-        "Language", "rkyv", "Cap'n Proto", "Traditional"
+        "{:<15} {:<15} {:<18} Traditional",
+        "Language", "rkyv", "Cap'n Proto"
     );
     println!("{}", "-".repeat(70));
 

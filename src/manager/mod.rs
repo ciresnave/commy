@@ -12,6 +12,7 @@ pub mod id_manager;
 pub mod lifecycle;
 pub mod memory_map;
 pub mod network;
+pub mod object_pool;
 pub mod protocol;
 pub mod shared_memory;
 pub mod transport;

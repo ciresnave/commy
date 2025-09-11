@@ -54,9 +54,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Serialize the data
         // Map serde_json errors into crate-local CommyError (adapter pattern)
-        let serialized_data = serde_json::to_vec(&data).map_err(|e| {
-            Box::<dyn std::error::Error>::from(commy::errors::CommyError::JsonSerialization(e))
-        })?;
+        let serialized_data = serde_json::to_vec(&data)
+            .map_err(commy::errors::CommyError::JsonSerialization)
+            .map_err(Box::<dyn std::error::Error>::from)?;
 
         // Create a request for this data
         let request = SharedFileRequest {

@@ -254,6 +254,13 @@ pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
         let instances = GLOBAL_INSTANCES.read();
         if let Some(coordinator) = instances.get(&handle.instance_id) {
             let node_id = coordinator.get_node_id();
+            // Ownership / lifetime contract:
+            // `allocate_string` returns a pointer allocated with `CString::into_raw()`.
+            // The caller (foreign language) takes ownership of the returned pointer
+            // and MUST call `commy_free_string` to reclaim the memory when finished.
+            // The returned pointer points to a NUL-terminated C string that is
+            // independent of Rust-side data (it is heap-owned by the C allocator
+            // and safe to pass across FFI boundaries until freed by the caller).
             allocate_string(&node_id)
         } else {
             std::ptr::null_mut()

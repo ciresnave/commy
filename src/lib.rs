@@ -49,6 +49,8 @@ pub mod serialization;
 
 pub mod simple_protocol;
 
+pub mod utils;
+
 #[cfg(feature = "plugins")]
 pub mod plugins;
 

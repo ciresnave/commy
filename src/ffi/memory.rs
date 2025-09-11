@@ -31,6 +31,20 @@ pub unsafe extern "C" fn commy_free(ptr: *mut c_void) {
     }
 }
 
+// Notes on ownership / lifetimes:
+// - Memory returned by `commy_malloc` and `commy_strdup` is allocated via the
+//   platform C allocator (malloc) and must be freed by the caller using
+//   `commy_free` (for raw allocations) or `commy_free_string` (for string
+//   pointers produced by `allocate_string` or `commy_strdup`).
+// - Pointers returned by `allocate_string` use `CString::into_raw()` and must
+//   be reclaimed with `commy_free_string` (which reconstructs a CString and
+//   drops it). Mixing free functions (e.g., freeing a `into_raw` pointer with
+//   `commy_free`) is undefined behaviour and must be avoided.
+// - All functions that accept raw pointers document whether the caller or the
+//   callee owns the memory. The FFI contract is: caller-allocates/caller-frees
+//   unless the API explicitly documents that the callee returns an owned
+//   allocation (like `allocate_string`).
+
 /// Allocate and copy a string to C-managed memory
 #[cfg(feature = "ffi")]
 #[no_mangle]

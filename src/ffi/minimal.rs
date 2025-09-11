@@ -4,6 +4,7 @@
 //! the foundation for multi-language SDKs. It includes only the core functionality
 //! that works as a proof of concept for the FFI layer.
 
+#![cfg(not(feature = "ffi"))]
 #![allow(clippy::not_unsafe_ptr_arg_deref)] // Expected in FFI modules
 #![allow(clippy::manual_c_str_literals)]
 #![allow(clippy::manual_unwrap_or)]
@@ -809,6 +810,7 @@ pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMes
 }
 
 /// Free a string allocated by the FFI
+#[cfg(not(feature = "ffi"))]
 #[no_mangle]
 pub extern "C" fn commy_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -819,6 +821,7 @@ pub extern "C" fn commy_free_string(ptr: *mut c_char) {
 }
 
 /// Allocate memory (simple wrapper around malloc)
+#[cfg(not(feature = "ffi"))]
 #[no_mangle]
 pub extern "C" fn commy_malloc(size: usize) -> *mut c_void {
     if size == 0 {
@@ -829,6 +832,7 @@ pub extern "C" fn commy_malloc(size: usize) -> *mut c_void {
 }
 
 /// Free memory allocated by commy_malloc
+#[cfg(not(feature = "ffi"))]
 #[no_mangle]
 pub extern "C" fn commy_free(ptr: *mut c_void) {
     if !ptr.is_null() {
@@ -839,6 +843,7 @@ pub extern "C" fn commy_free(ptr: *mut c_void) {
 }
 
 /// Duplicate a string
+#[cfg(not(feature = "ffi"))]
 #[no_mangle]
 pub extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
     if src.is_null() {
@@ -855,6 +860,7 @@ pub extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
 }
 
 /// Allocate a service info array
+#[cfg(not(feature = "ffi"))]
 #[no_mangle]
 pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
     if count == 0 {
@@ -873,6 +879,7 @@ pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServ
 }
 
 /// Free a service info array
+#[cfg(not(feature = "ffi"))]
 #[no_mangle]
 pub extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
     if ptr.is_null() || count == 0 {

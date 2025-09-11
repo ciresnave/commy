@@ -47,7 +47,15 @@ impl SimpleTransportManager {
 
         Self { shared_memory_dir }
     }
+}
 
+impl Default for SimpleTransportManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SimpleTransportManager {
     /// Demonstrate intelligent transport selection
     pub fn select_transport(
         &self,

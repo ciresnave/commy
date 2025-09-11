@@ -108,23 +108,12 @@ impl<T: Clone + Default, const N: usize> FixedVec<T, N> {
 }
 
 // Combined data structure optimized for zero-copy operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct FixedSizeData {
     message: FixedString<64>,   // String up to 64 bytes
     numbers: FixedVec<i32, 10>, // Vec of up to 10 i32s
     counter: u32,
     timestamp: u64,
-}
-
-impl Default for FixedSizeData {
-    fn default() -> Self {
-        Self {
-            message: FixedString::default(),
-            numbers: FixedVec::default(),
-            counter: 0,
-            timestamp: 0,
-        }
-    }
 }
 
 #[cfg(feature = "manager")]
@@ -139,11 +128,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✅ Manager initialized for zero-copy operations");
 
-    // Create fixed-size data structure
-    let mut data = FixedSizeData::default();
-
-    // Populate with sample data
-    data.message = FixedString::new("Hello from fixed-size world!")?;
+    // Create fixed-size data structure and populate message inline
+    let mut data = FixedSizeData {
+        message: FixedString::new("Hello from fixed-size world!")?,
+        ..Default::default()
+    };
     data.numbers.push(42)?;
     data.numbers.push(84)?;
     data.numbers.push(126)?;
@@ -163,9 +152,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Demonstrate zero-copy serialization
     // Map serde_json errors into the crate-local CommyError to show the adapter pattern.
-    let serialized_data = serde_json::to_vec(&data).map_err(|e| {
-        Box::<dyn std::error::Error>::from(commy::errors::CommyError::JsonSerialization(e))
-    })?;
+    let serialized_data = serde_json::to_vec(&data)
+        .map_err(commy::errors::CommyError::JsonSerialization)
+        .map_err(Box::<dyn std::error::Error>::from)?;
     println!("\n🚀 Zero-copy serialization:");
     println!("  📊 Data size: {} bytes (compact!)", serialized_data.len());
 
@@ -262,12 +251,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match manager.request_file(read_request, "demo").await {
         Ok(_response) => {
             // Simulate successful deserialization
-            let retrieved_data: FixedSizeData =
-                serde_json::from_slice(&serialized_data).map_err(|e| {
-                    Box::<dyn std::error::Error>::from(
-                        commy::errors::CommyError::JsonSerialization(e),
-                    )
-                })?;
+            let retrieved_data: FixedSizeData = serde_json::from_slice(&serialized_data)
+                .map_err(commy::errors::CommyError::JsonSerialization)
+                .map_err(Box::<dyn std::error::Error>::from)?;
 
             println!("  ✅ Data retrieved successfully:");
             println!("    📝 Message: '{}'", retrieved_data.message.as_str());
