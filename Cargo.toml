@@ -56,6 +56,9 @@ num-bigint-dig = "=0.8.4"
 [features]
 default = ["manager", "mesh", "ffi"]
 
+# Opt-in longer-running tests and stress scenarios. Not enabled by default.
+stress-tests = []
+
 # Foundation layer features
 manager = [
     "tokio",
