@@ -323,6 +323,12 @@ impl SharedFileManager {
             ))
         } else {
             // No-op mock provider that accepts any non-empty token
+            // Prevent usage outside of test environments
+            if std::env::var("TEST_ENV").unwrap_or_default() != "1" {
+                panic!("MockAuthProvider should only be used in test environments! Set TEST_ENV=1 to allow.");
+            } else {
+                eprintln!("WARNING: Using MockAuthProvider. This should only be enabled for testing.");
+            }
             std::sync::Arc::new(MockAuthProvider::new(true))
         };
 
