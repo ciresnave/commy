@@ -13,6 +13,7 @@ pub struct TestEnvironment {
     pub config: ManagerConfig,
 }
 
+#[allow(dead_code)]
 impl TestEnvironment {
     /// Create a new isolated test environment
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {

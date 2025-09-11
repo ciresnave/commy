@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .execute_request(request, &routing_decision)
             .await
         {
-            Ok(response) => {
+            Ok(_response) => {
                 println!("   ✅ Request executed successfully");
                 println!("   📁 Response received");
             }

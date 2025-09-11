@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 //! Phase 3 FFI Demo - Multi-language SDK Foundation
 //!
 //! This example demonstrates the C FFI interface that serves as the foundation
@@ -20,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize the FFI layer
     println!("📡 Initializing FFI layer...");
-    let init_result = unsafe { commy_ffi_init() };
+    let init_result = commy_ffi_init();
     if init_result != 0 {
         eprintln!("❌ Failed to initialize FFI layer: {}", init_result);
         return Err("FFI initialization failed".into());
@@ -28,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ FFI layer initialized successfully");
 
     // Get and display version
-    let version_ptr = unsafe { commy_ffi_version() };
+    let version_ptr = commy_ffi_version();
     if !version_ptr.is_null() {
         let version = unsafe { CStr::from_ptr(version_ptr) };
         println!("📖 Commy version: {}", version.to_string_lossy());
@@ -37,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a mesh coordinator
     println!("\n🌐 Creating mesh coordinator...");
     let node_id = CString::new("demo-node-1").unwrap();
-    let handle = unsafe { commy_create_mesh(node_id.as_ptr(), 8080) };
+    let handle = commy_create_mesh(node_id.as_ptr(), 8080);
 
     if handle.instance_id == 0 {
         eprintln!("❌ Failed to create mesh coordinator");
@@ -67,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let config_result =
-        unsafe { commy_configure_mesh(handle, &health_config as *const _, &lb_config as *const _) };
+        commy_configure_mesh(handle, &health_config as *const _, &lb_config as *const _);
 
     if config_result != 0 {
         println!("⚠️ Mesh configuration returned code: {}", config_result);
@@ -77,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start the mesh (this may fail if we don't have the mesh feature enabled)
     println!("\n🏃 Starting mesh coordinator...");
-    let start_result = unsafe { commy_start_mesh(handle) };
+    let start_result = commy_start_mesh(handle);
     if start_result != 0 {
         println!(
             "⚠️ Mesh start returned code: {} (may be expected if mesh feature disabled)",
@@ -104,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata.as_ptr(),
     };
 
-    let register_result = unsafe { commy_register_service(handle, &service_config as *const _) };
+    let register_result = commy_register_service(handle, &service_config as *const _);
     if register_result != 0 {
         println!("⚠️ Service registration returned code: {}", register_result);
     } else {
@@ -122,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata.as_ptr(),
     };
 
-    let register_result2 = unsafe { commy_register_service(handle, &service_config2 as *const _) };
+    let register_result2 = commy_register_service(handle, &service_config2 as *const _);
     if register_result2 != 0 {
         println!(
             "⚠️ Service registration returned code: {}",
@@ -137,14 +140,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut services_ptr: *mut CommyServiceInfo = ptr::null_mut();
     let mut service_count: usize = 0;
 
-    let discover_result = unsafe {
-        commy_discover_services(
-            handle,
-            service_name.as_ptr(),
-            &mut services_ptr as *mut _,
-            &mut service_count as *mut _,
-        )
-    };
+    let discover_result = commy_discover_services(
+        handle,
+        service_name.as_ptr(),
+        &mut services_ptr as *mut _,
+        &mut service_count as *mut _,
+    );
 
     if discover_result == 0 && service_count > 0 {
         println!("✅ Discovered {} service(s):", service_count);
@@ -196,7 +197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         average_response_time_ms: 0.0,
     };
 
-    let stats_result = unsafe { commy_get_mesh_stats(handle, &mut stats as *mut _) };
+    let stats_result = commy_get_mesh_stats(handle, &mut stats as *mut _);
     if stats_result == 0 {
         println!("✅ Mesh Statistics:");
         println!("  📈 Total Services: {}", stats.total_services);
@@ -225,14 +226,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         response_time_ms: 0,
     };
 
-    let select_result = unsafe {
-        commy_select_service(
-            handle,
-            service_name.as_ptr(),
-            ptr::null(), // No client ID
-            &mut selected_service as *mut _,
-        )
-    };
+    let select_result = commy_select_service(
+        handle,
+        service_name.as_ptr(),
+        ptr::null(), // No client ID
+        &mut selected_service as *mut _,
+    );
 
     if select_result == 0 {
         let selected_id = if !selected_service.service_id.is_null() {
@@ -269,7 +268,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Check if mesh is running
     println!("\n🔍 Checking mesh status...");
-    let is_running = unsafe { commy_is_mesh_running(handle) };
+    let is_running = commy_is_mesh_running(handle);
     match is_running {
         1 => println!("✅ Mesh is running"),
         0 => println!("⏹️ Mesh is not running"),
@@ -278,7 +277,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get node ID
     println!("\n🏷️ Getting node ID...");
-    let node_id_ptr = unsafe { commy_get_node_id(handle) };
+    let node_id_ptr = commy_get_node_id(handle);
     if !node_id_ptr.is_null() {
         let node_id_str = unsafe { CStr::from_ptr(node_id_ptr) };
         println!("✅ Node ID: {}", node_id_str.to_string_lossy());
@@ -312,7 +311,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Stop the mesh
     println!("\n⏹️ Stopping mesh coordinator...");
-    let stop_result = unsafe { commy_stop_mesh(handle) };
+    let stop_result = commy_stop_mesh(handle);
     if stop_result != 0 {
         println!(
             "⚠️ Mesh stop returned code: {} (may be expected)",
@@ -324,7 +323,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cleanup FFI layer
     println!("\n🧹 Cleaning up FFI layer...");
-    let cleanup_result = unsafe { commy_ffi_cleanup() };
+    let cleanup_result = commy_ffi_cleanup();
     if cleanup_result != 0 {
         println!("⚠️ FFI cleanup returned code: {}", cleanup_result);
     } else {

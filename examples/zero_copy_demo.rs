@@ -4,6 +4,9 @@
 //! over shared memory-mapped files. It shows the performance difference between
 //! traditional serialization and zero-copy serialization.
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 use commy::serialization::*;
 use std::time::Instant;
 

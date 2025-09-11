@@ -7,6 +7,10 @@
 //! - Platform-specific optimizations
 //! - Unified API design across languages
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 #[cfg(feature = "manager")]
 use commy::manager::{
     ConnectionSide, ConsistencyLevel, CreationPolicy, Directionality, ExistencePolicy,

@@ -11,6 +11,14 @@ use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// Network-specific imports (guarded to avoid unused-import warnings when
+// `network` feature is disabled)
+#[cfg(feature = "network")]
+use crate::manager::protocol::{MessagePayload, MessageType, ProtocolHandler, ProtocolMessage};
+#[cfg(feature = "network")]
+use crate::manager::NetworkEndpoint;
+#[cfg(feature = "network")]
+use std::time::{Duration, Instant};
 #[cfg(feature = "network")]
 use {
     dashmap::DashMap,

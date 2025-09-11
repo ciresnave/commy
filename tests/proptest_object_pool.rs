@@ -21,10 +21,8 @@ proptest! {
                     // randomly choose op based on simple pattern
                     if (i + t) % 3 == 0 {
                         p.release(i + t);
-                    } else {
-                        if p.try_acquire().is_some() {
-                            got += 1;
-                        }
+                    } else if p.try_acquire().is_some() {
+                        got += 1;
                     }
                     if i % 17 == 0 { thread::sleep(Duration::from_micros(1)); }
                 }
@@ -40,6 +38,6 @@ proptest! {
         // invariants
         assert!(pool.len() <= 50);
         // either some acquires happened or the pool contains items
-        assert!(total > 0 || pool.len() > 0);
+    assert!(total > 0 || !pool.is_empty());
     }
 }

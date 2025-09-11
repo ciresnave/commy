@@ -7,6 +7,10 @@
 //! This example demonstrates the performance benefits of the rkyv zero-copy serialization
 //! backend compared to traditional JSON serialization for shared memory operations.
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 use commy::serialization::*;
 
 // Provide a fallback main when none of the formats are enabled to avoid

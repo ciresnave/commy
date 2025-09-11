@@ -1,3 +1,4 @@
+#[cfg(feature = "plugins")]
 use std::path::PathBuf;
 
 #[cfg(feature = "plugins")]

@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a mesh coordinator
     println!("\n🌐 Creating mesh coordinator...");
     let node_id = CString::new("demo-node-1").unwrap();
-    let handle = unsafe { commy_create_mesh(node_id.as_ptr(), 8080) };
+    let handle = commy_create_mesh(node_id.as_ptr(), 8080);
 
     if handle.instance_id == 0 {
         eprintln!("❌ Failed to create mesh coordinator");
@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         average_response_time_ms: 0.0,
     };
 
-    let stats_result = unsafe { commy_get_mesh_stats(handle, &mut stats as *mut _) };
+    let stats_result = commy_get_mesh_stats(handle, &mut stats as *mut _);
     if stats_result == 0 {
         println!("✅ Mesh Statistics (default values):");
         println!("  📈 Total Services: {}", stats.total_services);
@@ -132,7 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Try to create a mesh with invalid parameters
     let invalid_node_id = CString::new("").unwrap(); // Empty node ID
-    let invalid_handle = unsafe { commy_create_mesh(invalid_node_id.as_ptr(), 0) }; // Port 0
+    let invalid_handle = commy_create_mesh(invalid_node_id.as_ptr(), 0); // Port 0
 
     if invalid_handle.instance_id == 0 {
         println!("✅ Error handling works: Invalid mesh creation properly rejected");

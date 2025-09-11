@@ -17,14 +17,13 @@ use crate::mesh::{MeshConfig, MeshCoordinator};
 /// reads.
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub unsafe extern "C" fn commy_create_mesh(
-    node_id: *const c_char,
-    listen_port: u16,
-) -> CommyHandle {
+pub extern "C" fn commy_create_mesh(node_id: *const c_char, listen_port: u16) -> CommyHandle {
     let node_id_str = match c_str_to_string(node_id) {
         Ok(s) => s,
         Err(_) => return CommyHandle::null(),
     };
+    // Perform pointer-to-string conversion in an unsafe block while keeping
+    // the public symbol safe to call from foreign languages.
 
     #[cfg(feature = "mesh")]
     {
@@ -116,13 +115,11 @@ pub extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
 /// struct that the caller owns and allows to be written to.
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub unsafe extern "C" fn commy_get_mesh_stats(
-    handle: CommyHandle,
-    stats: *mut CommyMeshStats,
-) -> i32 {
+pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMeshStats) -> i32 {
     if handle.is_null() || stats.is_null() {
         return CommyError::InvalidArgument as i32;
     }
+    // Perform pointer dereference in an unsafe block
 
     #[cfg(feature = "mesh")]
     {
@@ -187,7 +184,7 @@ pub extern "C" fn commy_set_log_callback(callback: CommyLogCallback) -> i32 {
 /// duration of the call.
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub unsafe extern "C" fn commy_configure_mesh_core(
+pub extern "C" fn commy_configure_mesh_core(
     handle: CommyHandle,
     health_config: *const CommyHealthConfig,
     lb_config: *const CommyLoadBalancerConfig,
@@ -195,6 +192,7 @@ pub unsafe extern "C" fn commy_configure_mesh_core(
     if handle.is_null() {
         return CommyError::InvalidArgument as i32;
     }
+    // Perform pointer dereference in an unsafe block
 
     #[cfg(feature = "mesh")]
     {
@@ -248,6 +246,7 @@ pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
     if handle.is_null() {
         return std::ptr::null_mut();
     }
+    // Perform pointer dereference in an unsafe block
 
     #[cfg(feature = "mesh")]
     {

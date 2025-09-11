@@ -30,7 +30,7 @@ mod enterprise {
         let mesh_name = CString::new("test_mesh").unwrap();
         let port = 8080u16;
 
-        let mesh_result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+        let mesh_result = commy_create_mesh(mesh_name.as_ptr(), port);
         assert!(mesh_result.instance_id != 0, "Creating mesh should succeed");
 
         // Cleanup FFI system
@@ -48,7 +48,7 @@ mod enterprise {
         let mesh_name = CString::new("python_test_mesh").unwrap();
         let port = 8081u16;
 
-        let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+        let result = commy_create_mesh(mesh_name.as_ptr(), port);
         assert!(
             result.instance_id != 0,
             "Python mesh creation should succeed"
@@ -68,7 +68,7 @@ mod enterprise {
         let mesh_name = CString::new("nodejs_test_mesh").unwrap();
         let port = 8082u16;
 
-        let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+        let result = commy_create_mesh(mesh_name.as_ptr(), port);
         assert!(
             result.instance_id != 0,
             "Node.js mesh creation should succeed"
@@ -96,7 +96,7 @@ mod enterprise {
                 let port = 8090u16 + i;
 
                 tokio::spawn(async move {
-                    let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+                    let result = commy_create_mesh(mesh_name.as_ptr(), port);
                     result.instance_id != 0
                 })
             })
@@ -120,12 +120,12 @@ mod enterprise {
         assert_eq!(init_result, 0);
 
         // Test invalid mesh name (null pointer)
-        let result = unsafe { commy_create_mesh(std::ptr::null(), 8080) };
+        let result = commy_create_mesh(std::ptr::null(), 8080);
         assert!(result.instance_id == 0, "Invalid parameters should fail");
 
         // Test mesh with empty name
         let empty_name = CString::new("").unwrap();
-        let result = unsafe { commy_create_mesh(empty_name.as_ptr(), 8080) };
+        let result = commy_create_mesh(empty_name.as_ptr(), 8080);
         assert!(result.instance_id == 0, "Empty name should fail");
 
         // Cleanup
@@ -145,7 +145,7 @@ mod enterprise {
             let mesh_name = CString::new(format!("{}_interop_mesh", lang)).unwrap();
             let port = 8100u16 + idx as u16;
 
-            let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+            let result = commy_create_mesh(mesh_name.as_ptr(), port);
             assert!(
                 result.instance_id != 0,
                 "Cross-language mesh should be created for {}",
@@ -170,7 +170,7 @@ mod enterprise {
             let mesh_name = CString::new(format!("perf_mesh_{}", i)).unwrap();
             let port = 8200u16 + i as u16;
 
-            let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+            let result = commy_create_mesh(mesh_name.as_ptr(), port);
             assert!(
                 result.instance_id != 0,
                 "Performance test mesh {} should succeed",
@@ -200,7 +200,7 @@ mod enterprise {
 
         // This test validates that all enterprise components work together
         // Initialize FFI
-        let init_result = unsafe { commy_ffi_init() };
+        let init_result = commy_ffi_init();
         assert_eq!(
             init_result, 0,
             "Enterprise FFI initialization should succeed"
@@ -210,7 +210,7 @@ mod enterprise {
         let mesh_name = CString::new("enterprise_mesh").unwrap();
         let port = 8300u16;
 
-        let mesh_result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+        let mesh_result = commy_create_mesh(mesh_name.as_ptr(), port);
         assert_ne!(
             mesh_result.instance_id, 0,
             "Enterprise mesh creation should succeed"
@@ -220,7 +220,7 @@ mod enterprise {
         println!("📊 All enterprise components validated");
 
         // Cleanup
-        unsafe { commy_ffi_cleanup() };
+        commy_ffi_cleanup();
     }
 }
 

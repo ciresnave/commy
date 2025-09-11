@@ -72,11 +72,7 @@ pub extern "C" fn commy_ffi_version() -> *const c_char {
 ///
 /// `node_id` must be a valid, non-null, NUL-terminated C string pointer. The
 /// caller must ensure the pointer points to memory valid for reads.
-#[no_mangle]
-pub unsafe extern "C" fn commy_create_mesh(
-    node_id: *const c_char,
-    listen_port: u16,
-) -> CommyHandle {
+pub extern "C" fn commy_create_mesh(node_id: *const c_char, listen_port: u16) -> CommyHandle {
     // Validate parameters
     if node_id.is_null() {
         return CommyHandle {

@@ -6,6 +6,10 @@
 //! 3. Cross-language compatibility
 //! 4. Maximum performance through direct memory access
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 use commy::serialization::{
     FormatData, RawBinaryData, RawBinaryError, RawBytes, UniversalData, ZeroCopyAccess,
     ZeroCopyBytes,

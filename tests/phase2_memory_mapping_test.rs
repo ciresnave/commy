@@ -45,7 +45,7 @@ async fn test_phase2_memory_mapping_basic() {
     let _ = tracing_subscriber::fmt::try_init();
 
     let config = create_test_config(&test_env);
-    let manager = SharedFileManager::new(config)
+    let _manager = SharedFileManager::new(config)
         .await
         .expect("Failed to create SharedFileManager");
 

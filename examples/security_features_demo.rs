@@ -1,4 +1,8 @@
 //! Security Features Demo
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+//! Security Features Demo
 //!
 //! Demonstrates comprehensive security capabilities including:
 //! - End-to-end encryption with multiple algorithms

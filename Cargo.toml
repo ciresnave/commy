@@ -143,9 +143,7 @@ rcgen = "0.9"
 proptest = "1.0"
 
 [patch.crates-io]
-# Temporary override: point to upstream commit that fixes `div_ceil` usage
-# (replaces method-style `x.div_ceil(&y)` with `Integer::div_ceil(&x, &y)`).
-# This targets the upstream rust-num/num-bigint commit which contains the
-# div_ceil/int-roundings fixes. Remove this override once a fixed crates.io
-# release is published.
-num-bigint-dig = { git = "https://github.com/rust-num/num-bigint.git", package = "num-bigint", rev = "1469ed68d16bcaa069965dcecf4cab0dbcde3b92" }
+# Patch the `num-bigint-dig` crate to a local vendor copy which contains fixes
+# for future-incompatibility lints. Remove this once an upstream crates.io
+# release is available with the required fixes.
+num-bigint-dig = { path = "vendor/num-bigint-dig" }

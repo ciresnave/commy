@@ -2,9 +2,7 @@
 //!
 //! Tests the basic functionality of the simplified Phase 1 implementation
 
-use commy::manager::core::ManagerConfig;
-use commy::manager::{ExistencePolicy, Permission, SharedFileManager, SharedFileRequest};
-use std::path::PathBuf;
+use commy::manager::SharedFileManager;
 
 mod test_utils;
 use test_utils::{TestCleanupGuard, TestEnvironment};
@@ -21,7 +19,7 @@ async fn test_phase1_basic_functionality() {
     config.listen_port = 18080; // Override port for this specific test
 
     // Create the manager
-    let manager = SharedFileManager::new(config)
+    let _manager = SharedFileManager::new(config)
         .await
         .expect("Failed to create SharedFileManager");
 
@@ -48,7 +46,7 @@ async fn test_phase1_list_files() {
     });
 
     let config = env.config.clone();
-    let manager = SharedFileManager::new(config)
+    let _manager = SharedFileManager::new(config)
         .await
         .expect("Failed to create SharedFileManager");
 

@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 //! Polyglot Serialization Strategy Demo
 //!
 //! This example demonstrates Commy's strategic approach to supporting both

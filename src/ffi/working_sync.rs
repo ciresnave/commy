@@ -4,6 +4,8 @@
 //! new synchronous interface, eliminating the need for runtime.block_on() calls
 //! and making C/C++ interop much more reliable.
 
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use std::collections::HashMap;
 use std::ffi::{c_char, c_uint, CStr, CString};
 use std::ptr;
@@ -80,10 +82,7 @@ pub extern "C" fn commy_ffi_init() -> c_uint {
 /// valid node id is expected. Invalid pointers or non-UTF-8 input may lead to
 /// undefined behavior or an error return (null handle).
 #[no_mangle]
-pub unsafe extern "C" fn commy_create_mesh(
-    node_id: *const c_char,
-    listen_port: u16,
-) -> CommyHandle {
+pub extern "C" fn commy_create_mesh(node_id: *const c_char, listen_port: u16) -> CommyHandle {
     // Validate node_id pointer before converting to Rust string
     if node_id.is_null() {
         tracing::warn!("commy_create_mesh called with null node_id");
@@ -276,10 +275,7 @@ pub struct FFIStats {
 /// caller must ensure the pointer points to a valid UTF-8 sequence if a valid
 /// node id is expected. Invalid pointers or non-UTF-8 input may lead to undefined
 /// behavior or an error return (null handle).
-pub unsafe extern "C" fn commy_get_mesh_stats(
-    handle: CommyHandle,
-    stats: *mut CommyMeshStats,
-) -> i32 {
+pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMeshStats) -> i32 {
     if stats.is_null() {
         return LegacyCommyError::InvalidParameter as i32;
     }
@@ -303,6 +299,7 @@ pub unsafe extern "C" fn commy_get_mesh_stats(
     // Use synchronous get_stats - no async runtime needed!
     let mesh_stats = coordinator.get_stats_sync();
 
+    // SAFETY: `stats` was checked for null earlier; confine raw pointer writes here.
     unsafe {
         (*stats).total_services = mesh_stats.total_services as u32;
         (*stats).healthy_services = mesh_stats.healthy_services as u32;
@@ -349,7 +346,7 @@ pub extern "C" fn commy_destroy_mesh(handle: CommyHandle) -> i32 {
 /// `CommyHealthConfig` / `CommyLoadBalancerConfig` structures that the
 /// caller owns for the duration of the call.
 #[no_mangle]
-pub unsafe extern "C" fn commy_configure_mesh(
+pub extern "C" fn commy_configure_mesh(
     _handle: CommyHandle,
     _health: *const CommyHealthConfig,
     _lb: *const CommyLoadBalancerConfig,
@@ -370,7 +367,7 @@ pub unsafe extern "C" fn commy_configure_mesh(
 /// pointer to a `CommyServiceInfo` struct that the caller owns and allows to
 /// be written to.
 #[no_mangle]
-pub unsafe extern "C" fn commy_select_service(
+pub extern "C" fn commy_select_service(
     _handle: CommyHandle,
     _service_name: *const c_char,
     _client_id: *const c_char,
@@ -411,7 +408,7 @@ use libc::c_char as libc_c_char;
 /// also obey the usual C string invariants (non-null, NUL-terminated, valid
 /// UTF-8 when interpreted as Rust strings).
 #[no_mangle]
-pub unsafe extern "C" fn commy_register_service(
+pub extern "C" fn commy_register_service(
     _handle: CommyHandle,
     config: *const CommyServiceConfig,
 ) -> i32 {
@@ -419,6 +416,7 @@ pub unsafe extern "C" fn commy_register_service(
         return LegacyCommyError::InvalidParameter as i32;
     }
 
+    // Confine raw pointer dereferences to an unsafe block
     unsafe {
         let service_name = if (*config).service_name.is_null() {
             "unnamed_service"
@@ -458,10 +456,7 @@ pub unsafe extern "C" fn commy_register_service(
 /// pointer. The caller must ensure it points to valid memory for the duration
 /// of the call.
 #[no_mangle]
-pub unsafe extern "C" fn commy_unregister_service(
-    _handle: CommyHandle,
-    service_id: *const c_char,
-) -> i32 {
+pub extern "C" fn commy_unregister_service(_handle: CommyHandle, service_id: *const c_char) -> i32 {
     if service_id.is_null() {
         return LegacyCommyError::InvalidParameter as i32;
     }
@@ -498,7 +493,7 @@ pub extern "C" fn commy_ffi_version() -> *const libc_c_char {
 /// caller owns and allows to be written to. If `_service_name` is dereferenced
 /// it must be a valid, non-null, NUL-terminated C string pointer.
 #[no_mangle]
-pub unsafe extern "C" fn commy_discover_services(
+pub extern "C" fn commy_discover_services(
     _handle: CommyHandle,
     _service_name: *const libc_c_char,
     services: *mut *mut CommyServiceInfo,

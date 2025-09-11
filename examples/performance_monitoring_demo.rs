@@ -6,6 +6,9 @@
 //! - Resource utilization monitoring
 //! - Predictive performance modeling
 //! - Automated optimization recommendations
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 
 #[cfg(feature = "manager")]
 use commy::manager::{
@@ -882,10 +885,10 @@ fn calculate_overall_score(
     };
 
     // Weighted average: latency and reliability are most important
-    (grade_to_score(latency) * 0.3
+    grade_to_score(latency) * 0.3
         + grade_to_score(throughput) * 0.25
         + grade_to_score(reliability) * 0.3
-        + grade_to_score(efficiency) * 0.15)
+        + grade_to_score(efficiency) * 0.15
 }
 
 #[cfg(feature = "manager")]
