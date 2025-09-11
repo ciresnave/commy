@@ -6,7 +6,7 @@
 
 use super::memory_map::{MappedFile, MemoryMapManager};
 use super::*;
-use crate::manager::auth_provider::{AuthProvider, RealAuthProvider};
+use crate::manager::auth_provider::{AuthProvider, MockAuthProvider, RealAuthProvider};
 use auth_framework::AuthFramework;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
@@ -242,7 +242,10 @@ impl Default for PerformanceConfig {
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
-            require_auth: true,
+            // Default to not requiring auth for local tests and examples so
+            // that TestEnvironment::default() does not force external
+            // AuthFramework initialization.
+            require_auth: false,
             max_auth_failures: 5,
             auth_lockout_seconds: 300, // 5 minutes
             audit_logging: true,
@@ -294,23 +297,40 @@ impl SharedFileManager {
             config.files_directory
         );
 
-        // Initialize auth framework
-        // Centralize the token lifetime so the same value is used when
-        // constructing AuthConfig and when RealAuthProvider builds AuthToken
-        // instances.
+        // Initialize auth provider. If the manager configuration disables
+        // authentication, use a MockAuthProvider that accepts tokens to keep
+        // local tests and non-secure deployments simple. Otherwise initialize
+        // the real AuthFramework and wrap it in a RealAuthProvider.
         let token_lifetime_secs: u64 = 3600; // 1 hour
-        let auth_config = auth_framework::AuthConfig::new()
-            .token_lifetime(Duration::from_secs(token_lifetime_secs))
-            .refresh_token_lifetime(Duration::from_secs(86400 * 7));
 
-        let mut auth_fw = AuthFramework::new(auth_config);
-        auth_fw
-            .initialize()
-            .await
-            .map_err(|e| ManagerError::ConfigurationError {
-                component: "Auth".to_string(),
-                message: format!("Auth initialization failed: {}", e),
-            })?;
+        let auth_arc: std::sync::Arc<dyn AuthProvider> = if config.security_config.require_auth {
+            let auth_config = auth_framework::AuthConfig::new()
+                .token_lifetime(Duration::from_secs(token_lifetime_secs))
+                .refresh_token_lifetime(Duration::from_secs(86400 * 7));
+
+            let mut auth_fw = AuthFramework::new(auth_config);
+            auth_fw
+                .initialize()
+                .await
+                .map_err(|e| ManagerError::ConfigurationError {
+                    component: "Auth".to_string(),
+                    message: format!("Auth initialization failed: {}", e),
+                })?;
+
+            std::sync::Arc::new(RealAuthProvider::new(
+                Arc::new(RwLock::new(auth_fw)),
+                token_lifetime_secs,
+            ))
+        } else {
+            // No-op mock provider that accepts any non-empty token
+            // Prevent usage outside of test environments
+            if std::env::var("TEST_ENV").unwrap_or_default() != "1" {
+                panic!("MockAuthProvider should only be used in test environments! Set TEST_ENV=1 to allow.");
+            } else {
+                eprintln!("WARNING: Using MockAuthProvider. This should only be enabled for testing.");
+            }
+            std::sync::Arc::new(MockAuthProvider::new(true))
+        };
 
         // Initialize distributed config
         let dist_config = ConfigManager::new();
@@ -335,10 +355,7 @@ impl SharedFileManager {
         // that align with the framework's expectations. Create the Arc directly
         // and coerce to the trait object type.
         Ok(Self {
-            auth: std::sync::Arc::new(RealAuthProvider::new(
-                Arc::new(RwLock::new(auth_fw)),
-                token_lifetime_secs,
-            )),
+            auth: auth_arc,
             config: Arc::new(RwLock::new(dist_config)),
             memory_map_manager,
             active_files: Arc::new(DashMap::new()),
@@ -646,7 +663,11 @@ impl SharedFileManager {
                     let active_files = Arc::clone(&self.active_files);
                     let event_broadcaster = self.event_broadcaster.clone();
                     let manager_config = self.manager_config.clone();
-                    let tls_acceptor = self.tls_acceptor.clone();
+                    // `Option<TlsAcceptor>` is Copy when the network feature is
+                    // disabled (TlsAcceptor = ()), so calling `clone()` triggers
+                    // clippy::clone_on_copy. Copy the field instead which is
+                    // a no-op for Copy types and avoids an extra clone call.
+                    let tls_acceptor = self.tls_acceptor;
 
                     // Handle connection in a separate task
                     tokio::spawn(async move {
@@ -809,9 +830,7 @@ impl SharedFileManager {
         // provides a validation API, use it; otherwise fall back to the simple
         // non-empty check previously present. This keeps behavior stable while
         // enabling a straightforward upgrade path to full authentication.
-        if let Err(e) = self.validate_auth_token(auth_token).await {
-            return Err(e);
-        }
+        self.validate_auth_token(auth_token).await?;
 
         // 2. Validate request parameters
         if request.identifier.is_empty() {
