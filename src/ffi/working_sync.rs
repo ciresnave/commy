@@ -502,7 +502,7 @@ pub unsafe extern "C" fn commy_unregister_service(
 }
 
 // =============================================================================
-// Legacy compatibility functions for existing tests
+/// Legacy compatibility functions for existing tests
 // =============================================================================
 
 /// Legacy compatibility function that maps to new interface
