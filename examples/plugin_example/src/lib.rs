@@ -62,7 +62,13 @@ extern "C" fn get_schema_text_example(_ctx: *mut c_void) -> *const c_char {
 
 // Provide descriptors via C ABI
 #[no_mangle]
-pub extern "C" fn com_my_plugin_get_descriptors(
+/// # Safety
+///
+/// `n` may be null. If non-null, it must point to writable memory large
+/// enough to hold a `usize` and the caller must ensure the pointer is valid
+/// for writes. This function returns a pointer to a static array of
+/// `PluginTypeDescriptor` which the caller must not attempt to free.
+pub unsafe extern "C" fn com_my_plugin_get_descriptors(
     n: *mut usize,
 ) -> *const *const PluginTypeDescriptor {
     // Static C string for the type name
@@ -92,7 +98,14 @@ pub extern "C" fn com_my_plugin_get_descriptors(
 
 // Backwards-compatible register symbol (no-op for this example)
 #[no_mangle]
-pub extern "C" fn com_my_plugin_register(
+/// # Safety
+///
+/// `_descriptors` may be null. If non-null, it must point to an array of
+/// `_n` pointers to valid `PluginTypeDescriptor` values that are valid for
+/// reads for the duration of the call. The function does not take ownership
+/// of the descriptors and callers must not free them while the host may
+/// still reference them.
+pub unsafe extern "C" fn com_my_plugin_register(
     _descriptors: *const *const PluginTypeDescriptor,
     _n: usize,
 ) {

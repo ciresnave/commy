@@ -1,0 +1,769 @@
+diff --git a/examples/phase3_ffi_demo.rs b/examples/phase3_ffi_demo.rs
+index 29b48a0..f9b6c5d 100644
+--- a/examples/phase3_ffi_demo.rs
++++ b/examples/phase3_ffi_demo.rs
+@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     println!("✅ FFI layer initialized successfully");
+ 
+     // Get and display version
+-    let version_ptr = commy_ffi_version();
++    let version_ptr = unsafe { commy_ffi_version() };
+     if !version_ptr.is_null() {
+         let version = unsafe { CStr::from_ptr(version_ptr) };
+         println!("📖 Commy version: {}", version.to_string_lossy());
+@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     // Create a mesh coordinator
+     println!("\n🌐 Creating mesh coordinator...");
+     let node_id = CString::new("demo-node-1").unwrap();
+-    let handle = commy_create_mesh(node_id.as_ptr(), 8080);
++    let handle = unsafe { commy_create_mesh(node_id.as_ptr(), 8080) };
+ 
+     if handle.instance_id == 0 {
+         eprintln!("❌ Failed to create mesh coordinator");
+@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+         metadata: metadata.as_ptr(),
+     };
+ 
+-    let register_result = commy_register_service(handle, &service_config as *const _);
++    let register_result = unsafe { commy_register_service(handle, &service_config as *const _) };
+     if register_result != 0 {
+         println!("⚠️ Service registration returned code: {}", register_result);
+     } else {
+@@ -125,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+         metadata: metadata.as_ptr(),
+     };
+ 
+-    let register_result2 = commy_register_service(handle, &service_config2 as *const _);
++    let register_result2 = unsafe { commy_register_service(handle, &service_config2 as *const _) };
+     if register_result2 != 0 {
+         println!(
+             "⚠️ Service registration returned code: {}",
+@@ -140,12 +140,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let mut services_ptr: *mut CommyServiceInfo = ptr::null_mut();
+     let mut service_count: usize = 0;
+ 
+-    let discover_result = commy_discover_services(
+-        handle,
+-        service_name.as_ptr(),
+-        &mut services_ptr as *mut _,
+-        &mut service_count as *mut _,
+-    );
++    let discover_result = unsafe {
++        commy_discover_services(
++            handle,
++            service_name.as_ptr(),
++            &mut services_ptr as *mut _,
++            &mut service_count as *mut _,
++        )
++    };
+ 
+     if discover_result == 0 && service_count > 0 {
+         println!("✅ Discovered {} service(s):", service_count);
+@@ -197,7 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+         average_response_time_ms: 0.0,
+     };
+ 
+-    let stats_result = commy_get_mesh_stats(handle, &mut stats as *mut _);
++    let stats_result = unsafe { commy_get_mesh_stats(handle, &mut stats as *mut _) };
+     if stats_result == 0 {
+         println!("✅ Mesh Statistics:");
+         println!("  📈 Total Services: {}", stats.total_services);
+@@ -277,7 +279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+ 
+     // Get node ID
+     println!("\n🏷️ Getting node ID...");
+-    let node_id_ptr = commy_get_node_id(handle);
++    let node_id_ptr = unsafe { commy_get_node_id(handle) };
+     if !node_id_ptr.is_null() {
+         let node_id_str = unsafe { CStr::from_ptr(node_id_ptr) };
+         println!("✅ Node ID: {}", node_id_str.to_string_lossy());
+diff --git a/examples/phase3_ffi_demo_simple.rs b/examples/phase3_ffi_demo_simple.rs
+index e85c10d..bd28b79 100644
+--- a/examples/phase3_ffi_demo_simple.rs
++++ b/examples/phase3_ffi_demo_simple.rs
+@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     println!("✅ FFI layer initialized successfully");
+ 
+     // Get and display version
+-    let version_ptr = commy_ffi_version();
++    let version_ptr = unsafe { commy_ffi_version() };
+     if !version_ptr.is_null() {
+         let version = unsafe { CStr::from_ptr(version_ptr) };
+         println!("📖 Commy version: {}", version.to_string_lossy());
+@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     // Create a mesh coordinator
+     println!("\n🌐 Creating mesh coordinator...");
+     let node_id = CString::new("demo-node-1").unwrap();
+-    let handle = commy_create_mesh(node_id.as_ptr(), 8080);
++    let handle = unsafe { commy_create_mesh(node_id.as_ptr(), 8080) };
+ 
+     if handle.instance_id == 0 {
+         eprintln!("❌ Failed to create mesh coordinator");
+@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+ 
+     // Get node ID
+     println!("\n🏷️ Getting node ID...");
+-    let node_id_ptr = commy_get_node_id(handle);
++    let node_id_ptr = unsafe { commy_get_node_id(handle) };
+     if !node_id_ptr.is_null() {
+         let node_id_str = unsafe { CStr::from_ptr(node_id_ptr) };
+         println!("✅ Node ID: {}", node_id_str.to_string_lossy());
+@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+         average_response_time_ms: 0.0,
+     };
+ 
+-    let stats_result = commy_get_mesh_stats(handle, &mut stats as *mut _);
++    let stats_result = unsafe { commy_get_mesh_stats(handle, &mut stats as *mut _) };
+     if stats_result == 0 {
+         println!("✅ Mesh Statistics (default values):");
+         println!("  📈 Total Services: {}", stats.total_services);
+@@ -132,7 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+ 
+     // Try to create a mesh with invalid parameters
+     let invalid_node_id = CString::new("").unwrap(); // Empty node ID
+-    let invalid_handle = commy_create_mesh(invalid_node_id.as_ptr(), 0); // Port 0
++    let invalid_handle = unsafe { commy_create_mesh(invalid_node_id.as_ptr(), 0) }; // Port 0
+ 
+     if invalid_handle.instance_id == 0 {
+         println!("✅ Error handling works: Invalid mesh creation properly rejected");
+diff --git a/src/ffi/core.rs b/src/ffi/core.rs
+index af9d918..bf86a50 100644
+--- a/src/ffi/core.rs
++++ b/src/ffi/core.rs
+@@ -17,7 +17,10 @@ use crate::mesh::{MeshConfig, MeshCoordinator};
+ /// reads.
+ #[cfg(feature = "ffi")]
+ #[no_mangle]
+-pub extern "C" fn commy_create_mesh(node_id: *const c_char, listen_port: u16) -> CommyHandle {
++pub unsafe extern "C" fn commy_create_mesh(
++    node_id: *const c_char,
++    listen_port: u16,
++) -> CommyHandle {
+     let node_id_str = match c_str_to_string(node_id) {
+         Ok(s) => s,
+         Err(_) => return CommyHandle::null(),
+@@ -115,7 +118,10 @@ pub extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
+ /// struct that the caller owns and allows to be written to.
+ #[cfg(feature = "ffi")]
+ #[no_mangle]
+-pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMeshStats) -> i32 {
++pub unsafe extern "C" fn commy_get_mesh_stats(
++    handle: CommyHandle,
++    stats: *mut CommyMeshStats,
++) -> i32 {
+     if handle.is_null() || stats.is_null() {
+         return CommyError::InvalidArgument as i32;
+     }
+@@ -184,7 +190,7 @@ pub extern "C" fn commy_set_log_callback(callback: CommyLogCallback) -> i32 {
+ /// duration of the call.
+ #[cfg(feature = "ffi")]
+ #[no_mangle]
+-pub extern "C" fn commy_configure_mesh_core(
++pub unsafe extern "C" fn commy_configure_mesh_core(
+     handle: CommyHandle,
+     health_config: *const CommyHealthConfig,
+     lb_config: *const CommyLoadBalancerConfig,
+@@ -231,7 +237,7 @@ pub extern "C" fn commy_configure_mesh_core(
+ // and ensures a single canonical entry point when the crate is built normally.
+ #[cfg(feature = "ffi")]
+ #[no_mangle]
+-pub extern "C" fn commy_configure_mesh(
++pub unsafe extern "C" fn commy_configure_mesh(
+     handle: CommyHandle,
+     health_config: *const CommyHealthConfig,
+     lb_config: *const CommyLoadBalancerConfig,
+@@ -242,7 +248,7 @@ pub extern "C" fn commy_configure_mesh(
+ /// Get the node ID of the mesh
+ #[cfg(feature = "ffi")]
+ #[no_mangle]
+-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
++pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+     if handle.is_null() {
+         return std::ptr::null_mut();
+     }
+diff --git a/src/ffi/minimal.rs b/src/ffi/minimal.rs
+index 9123232..90fa684 100644
+--- a/src/ffi/minimal.rs
++++ b/src/ffi/minimal.rs
+@@ -492,7 +492,7 @@ pub extern "C" fn commy_ffi_version() -> *const c_char {
+ 
+ /// Create a new mesh coordinator
+ #[no_mangle]
+-pub extern "C" fn commy_create_mesh(node_id: *const c_char, port: u16) -> CommyHandle {
++pub unsafe extern "C" fn commy_create_mesh(node_id: *const c_char, port: u16) -> CommyHandle {
+     if node_id.is_null() {
+         return CommyHandle {
+             instance_id: 0,
+@@ -622,7 +622,7 @@ pub extern "C" fn commy_configure_mesh_minimal(
+ 
+ /// Register a service with the mesh
+ #[no_mangle]
+-pub extern "C" fn commy_register_service(
++pub unsafe extern "C" fn commy_register_service(
+     handle: CommyHandle,
+     config: *const CommyServiceConfig,
+ ) -> i32 {
+@@ -669,7 +669,7 @@ pub extern "C" fn commy_register_service(
+ 
+ /// Unregister a service from the mesh
+ #[no_mangle]
+-pub extern "C" fn commy_unregister_service(
++pub unsafe extern "C" fn commy_unregister_service(
+     handle: CommyHandle,
+     service_name: *const c_char,
+ ) -> i32 {
+@@ -697,7 +697,7 @@ pub extern "C" fn commy_unregister_service(
+ 
+ /// Discover services by name
+ #[no_mangle]
+-pub extern "C" fn commy_discover_services(
++pub unsafe extern "C" fn commy_discover_services(
+     handle: CommyHandle,
+     service_name: *const c_char,
+     services: *mut *mut CommyServiceInfo,
+@@ -729,7 +729,7 @@ pub extern "C" fn commy_discover_services(
+ 
+ /// Select a service using load balancer
+ #[no_mangle]
+-pub extern "C" fn commy_select_service(
++pub unsafe extern "C" fn commy_select_service(
+     handle: CommyHandle,
+     service_name: *const c_char,
+     _client_id: *const c_char,
+@@ -768,7 +768,7 @@ pub extern "C" fn commy_select_service(
+ 
+ /// Get node ID
+ #[no_mangle]
+-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
++pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+     let instances = GLOBAL_INSTANCES.read();
+     if let Some(node_info) = instances.get(&handle.instance_id) {
+         // Extract node ID from stored info (format: "node_id:port")
+@@ -784,7 +784,10 @@ pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+ 
+ /// Get mesh statistics
+ #[no_mangle]
+-pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMeshStats) -> i32 {
++pub unsafe extern "C" fn commy_get_mesh_stats(
++    handle: CommyHandle,
++    stats: *mut CommyMeshStats,
++) -> i32 {
+     if stats.is_null() {
+         return CommyError::InvalidParameter as i32;
+     }
+@@ -812,7 +815,7 @@ pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMes
+ /// Free a string allocated by the FFI
+ #[cfg(not(feature = "ffi"))]
+ #[no_mangle]
+-pub extern "C" fn commy_free_string(ptr: *mut c_char) {
++pub unsafe extern "C" fn commy_free_string(ptr: *mut c_char) {
+     if !ptr.is_null() {
+         unsafe {
+             let _ = CString::from_raw(ptr);
+@@ -823,7 +826,7 @@ pub extern "C" fn commy_free_string(ptr: *mut c_char) {
+ /// Allocate memory (simple wrapper around malloc)
+ #[cfg(not(feature = "ffi"))]
+ #[no_mangle]
+-pub extern "C" fn commy_malloc(size: usize) -> *mut c_void {
++pub unsafe extern "C" fn commy_malloc(size: usize) -> *mut c_void {
+     if size == 0 {
+         return ptr::null_mut();
+     }
+@@ -834,7 +837,7 @@ pub extern "C" fn commy_malloc(size: usize) -> *mut c_void {
+ /// Free memory allocated by commy_malloc
+ #[cfg(not(feature = "ffi"))]
+ #[no_mangle]
+-pub extern "C" fn commy_free(ptr: *mut c_void) {
++pub unsafe extern "C" fn commy_free(ptr: *mut c_void) {
+     if !ptr.is_null() {
+         unsafe {
+             libc::free(ptr);
+@@ -845,7 +848,7 @@ pub extern "C" fn commy_free(ptr: *mut c_void) {
+ /// Duplicate a string
+ #[cfg(not(feature = "ffi"))]
+ #[no_mangle]
+-pub extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
++pub unsafe extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
+     if src.is_null() {
+         return ptr::null_mut();
+     }
+@@ -862,7 +865,7 @@ pub extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
+ /// Allocate a service info array
+ #[cfg(not(feature = "ffi"))]
+ #[no_mangle]
+-pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
++pub unsafe extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
+     if count == 0 {
+         return ptr::null_mut();
+     }
+@@ -881,7 +884,7 @@ pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServ
+ /// Free a service info array
+ #[cfg(not(feature = "ffi"))]
+ #[no_mangle]
+-pub extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
++pub unsafe extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
+     if ptr.is_null() || count == 0 {
+         return;
+     }
+@@ -908,7 +911,7 @@ pub extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, coun
+ 
+ /// Simple service registration that koffi can handle
+ #[no_mangle]
+-pub extern "C" fn commy_register_service_simple(
++pub unsafe extern "C" fn commy_register_service_simple(
+     handle: CommyHandle,
+     name: *const c_char,
+     version: *const c_char,
+@@ -950,7 +953,7 @@ pub extern "C" fn commy_register_service_simple(
+ 
+ /// Simple service discovery count that koffi can handle
+ #[no_mangle]
+-pub extern "C" fn commy_discover_services_count(
++pub unsafe extern "C" fn commy_discover_services_count(
+     handle: CommyHandle,
+     service_name: *const c_char,
+ ) -> i32 {
+@@ -976,7 +979,7 @@ pub extern "C" fn commy_discover_services_count(
+ 
+ /// Get active service count that koffi can handle
+ #[no_mangle]
+-pub extern "C" fn commy_get_active_service_count(handle: CommyHandle) -> u32 {
++pub unsafe extern "C" fn commy_get_active_service_count(handle: CommyHandle) -> u32 {
+     // Check if we have a valid mesh instance
+     let instances = GLOBAL_INSTANCES.read();
+     if instances.contains_key(&handle.instance_id) {
+@@ -994,7 +997,7 @@ pub extern "C" fn commy_get_active_service_count(handle: CommyHandle) -> u32 {
+ /// Create a new SharedFileManager instance
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_create_file_manager(
++pub unsafe extern "C" fn commy_create_file_manager(
+     config: *const CommyManagerConfig,
+ ) -> CommyFileManagerHandle {
+     if config.is_null() {
+@@ -1158,7 +1161,7 @@ pub extern "C" fn commy_create_file_manager(
+ /// Request a shared file allocation
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_request_shared_file(
++pub unsafe extern "C" fn commy_request_shared_file(
+     ___manager_handle: CommyFileManagerHandle,
+     request: *const CommySharedFileRequest,
+     response: *mut CommySharedFileResponse,
+@@ -1214,7 +1217,7 @@ pub extern "C" fn commy_request_shared_file(
+ /// Disconnect from a shared file
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_disconnect_shared_file(
++pub unsafe extern "C" fn commy_disconnect_shared_file(
+     ____manager_handle: CommyFileManagerHandle,
+     file_id: u64,
+ ) -> i32 {
+@@ -1227,7 +1230,7 @@ pub extern "C" fn commy_disconnect_shared_file(
+ /// List active shared files
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_list_active_files(
++pub unsafe extern "C" fn commy_list_active_files(
+     ____manager_handle: CommyFileManagerHandle,
+     files_out: *mut *mut CommyFileInfo,
+     count_out: *mut u32,
+@@ -1250,7 +1253,7 @@ pub extern "C" fn commy_list_active_files(
+ /// Get file information by ID
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_get_file_info(
++pub unsafe extern "C" fn commy_get_file_info(
+     ____manager_handle: CommyFileManagerHandle,
+     file_id: u64,
+     info_out: *mut CommyFileInfo,
+@@ -1296,7 +1299,7 @@ pub extern "C" fn commy_shutdown_file_manager(manager_handle: CommyFileManagerHa
+ /// Free a shared file response structure
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_free_shared_file_response(response: *mut CommySharedFileResponse) {
++pub unsafe extern "C" fn commy_free_shared_file_response(response: *mut CommySharedFileResponse) {
+     if response.is_null() {
+         return;
+     }
+@@ -1314,7 +1317,7 @@ pub extern "C" fn commy_free_shared_file_response(response: *mut CommySharedFile
+ /// Free a file info structure
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_free_file_info(info: *mut CommyFileInfo) {
++pub unsafe extern "C" fn commy_free_file_info(info: *mut CommyFileInfo) {
+     if info.is_null() {
+         return;
+     }
+@@ -1332,7 +1335,7 @@ pub extern "C" fn commy_free_file_info(info: *mut CommyFileInfo) {
+ /// Free array of file info structures
+ #[cfg(feature = "manager")]
+ #[no_mangle]
+-pub extern "C" fn commy_free_file_info_array(files: *mut CommyFileInfo, count: u32) {
++pub unsafe extern "C" fn commy_free_file_info_array(files: *mut CommyFileInfo, count: u32) {
+     if files.is_null() {
+         return;
+     }
+@@ -1355,7 +1358,7 @@ pub extern "C" fn commy_free_file_info_array(files: *mut CommyFileInfo, count: u
+ 
+ /// Create a default manager configuration
+ #[no_mangle]
+-pub extern "C" fn commy_create_default_manager_config() -> *mut CommyManagerConfig {
++pub unsafe extern "C" fn commy_create_default_manager_config() -> *mut CommyManagerConfig {
+     let config = Box::new(CommyManagerConfig {
+         listen_port: 8080,
+         bind_address: commy_strdup("127.0.0.1\0".as_ptr() as *const c_char),
+@@ -1376,7 +1379,7 @@ pub extern "C" fn commy_create_default_manager_config() -> *mut CommyManagerConf
+ 
+ /// Free manager configuration
+ #[no_mangle]
+-pub extern "C" fn commy_free_manager_config(config: *mut CommyManagerConfig) {
++pub unsafe extern "C" fn commy_free_manager_config(config: *mut CommyManagerConfig) {
+     if config.is_null() {
+         return;
+     }
+@@ -1404,7 +1407,7 @@ pub extern "C" fn commy_free_manager_config(config: *mut CommyManagerConfig) {
+ 
+ /// Generate a compliance report
+ #[no_mangle]
+-pub extern "C" fn commy_generate_compliance_report(
++pub unsafe extern "C" fn commy_generate_compliance_report(
+     ____manager_handle: CommyFileManagerHandle,
+     report_type: CommyComplianceReportType,
+     report_out: *mut CommyComplianceReport,
+@@ -1480,7 +1483,7 @@ pub extern "C" fn commy_generate_compliance_report(
+ 
+ /// Get audit events for a time period
+ #[no_mangle]
+-pub extern "C" fn commy_get_audit_events(
++pub unsafe extern "C" fn commy_get_audit_events(
+     ____manager_handle: CommyFileManagerHandle,
+     start_timestamp: u64,
+     end_timestamp: u64,
+@@ -1566,7 +1569,7 @@ pub extern "C" fn commy_get_audit_events(
+ 
+ /// Record an audit event
+ #[no_mangle]
+-pub extern "C" fn commy_record_audit_event(
++pub unsafe extern "C" fn commy_record_audit_event(
+     ____manager_handle: CommyFileManagerHandle,
+     event_type: *const c_char,
+     _user_id: *const c_char,
+@@ -1608,7 +1611,7 @@ pub extern "C" fn commy_record_audit_event(
+ 
+ /// Free compliance report
+ #[no_mangle]
+-pub extern "C" fn commy_free_compliance_report(report: *mut CommyComplianceReport) {
++pub unsafe extern "C" fn commy_free_compliance_report(report: *mut CommyComplianceReport) {
+     if report.is_null() {
+         return;
+     }
+@@ -1628,7 +1631,7 @@ pub extern "C" fn commy_free_compliance_report(report: *mut CommyComplianceRepor
+ 
+ /// Free audit events array
+ #[no_mangle]
+-pub extern "C" fn commy_free_audit_events(events: *mut CommyAuditEvent, count: u32) {
++pub unsafe extern "C" fn commy_free_audit_events(events: *mut CommyAuditEvent, count: u32) {
+     if events.is_null() {
+         return;
+     }
+@@ -1671,7 +1674,7 @@ pub extern "C" fn commy_free_audit_events(events: *mut CommyAuditEvent, count: u
+ 
+ /// Start a distributed trace span
+ #[no_mangle]
+-pub extern "C" fn commy_start_trace_span(
++pub unsafe extern "C" fn commy_start_trace_span(
+     _manager_handle: CommyFileManagerHandle,
+     operation_name: *const c_char,
+     parent_span_id: *const c_char,
+@@ -1722,7 +1725,7 @@ pub extern "C" fn commy_start_trace_span(
+ 
+ /// Finish a distributed trace span
+ #[no_mangle]
+-pub extern "C" fn commy_finish_trace_span(
++pub unsafe extern "C" fn commy_finish_trace_span(
+     ___manager_handle: CommyFileManagerHandle,
+     span: *mut CommyTraceSpan,
+     status: CommyTraceStatus,
+@@ -1751,7 +1754,7 @@ pub extern "C" fn commy_finish_trace_span(
+ 
+ /// Export metrics to external systems
+ #[no_mangle]
+-pub extern "C" fn commy_export_metrics(
++pub unsafe extern "C" fn commy_export_metrics(
+     ___manager_handle: CommyFileManagerHandle,
+     export_format: *const c_char, // "prometheus", "influxdb", "otlp"
+     endpoint: *const c_char,
+@@ -1793,7 +1796,7 @@ pub extern "C" fn commy_export_metrics(
+ 
+ /// Record a custom metric
+ #[no_mangle]
+-pub extern "C" fn commy_record_metric(
++pub unsafe extern "C" fn commy_record_metric(
+     ___manager_handle: CommyFileManagerHandle,
+     name: *const c_char,
+     metric_type: CommyMetricType,
+@@ -1831,7 +1834,7 @@ pub extern "C" fn commy_record_metric(
+ 
+ /// Configure multi-region federation
+ #[no_mangle]
+-pub extern "C" fn commy_configure_federation(
++pub unsafe extern "C" fn commy_configure_federation(
+     ___manager_handle: CommyFileManagerHandle,
+     federation_config: *const CommyFederationConfig,
+ ) -> i32 {
+@@ -1866,7 +1869,7 @@ pub extern "C" fn commy_configure_federation(
+ 
+ /// Discover services across regions
+ #[no_mangle]
+-pub extern "C" fn commy_discover_cross_region_services(
++pub unsafe extern "C" fn commy_discover_cross_region_services(
+     ___manager_handle: CommyFileManagerHandle,
+     target_region: *const c_char,
+     _service_name: *const c_char,
+@@ -1898,7 +1901,7 @@ pub extern "C" fn commy_discover_cross_region_services(
+ 
+ /// Get region health status
+ #[no_mangle]
+-pub extern "C" fn commy_get_region_health(
++pub unsafe extern "C" fn commy_get_region_health(
+     ___manager_handle: CommyFileManagerHandle,
+     region_id: *const c_char,
+     region_out: *mut CommyRegion,
+@@ -1938,7 +1941,7 @@ pub extern "C" fn commy_get_region_health(
+ 
+ /// Create a policy rule
+ #[no_mangle]
+-pub extern "C" fn commy_create_policy_rule(
++pub unsafe extern "C" fn commy_create_policy_rule(
+     ___manager_handle: CommyFileManagerHandle,
+     rule: *const CommyPolicyRule,
+     rule_id_out: *mut *mut c_char,
+@@ -1980,7 +1983,7 @@ pub extern "C" fn commy_create_policy_rule(
+ 
+ /// Evaluate policy rules against a request
+ #[no_mangle]
+-pub extern "C" fn commy_evaluate_policies(
++pub unsafe extern "C" fn commy_evaluate_policies(
+     ___manager_handle: CommyFileManagerHandle,
+     context: *const c_char, // JSON context
+     violations_out: *mut *mut c_char,
+diff --git a/src/ffi/real.rs b/src/ffi/real.rs
+index 5968c95..fc287b1 100644
+--- a/src/ffi/real.rs
++++ b/src/ffi/real.rs
+@@ -72,7 +72,10 @@ pub extern "C" fn commy_ffi_version() -> *const c_char {
+ ///
+ /// `node_id` must be a valid, non-null, NUL-terminated C string pointer. The
+ /// caller must ensure the pointer points to memory valid for reads.
+-pub extern "C" fn commy_create_mesh(node_id: *const c_char, listen_port: u16) -> CommyHandle {
++pub unsafe extern "C" fn commy_create_mesh(
++    node_id: *const c_char,
++    listen_port: u16,
++) -> CommyHandle {
+     // Validate parameters
+     if node_id.is_null() {
+         return CommyHandle {
+@@ -234,7 +237,7 @@ pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
+ 
+ /// Get node ID
+ #[no_mangle]
+-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
++pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+     if handle.instance_id == 0 {
+         return std::ptr::null_mut();
+     }
+diff --git a/src/ffi/working_sync.rs b/src/ffi/working_sync.rs
+index 9fa1504..4b48927 100644
+--- a/src/ffi/working_sync.rs
++++ b/src/ffi/working_sync.rs
+@@ -82,7 +82,10 @@ pub extern "C" fn commy_ffi_init() -> c_uint {
+ /// valid node id is expected. Invalid pointers or non-UTF-8 input may lead to
+ /// undefined behavior or an error return (null handle).
+ #[no_mangle]
+-pub extern "C" fn commy_create_mesh(node_id: *const c_char, listen_port: u16) -> CommyHandle {
++pub unsafe extern "C" fn commy_create_mesh(
++    node_id: *const c_char,
++    listen_port: u16,
++) -> CommyHandle {
+     // Validate node_id pointer before converting to Rust string
+     if node_id.is_null() {
+         tracing::warn!("commy_create_mesh called with null node_id");
+@@ -227,8 +230,16 @@ pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> c_uint {
+ }
+ 
+ /// Get node ID using synchronous interface
++/// # Safety
++///
++/// The `handle` must identify a valid, initialized mesh instance previously
++/// created by `commy_create_mesh` (or equivalent). The returned pointer is a
++/// newly-allocated NUL-terminated C string (owned by the caller) and must be
++/// freed by calling the corresponding free helper (for example using
++/// `CString::from_raw`) or any provided `commy_free_string` helper. The
++/// function may return null on error (for example when the handle is invalid).
+ #[no_mangle]
+-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
++pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+     let instances = match FFI_INSTANCES.get() {
+         Some(instances) => instances,
+         None => return ptr::null_mut(),
+@@ -275,7 +286,10 @@ pub struct FFIStats {
+ /// caller must ensure the pointer points to a valid UTF-8 sequence if a valid
+ /// node id is expected. Invalid pointers or non-UTF-8 input may lead to undefined
+ /// behavior or an error return (null handle).
+-pub extern "C" fn commy_get_mesh_stats(handle: CommyHandle, stats: *mut CommyMeshStats) -> i32 {
++pub unsafe extern "C" fn commy_get_mesh_stats(
++    handle: CommyHandle,
++    stats: *mut CommyMeshStats,
++) -> i32 {
+     if stats.is_null() {
+         return LegacyCommyError::InvalidParameter as i32;
+     }
+@@ -408,7 +422,7 @@ use libc::c_char as libc_c_char;
+ /// also obey the usual C string invariants (non-null, NUL-terminated, valid
+ /// UTF-8 when interpreted as Rust strings).
+ #[no_mangle]
+-pub extern "C" fn commy_register_service(
++pub unsafe extern "C" fn commy_register_service(
+     _handle: CommyHandle,
+     config: *const CommyServiceConfig,
+ ) -> i32 {
+@@ -456,7 +470,10 @@ pub extern "C" fn commy_register_service(
+ /// pointer. The caller must ensure it points to valid memory for the duration
+ /// of the call.
+ #[no_mangle]
+-pub extern "C" fn commy_unregister_service(_handle: CommyHandle, service_id: *const c_char) -> i32 {
++pub unsafe extern "C" fn commy_unregister_service(
++    _handle: CommyHandle,
++    service_id: *const c_char,
++) -> i32 {
+     if service_id.is_null() {
+         return LegacyCommyError::InvalidParameter as i32;
+     }
+@@ -481,7 +498,14 @@ pub extern "C" fn commy_unregister_service(_handle: CommyHandle, service_id: *co
+ /// Legacy compatibility function that maps to new interface
+ #[no_mangle]
+ #[allow(clippy::manual_c_str_literals)]
+-pub extern "C" fn commy_ffi_version() -> *const libc_c_char {
++/// Returns a pointer to a static NUL-terminated version string for the library.
++///
++/// # Safety
++///
++/// The returned pointer points to a static, NUL-terminated byte string owned by
++/// the library. The caller must not attempt to free or modify the returned
++/// pointer. The pointer is valid for the lifetime of the process.
++pub unsafe extern "C" fn commy_ffi_version() -> *const libc_c_char {
+     b"0.2.0-sync\0".as_ptr() as *const libc_c_char
+ }
+ 
+@@ -493,7 +517,7 @@ pub extern "C" fn commy_ffi_version() -> *const libc_c_char {
+ /// caller owns and allows to be written to. If `_service_name` is dereferenced
+ /// it must be a valid, non-null, NUL-terminated C string pointer.
+ #[no_mangle]
+-pub extern "C" fn commy_discover_services(
++pub unsafe extern "C" fn commy_discover_services(
+     _handle: CommyHandle,
+     _service_name: *const libc_c_char,
+     services: *mut *mut CommyServiceInfo,
+diff --git a/src/manager/object_pool.rs b/src/manager/object_pool.rs
+index 6e754b5..b941ebb 100644
+--- a/src/manager/object_pool.rs
++++ b/src/manager/object_pool.rs
+@@ -15,6 +15,15 @@ impl<T> ObjectPool<T> {
+         }
+     }
+ 
++    /// Explicitly named constructor matching the underlying utils implementation.
++    /// This clarifies the meaning (max size + initial items) while keeping
++    /// `with_capacity` as a backward-compatible alias.
++    pub fn with_max_size_and_initial(max_size: usize, initial: Vec<T>) -> Self {
++        Self {
++            inner: _UnifiedObjectPool::with_max_size_and_initial(max_size, initial),
++        }
++    }
++
+     /// Acquire an object from the pool, or return None if empty.
+     pub fn try_acquire(&self) -> Option<T> {
+         self.inner.try_acquire()
+diff --git a/tests/enterprise_full_suite.rs b/tests/enterprise_full_suite.rs
+index c0ef09f..6f28454 100644
+--- a/tests/enterprise_full_suite.rs
++++ b/tests/enterprise_full_suite.rs
+@@ -30,7 +30,7 @@ mod enterprise {
+         let mesh_name = CString::new("test_mesh").unwrap();
+         let port = 8080u16;
+ 
+-        let mesh_result = commy_create_mesh(mesh_name.as_ptr(), port);
++        let mesh_result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+         assert!(mesh_result.instance_id != 0, "Creating mesh should succeed");
+ 
+         // Cleanup FFI system
+@@ -48,7 +48,7 @@ mod enterprise {
+         let mesh_name = CString::new("python_test_mesh").unwrap();
+         let port = 8081u16;
+ 
+-        let result = commy_create_mesh(mesh_name.as_ptr(), port);
++        let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+         assert!(
+             result.instance_id != 0,
+             "Python mesh creation should succeed"
+@@ -68,7 +68,7 @@ mod enterprise {
+         let mesh_name = CString::new("nodejs_test_mesh").unwrap();
+         let port = 8082u16;
+ 
+-        let result = commy_create_mesh(mesh_name.as_ptr(), port);
++        let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+         assert!(
+             result.instance_id != 0,
+             "Node.js mesh creation should succeed"
+@@ -96,7 +96,7 @@ mod enterprise {
+                 let port = 8090u16 + i;
+ 
+                 tokio::spawn(async move {
+-                    let result = commy_create_mesh(mesh_name.as_ptr(), port);
++                    let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+                     result.instance_id != 0
+                 })
+             })
+@@ -120,12 +120,12 @@ mod enterprise {
+         assert_eq!(init_result, 0);
+ 
+         // Test invalid mesh name (null pointer)
+-        let result = commy_create_mesh(std::ptr::null(), 8080);
++        let result = unsafe { commy_create_mesh(std::ptr::null(), 8080) };
+         assert!(result.instance_id == 0, "Invalid parameters should fail");
+ 
+         // Test mesh with empty name
+         let empty_name = CString::new("").unwrap();
+-        let result = commy_create_mesh(empty_name.as_ptr(), 8080);
++        let result = unsafe { commy_create_mesh(empty_name.as_ptr(), 8080) };
+         assert!(result.instance_id == 0, "Empty name should fail");
+ 
+         // Cleanup
+@@ -145,7 +145,7 @@ mod enterprise {
+             let mesh_name = CString::new(format!("{}_interop_mesh", lang)).unwrap();
+             let port = 8100u16 + idx as u16;
+ 
+-            let result = commy_create_mesh(mesh_name.as_ptr(), port);
++            let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+             assert!(
+                 result.instance_id != 0,
+                 "Cross-language mesh should be created for {}",
+@@ -170,7 +170,7 @@ mod enterprise {
+             let mesh_name = CString::new(format!("perf_mesh_{}", i)).unwrap();
+             let port = 8200u16 + i as u16;
+ 
+-            let result = commy_create_mesh(mesh_name.as_ptr(), port);
++            let result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+             assert!(
+                 result.instance_id != 0,
+                 "Performance test mesh {} should succeed",
+@@ -210,7 +210,7 @@ mod enterprise {
+         let mesh_name = CString::new("enterprise_mesh").unwrap();
+         let port = 8300u16;
+ 
+-        let mesh_result = commy_create_mesh(mesh_name.as_ptr(), port);
++        let mesh_result = unsafe { commy_create_mesh(mesh_name.as_ptr(), port) };
+         assert_ne!(
+             mesh_result.instance_id, 0,
+             "Enterprise mesh creation should succeed"

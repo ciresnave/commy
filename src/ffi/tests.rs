@@ -75,14 +75,20 @@ fn test_mesh_start_stop() {
     assert_ne!(handle.instance_id, 0);
 
     // Test start
-    assert_eq!(commy_start_mesh(handle), CommyError::Success as i32);
+    assert_eq!(
+        unsafe { commy_start_mesh(handle) },
+        CommyError::Success as i32
+    );
 
     // Test is_running
-    let running_status = commy_is_mesh_running(handle);
+    let running_status = unsafe { commy_is_mesh_running(handle) };
     assert_eq!(running_status, 1); // Should return true (1) after starting
 
     // Test stop
-    assert_eq!(commy_stop_mesh(handle), CommyError::Success as i32);
+    assert_eq!(
+        unsafe { commy_stop_mesh(handle) },
+        CommyError::Success as i32
+    );
 
     // Test with invalid handle
     let invalid_handle = CommyHandle {
@@ -90,14 +96,14 @@ fn test_mesh_start_stop() {
         error_code: 0,
     };
     assert_eq!(
-        commy_start_mesh(invalid_handle),
+        unsafe { commy_start_mesh(invalid_handle) },
         CommyError::InstanceNotFound as i32
     );
     assert_eq!(
-        commy_stop_mesh(invalid_handle),
+        unsafe { commy_stop_mesh(invalid_handle) },
         CommyError::InstanceNotFound as i32
     );
-    assert_eq!(commy_is_mesh_running(invalid_handle), -1);
+    assert_eq!(unsafe { commy_is_mesh_running(invalid_handle) }, -1);
 
     assert_eq!(commy_ffi_cleanup(), CommyError::Success as i32);
 }
@@ -342,24 +348,28 @@ fn test_service_selection() {
 
     // Test valid selection
     assert_eq!(
-        commy_select_service(
-            handle,
-            service_name.as_ptr(),
-            ptr::null(),
-            &mut selected_service
-        ),
+        unsafe {
+            commy_select_service(
+                handle,
+                service_name.as_ptr(),
+                ptr::null(),
+                &mut selected_service,
+            )
+        },
         CommyError::Success as i32
     );
 
     // Test null service name
     assert_eq!(
-        commy_select_service(handle, ptr::null(), ptr::null(), &mut selected_service),
+        unsafe { commy_select_service(handle, ptr::null(), ptr::null(), &mut selected_service) },
         CommyError::InvalidParameter as i32
     );
 
     // Test null selected service
     assert_eq!(
-        commy_select_service(handle, service_name.as_ptr(), ptr::null(), ptr::null_mut()),
+        unsafe {
+            commy_select_service(handle, service_name.as_ptr(), ptr::null(), ptr::null_mut())
+        },
         CommyError::InvalidParameter as i32
     );
 
@@ -369,12 +379,14 @@ fn test_service_selection() {
         error_code: 0,
     };
     assert_eq!(
-        commy_select_service(
-            invalid_handle,
-            service_name.as_ptr(),
-            ptr::null(),
-            &mut selected_service
-        ),
+        unsafe {
+            commy_select_service(
+                invalid_handle,
+                service_name.as_ptr(),
+                ptr::null(),
+                &mut selected_service,
+            )
+        },
         CommyError::InstanceNotFound as i32
     );
 
@@ -387,7 +399,7 @@ fn test_mesh_statistics() {
     assert_eq!(commy_ffi_init(), CommyError::Success as i32);
 
     let node_id = CString::new("test-node").unwrap();
-    let handle = commy_create_mesh(node_id.as_ptr(), 8080);
+    let handle = unsafe { commy_create_mesh(node_id.as_ptr(), 8080) };
     assert_ne!(handle.instance_id, 0);
 
     let mut stats = CommyMeshStats {
@@ -430,11 +442,11 @@ fn test_node_id_retrieval() {
     assert_eq!(commy_ffi_init(), CommyError::Success as i32);
 
     let node_id = CString::new("test-node-123").unwrap();
-    let handle = commy_create_mesh(node_id.as_ptr(), 8080);
+    let handle = unsafe { commy_create_mesh(node_id.as_ptr(), 8080) };
     assert_ne!(handle.instance_id, 0);
 
     // Test valid node ID retrieval
-    let node_id_ptr = commy_get_node_id(handle);
+    let node_id_ptr = unsafe { commy_get_node_id(handle) };
     assert!(!node_id_ptr.is_null());
 
     unsafe {
@@ -451,7 +463,7 @@ fn test_node_id_retrieval() {
         instance_id: 99999,
         error_code: 0,
     };
-    let invalid_node_id_ptr = commy_get_node_id(invalid_handle);
+    let invalid_node_id_ptr = unsafe { commy_get_node_id(invalid_handle) };
     assert!(invalid_node_id_ptr.is_null());
 
     assert_eq!(commy_ffi_cleanup(), CommyError::Success as i32);
