@@ -233,7 +233,7 @@ pub unsafe extern "C" fn commy_configure_mesh_core(
 // and ensures a single canonical entry point when the crate is built normally.
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_configure_mesh(
+pub unsafe extern "C" fn commy_configure_mesh(
     handle: CommyHandle,
     health_config: *const CommyHealthConfig,
     lb_config: *const CommyLoadBalancerConfig,
@@ -244,7 +244,7 @@ pub extern "C" fn commy_configure_mesh(
 /// Get the node ID of the mesh
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
     if handle.is_null() {
         return std::ptr::null_mut();
     }

@@ -228,8 +228,16 @@ pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> c_uint {
 }
 
 /// Get node ID using synchronous interface
+/// # Safety
+///
+/// The `handle` must identify a valid, initialized mesh instance previously
+/// created by `commy_create_mesh` (or equivalent). The returned pointer is a
+/// newly-allocated NUL-terminated C string (owned by the caller) and must be
+/// freed by calling the corresponding free helper (for example using
+/// `CString::from_raw`) or any provided `commy_free_string` helper. The
+/// function may return null on error (for example when the handle is invalid).
 #[no_mangle]
-pub extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
+pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return ptr::null_mut(),
@@ -486,6 +494,13 @@ pub unsafe extern "C" fn commy_unregister_service(
 /// Legacy compatibility function that maps to new interface
 #[no_mangle]
 #[allow(clippy::manual_c_str_literals)]
+/// Returns a pointer to a static NUL-terminated version string for the library.
+///
+/// # Safety
+///
+/// The returned pointer points to a static, NUL-terminated byte string owned by
+/// the library. The caller must not attempt to free or modify the returned
+/// pointer. The pointer is valid for the lifetime of the process.
 pub extern "C" fn commy_ffi_version() -> *const libc_c_char {
     b"0.2.0-sync\0".as_ptr() as *const libc_c_char
 }
