@@ -50,9 +50,14 @@ pub unsafe extern "C" fn commy_create_mesh(
 }
 
 /// Start the mesh coordinator
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` previously returned from `commy_create_mesh`.
+/// - Callers must ensure the underlying mesh instance is not concurrently destroyed while
+///   this call is executing.
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
     if handle.is_null() {
         return CommyError::InvalidArgument as i32;
     }
@@ -81,9 +86,14 @@ pub extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
 }
 
 /// Stop the mesh coordinator
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` previously returned from `commy_create_mesh`.
+/// - Callers must ensure the underlying mesh instance is not concurrently accessed or
+///   destroyed while this call is executing.
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
     if handle.is_null() {
         return CommyError::InvalidArgument as i32;
     }
@@ -154,9 +164,14 @@ pub unsafe extern "C" fn commy_get_mesh_stats(
 }
 
 /// Check if mesh is running
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` previously returned from `commy_create_mesh`.
+/// - The caller must ensure the handle refers to a live instance; this function only
+///   performs a read and may race with instance teardown.
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
     if handle.is_null() {
         return CommyError::InvalidArgument as i32;
     }
@@ -244,6 +259,12 @@ pub unsafe extern "C" fn commy_configure_mesh(
 /// Get the node ID of the mesh
 #[cfg(feature = "ffi")]
 #[no_mangle]
+/// # Safety
+///
+/// `handle` must be a valid, non-null `CommyHandle` previously returned by
+/// `commy_create_mesh`. The returned pointer, if non-null, points to a
+/// NUL-terminated C string allocated by this library and the caller is
+/// responsible for freeing it with `commy_free_string` when no longer needed.
 pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
     if handle.is_null() {
         return std::ptr::null_mut();

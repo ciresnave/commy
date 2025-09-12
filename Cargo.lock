@@ -798,6 +798,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "auth-framework",
+ "base64 0.21.7",
  "bincode",
  "bitflags 2.9.4",
  "capnp",
@@ -809,6 +810,7 @@ dependencies = [
  "libc",
  "libloading",
  "memmap2",
+ "num-bigint-dig",
  "once_cell",
  "parking_lot",
  "postcard",
@@ -2608,6 +2610,7 @@ dependencies = [
  "num-iter",
  "num-traits",
  "rand 0.8.5",
+ "serde",
  "smallvec",
  "zeroize",
 ]
@@ -5589,3 +5592,8 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[patch.unused]]
+name = "num-bigint"
+version = "0.4.2"
+source = "git+https://github.com/rust-num/num-bigint.git?rev=1469ed68d16bcaa069965dcecf4cab0dbcde3b92#1469ed68d16bcaa069965dcecf4cab0dbcde3b92"

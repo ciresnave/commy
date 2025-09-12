@@ -279,9 +279,18 @@ fn test_cross_language_interoperability_infrastructure() {
     assert_eq!(nodejs_handle.error_code, CommyError::Success as i32);
 
     // Start all meshes
-    assert_eq!(unsafe { commy_start_mesh(python_handle) }, CommyError::Success as i32);
-    assert_eq!(unsafe { commy_start_mesh(go_handle) }, CommyError::Success as i32);
-    assert_eq!(unsafe { commy_start_mesh(nodejs_handle) }, CommyError::Success as i32);
+    assert_eq!(
+        unsafe { commy_start_mesh(python_handle) },
+        CommyError::Success as i32
+    );
+    assert_eq!(
+        unsafe { commy_start_mesh(go_handle) },
+        CommyError::Success as i32
+    );
+    assert_eq!(
+        unsafe { commy_start_mesh(nodejs_handle) },
+        CommyError::Success as i32
+    );
 
     // Give time for meshes to start
     thread::sleep(Duration::from_millis(500));
@@ -294,9 +303,18 @@ fn test_cross_language_interoperability_infrastructure() {
     println!("✓ Multi-language mesh infrastructure established");
 
     // Cleanup
-    assert_eq!(unsafe { commy_stop_mesh(python_handle) }, CommyError::Success as i32);
-    assert_eq!(unsafe { commy_stop_mesh(go_handle) }, CommyError::Success as i32);
-    assert_eq!(unsafe { commy_stop_mesh(nodejs_handle) }, CommyError::Success as i32);
+    assert_eq!(
+        unsafe { commy_stop_mesh(python_handle) },
+        CommyError::Success as i32
+    );
+    assert_eq!(
+        unsafe { commy_stop_mesh(go_handle) },
+        CommyError::Success as i32
+    );
+    assert_eq!(
+        unsafe { commy_stop_mesh(nodejs_handle) },
+        CommyError::Success as i32
+    );
 
     println!("✓ Cross-language interoperability infrastructure test completed");
 
@@ -371,4 +389,3 @@ fn test_multi_language_performance() {
     let cleanup_result = unsafe { commy_ffi_cleanup() };
     assert_eq!(cleanup_result, CommyError::Success as i32);
 }
-    assert_eq!(python_handle.error_code, CommyError::Success as i32);

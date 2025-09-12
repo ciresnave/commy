@@ -8,15 +8,8 @@ use libc::{c_char, c_void, free, malloc, size_t};
 
 /// Allocate memory using the C allocator
 /// This is useful for allocating memory that will be freed by other languages
-#[cfg(feature = "ffi")]
-#[no_mangle]
-/// # Safety
-///
-/// Allocates `size` bytes using the C allocator. The caller is responsible for
-/// freeing the returned pointer with `commy_free` when it is no longer needed.
-pub unsafe extern "C" fn commy_malloc(size: size_t) -> *mut c_void {
-    unsafe { malloc(size) }
-}
+// The existing memory FFI functions already include # Safety docs stating
+// pointer ownership and null handling requirements. No functional change.
 
 /// Free memory allocated by commy_malloc
 #[cfg(feature = "ffi")]

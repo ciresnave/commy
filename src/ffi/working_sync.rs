@@ -146,8 +146,14 @@ pub unsafe extern "C" fn commy_create_mesh(
 }
 
 /// Start a mesh coordinator using synchronous interface
+///
+/// # Safety
+///
+/// `handle` must refer to a valid mesh instance previously returned by
+/// `commy_create_mesh`. The caller must ensure the instance is not
+/// concurrently destroyed while this call executes.
 #[no_mangle]
-pub extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return LegacyCommyError::RuntimeError as i32,
@@ -175,8 +181,14 @@ pub extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
 }
 
 /// Stop a mesh coordinator using synchronous interface
+///
+/// # Safety
+///
+/// `handle` must refer to a valid mesh instance previously returned by
+/// `commy_create_mesh`. The caller must ensure the instance is not
+/// concurrently accessed or destroyed while this call executes.
 #[no_mangle]
-pub extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return LegacyCommyError::RuntimeError as i32,
@@ -204,8 +216,15 @@ pub extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
 }
 
 /// Check if mesh is running using synchronous interface
+///
+/// # Safety
+///
+/// `handle` must refer to a valid mesh instance previously returned by
+/// `commy_create_mesh`. The caller must ensure the handle remains valid for
+/// the duration of the call; racing with instance teardown may produce
+/// undefined behavior.
 #[no_mangle]
-pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> c_uint {
+pub unsafe extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> c_uint {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return 0,
@@ -228,6 +247,7 @@ pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> c_uint {
 }
 
 /// Get node ID using synchronous interface
+///
 /// # Safety
 ///
 /// The `handle` must identify a valid, initialized mesh instance previously
@@ -278,12 +298,6 @@ pub struct FFIStats {
 /// that the caller owns and is allowed to be written to. The function will write
 /// fields into the provided struct.
 #[no_mangle]
-/// # Safety
-///
-/// `node_id` must be a valid, non-null, NUL-terminated C string pointer. The
-/// caller must ensure the pointer points to a valid UTF-8 sequence if a valid
-/// node id is expected. Invalid pointers or non-UTF-8 input may lead to undefined
-/// behavior or an error return (null handle).
 pub unsafe extern "C" fn commy_get_mesh_stats(
     handle: CommyHandle,
     stats: *mut CommyMeshStats,
@@ -492,7 +506,6 @@ pub unsafe extern "C" fn commy_unregister_service(
 // =============================================================================
 
 /// Legacy compatibility function that maps to new interface
-#[no_mangle]
 #[allow(clippy::manual_c_str_literals)]
 /// Returns a pointer to a static NUL-terminated version string for the library.
 ///
@@ -501,7 +514,8 @@ pub unsafe extern "C" fn commy_unregister_service(
 /// The returned pointer points to a static, NUL-terminated byte string owned by
 /// the library. The caller must not attempt to free or modify the returned
 /// pointer. The pointer is valid for the lifetime of the process.
-pub unsafe extern "C" fn commy_ffi_version() -> *const libc_c_char {
+#[no_mangle]
+pub extern "C" fn commy_ffi_version() -> *const libc_c_char {
     b"0.2.0-sync\0".as_ptr() as *const libc_c_char
 }
 

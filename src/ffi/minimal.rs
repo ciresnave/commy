@@ -490,6 +490,13 @@ pub extern "C" fn commy_ffi_version() -> *const c_char {
 }
 
 /// Create a new mesh coordinator
+///
+/// # Safety
+/// - `node_id` must be a non-null pointer to a valid, null-terminated C string.
+/// - `node_id` must remain valid for the duration of the call and is owned by the caller.
+/// - `port` must be non-zero and a valid port number.
+/// - This function dereferences raw pointers and performs FFI allocations; callers must
+///   free any returned C strings with `commy_free_string` when appropriate.
 #[no_mangle]
 pub unsafe extern "C" fn commy_create_mesh(node_id: *const c_char, port: u16) -> CommyHandle {
     if node_id.is_null() {
@@ -537,8 +544,12 @@ pub unsafe extern "C" fn commy_create_mesh(node_id: *const c_char, port: u16) ->
 }
 
 /// Start the mesh coordinator
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` previously returned from `commy_create_mesh`.
+/// - Callers must ensure the underlying mesh instance is not concurrently destroyed.
 #[no_mangle]
-pub extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
     let instances = GLOBAL_INSTANCES.read();
     if instances.contains_key(&handle.instance_id) {
         // Mark as running
@@ -552,8 +563,12 @@ pub extern "C" fn commy_start_mesh(handle: CommyHandle) -> i32 {
 }
 
 /// Stop the mesh coordinator
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` previously returned from `commy_create_mesh`.
+/// - Callers must ensure the underlying mesh instance is not concurrently destroyed.
 #[no_mangle]
-pub extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
     let instances = GLOBAL_INSTANCES.read();
     if instances.contains_key(&handle.instance_id) {
         // Mark as stopped
@@ -567,8 +582,11 @@ pub extern "C" fn commy_stop_mesh(handle: CommyHandle) -> i32 {
 }
 
 /// Check if mesh is running
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` previously returned from `commy_create_mesh`.
 #[no_mangle]
-pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
+pub unsafe extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
     let instances = GLOBAL_INSTANCES.read();
     if instances.contains_key(&handle.instance_id) {
         let running = RUNNING_INSTANCES.read();
@@ -583,8 +601,13 @@ pub extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
 }
 
 /// Configure mesh settings (minimal implementation - renamed to avoid symbol collisions)
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` returned from `commy_create_mesh`.
+/// - `health_config` and `lb_config` may be null; if non-null they must point to valid
+///   structures that remain alive for the duration of the call.
 #[no_mangle]
-pub extern "C" fn commy_configure_mesh_minimal(
+pub unsafe extern "C" fn commy_configure_mesh_minimal(
     handle: CommyHandle,
     health_config: *const CommyHealthConfig,
     lb_config: *const CommyLoadBalancerConfig,
@@ -620,6 +643,13 @@ pub extern "C" fn commy_configure_mesh_minimal(
 }
 
 /// Register a service with the mesh
+///
+/// # Safety
+/// - `config` must be a non-null pointer to a valid `CommyServiceConfig`.
+/// - All `*const c_char` fields inside `CommyServiceConfig` must be valid, null-terminated
+///   C strings and remain valid for the duration of the call.
+/// - The caller retains ownership of strings; this function does not take ownership.
+/// - `handle` must be a valid `CommyHandle` returned from `commy_create_mesh`.
 #[no_mangle]
 pub unsafe extern "C" fn commy_register_service(
     handle: CommyHandle,
@@ -667,6 +697,11 @@ pub unsafe extern "C" fn commy_register_service(
 }
 
 /// Unregister a service from the mesh
+///
+/// # Safety
+/// - `service_name` must be a non-null pointer to a valid, null-terminated C string.
+/// - The caller retains ownership of the string memory.
+/// - `handle` must be a valid `CommyHandle` returned from `commy_create_mesh`.
 #[no_mangle]
 pub unsafe extern "C" fn commy_unregister_service(
     handle: CommyHandle,
@@ -695,6 +730,12 @@ pub unsafe extern "C" fn commy_unregister_service(
 }
 
 /// Discover services by name
+///
+/// # Safety
+/// - `service_name` must be a non-null pointer to a valid, null-terminated C string.
+/// - `services` and `count` must be valid, non-null pointers where results will be written.
+/// - The callee will allocate or set the `services` pointer; callers are responsible for
+///   freeing any returned memory using the corresponding free functions documented in the API.
 #[no_mangle]
 pub unsafe extern "C" fn commy_discover_services(
     handle: CommyHandle,
@@ -727,6 +768,11 @@ pub unsafe extern "C" fn commy_discover_services(
 }
 
 /// Select a service using load balancer
+///
+/// # Safety
+/// - `service_name` must be a non-null pointer to a valid, null-terminated C string.
+/// - `selected_service` must be a valid, non-null pointer to a `CommyServiceInfo` struct
+///   that the caller has allocated.
 #[no_mangle]
 pub unsafe extern "C" fn commy_select_service(
     handle: CommyHandle,
@@ -766,6 +812,11 @@ pub unsafe extern "C" fn commy_select_service(
 }
 
 /// Get node ID
+///
+/// # Safety
+/// - The returned pointer is allocated by the FFI and must be freed by the caller using
+///   `commy_free_string` when no longer needed.
+/// - The returned pointer may be null to indicate errors or missing instances.
 #[no_mangle]
 pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
     let instances = GLOBAL_INSTANCES.read();
@@ -782,6 +833,10 @@ pub unsafe extern "C" fn commy_get_node_id(handle: CommyHandle) -> *mut c_char {
 }
 
 /// Get mesh statistics
+///
+/// # Safety
+/// - `stats` must be a valid, non-null pointer to a `CommyMeshStats` structure where results
+///   will be written.
 #[no_mangle]
 pub unsafe extern "C" fn commy_get_mesh_stats(
     handle: CommyHandle,
@@ -812,6 +867,11 @@ pub unsafe extern "C" fn commy_get_mesh_stats(
 }
 
 /// Free a string allocated by the FFI
+///
+/// # Safety
+/// - `ptr` must be a pointer previously returned by one of the FFI allocation helpers
+///   (e.g., `commy_strdup`, `commy_get_node_id`, or similar).
+/// - After calling this function the caller must not use `ptr` again.
 #[no_mangle]
 pub unsafe extern "C" fn commy_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -822,6 +882,10 @@ pub unsafe extern "C" fn commy_free_string(ptr: *mut c_char) {
 }
 
 /// Allocate memory (simple wrapper around malloc)
+///
+/// # Safety
+/// - Caller must check for null return when allocation fails.
+/// - Memory returned must be freed using `commy_free`.
 #[no_mangle]
 pub unsafe extern "C" fn commy_malloc(size: usize) -> *mut c_void {
     if size == 0 {
@@ -832,6 +896,10 @@ pub unsafe extern "C" fn commy_malloc(size: usize) -> *mut c_void {
 }
 
 /// Free memory allocated by commy_malloc
+///
+/// # Safety
+/// - `ptr` must point to memory previously returned by `commy_malloc`.
+/// - After calling this function the pointer must not be used again.
 #[no_mangle]
 pub unsafe extern "C" fn commy_free(ptr: *mut c_void) {
     if !ptr.is_null() {
@@ -842,6 +910,10 @@ pub unsafe extern "C" fn commy_free(ptr: *mut c_void) {
 }
 
 /// Duplicate a string
+///
+/// # Safety
+/// - `src` must be a non-null pointer to a valid, null-terminated C string.
+/// - The returned pointer is owned by the caller and must be freed with `commy_free_string`.
 #[no_mangle]
 pub unsafe extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
     if src.is_null() {
@@ -858,6 +930,11 @@ pub unsafe extern "C" fn commy_strdup(src: *const c_char) -> *mut c_char {
 }
 
 /// Allocate a service info array
+///
+/// # Safety
+/// - `count` must be greater than zero.
+/// - The returned pointer must be freed with `commy_free_service_info_array` which will also
+///   free any nested strings.
 #[no_mangle]
 pub unsafe extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
     if count == 0 {
@@ -876,6 +953,10 @@ pub unsafe extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut Co
 }
 
 /// Free a service info array
+///
+/// # Safety
+/// - `ptr` must be either null or a pointer previously returned by `commy_alloc_service_info_array`.
+/// - `count` must match the number of elements allocated.
 #[no_mangle]
 pub unsafe extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
     if ptr.is_null() || count == 0 {
@@ -903,6 +984,9 @@ pub unsafe extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInf
 }
 
 /// Simple service registration that koffi can handle
+///
+/// # Safety
+/// - All `*const c_char` parameters must be valid, null-terminated C strings owned by the caller.
 #[no_mangle]
 pub unsafe extern "C" fn commy_register_service_simple(
     handle: CommyHandle,
@@ -945,6 +1029,9 @@ pub unsafe extern "C" fn commy_register_service_simple(
 }
 
 /// Simple service discovery count that koffi can handle
+///
+/// # Safety
+/// - `service_name` must be a non-null pointer to a valid, null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn commy_discover_services_count(
     handle: CommyHandle,
@@ -971,6 +1058,9 @@ pub unsafe extern "C" fn commy_discover_services_count(
 }
 
 /// Get active service count that koffi can handle
+///
+/// # Safety
+/// - `handle` must be a valid `CommyHandle` returned from a successful call to `commy_create_mesh`.
 #[no_mangle]
 pub unsafe extern "C" fn commy_get_active_service_count(handle: CommyHandle) -> u32 {
     // Check if we have a valid mesh instance
@@ -1998,8 +2088,15 @@ pub unsafe extern "C" fn commy_evaluate_policies(
 }
 
 /// Generate compliance scan report
+///
+/// # Safety
+/// - `scan_type` must be a non-null pointer to a valid, null-terminated C string.
+/// - `report_out` must be a valid, non-null pointer to a `CommyComplianceReport` struct
+///   that the caller has allocated.
+/// - The callee will set fields on `report_out` and allocate any nested C strings; the
+///   caller is responsible for freeing them using the appropriate free helpers.
 #[no_mangle]
-pub extern "C" fn commy_scan_compliance(
+pub unsafe extern "C" fn commy_scan_compliance(
     ___manager_handle: CommyFileManagerHandle,
     scan_type: *const c_char, // "SOC2", "GDPR", "HIPAA", "ALL"
     report_out: *mut CommyComplianceReport,
@@ -2047,8 +2144,14 @@ pub extern "C" fn commy_scan_compliance(
 // ============================================================================
 
 /// Generate Kubernetes deployment manifests
+///
+/// # Safety
+/// - `deployment_config` must be a valid pointer to a `CommyDeploymentConfig` if non-null.
+/// - `manifests_out` must be a valid, non-null pointer where the allocated manifest C string
+///   pointer will be stored. The returned string must be freed by the caller using
+///   `commy_free_string`.
 #[no_mangle]
-pub extern "C" fn commy_generate_k8s_manifests(
+pub unsafe extern "C" fn commy_generate_k8s_manifests(
     deployment_config: *const CommyDeploymentConfig,
     manifests_out: *mut *mut c_char,
 ) -> i32 {
@@ -2162,8 +2265,14 @@ spec:
 }
 
 /// Generate Helm chart values
+///
+/// # Safety
+/// - `deployment_config` must be a valid pointer to a `CommyDeploymentConfig` if non-null.
+/// - `values_out` must be a valid, non-null pointer where the allocated values C string
+///   pointer will be stored. The returned string must be freed by the caller using
+///   `commy_free_string`.
 #[no_mangle]
-pub extern "C" fn commy_generate_helm_values(
+pub unsafe extern "C" fn commy_generate_helm_values(
     deployment_config: *const CommyDeploymentConfig,
     values_out: *mut *mut c_char,
 ) -> i32 {
@@ -2261,8 +2370,14 @@ mesh:
 }
 
 /// Generate Docker Compose configuration
+///
+/// # Safety
+/// - `deployment_config` must be a valid pointer to a `CommyDeploymentConfig` if non-null.
+/// - `compose_out` must be a valid, non-null pointer where the allocated compose C string
+///   pointer will be stored. The returned string must be freed by the caller using
+///   `commy_free_string`.
 #[no_mangle]
-pub extern "C" fn commy_generate_docker_compose(
+pub unsafe extern "C" fn commy_generate_docker_compose(
     deployment_config: *const CommyDeploymentConfig,
     compose_out: *mut *mut c_char,
 ) -> i32 {
@@ -2357,8 +2472,13 @@ networks:
 // ============================================================================
 
 /// Free trace span
+///
+/// # Safety
+/// - `span` must be either null or a pointer previously returned by `commy_start_trace_span`.
+/// - After calling this function the caller must not use `span` or any nested pointers it
+///   contained.
 #[no_mangle]
-pub extern "C" fn commy_free_trace_span(span: *mut CommyTraceSpan) {
+pub unsafe extern "C" fn commy_free_trace_span(span: *mut CommyTraceSpan) {
     if span.is_null() {
         return;
     }
@@ -2391,8 +2511,15 @@ pub extern "C" fn commy_free_trace_span(span: *mut CommyTraceSpan) {
 }
 
 /// Free region information
+///
+/// # Safety
+/// - `region` must be either null or a pointer previously populated by a commy FFI getter
+///   (for example `commy_get_region_health`) and its nested C strings must be owned by the
+///   caller after the call.
+/// - After calling this function the caller must not use `region` or any nested pointers it
+///   contained.
 #[no_mangle]
-pub extern "C" fn commy_free_region(region: *mut CommyRegion) {
+pub unsafe extern "C" fn commy_free_region(region: *mut CommyRegion) {
     if region.is_null() {
         return;
     }
@@ -2414,8 +2541,13 @@ pub extern "C" fn commy_free_region(region: *mut CommyRegion) {
 }
 
 /// Free policy rule
+///
+/// # Safety
+/// - `rule` must be either null or a pointer previously returned or filled by a commy
+///   FFI function that allocated nested strings. After calling this function the caller
+///   must not use `rule` or any nested pointers.
 #[no_mangle]
-pub extern "C" fn commy_free_policy_rule(rule: *mut CommyPolicyRule) {
+pub unsafe extern "C" fn commy_free_policy_rule(rule: *mut CommyPolicyRule) {
     if rule.is_null() {
         return;
     }

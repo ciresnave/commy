@@ -104,7 +104,12 @@ pub unsafe extern "C" fn commy_create_mesh(
 
 /// Start a mesh coordinator using synchronous interface
 #[no_mangle]
-pub extern "C" fn commy_start_mesh(instance_id: c_uint) -> c_uint {
+/// # Safety
+///
+/// `instance_id` must refer to a valid instance previously created with
+/// `commy_create_mesh`. The caller must ensure the instance is not
+/// concurrently destroyed while this call executes.
+pub unsafe extern "C" fn commy_start_mesh(instance_id: c_uint) -> c_uint {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return FFIError::RuntimeError as c_uint,
@@ -135,7 +140,12 @@ pub extern "C" fn commy_start_mesh(instance_id: c_uint) -> c_uint {
 
 /// Stop a mesh coordinator using synchronous interface
 #[no_mangle]
-pub extern "C" fn commy_stop_mesh(instance_id: c_uint) -> c_uint {
+/// # Safety
+///
+/// `instance_id` must refer to a valid instance previously created with
+/// `commy_create_mesh`. The caller must ensure the instance is not
+/// concurrently accessed or destroyed while this call executes.
+pub unsafe extern "C" fn commy_stop_mesh(instance_id: c_uint) -> c_uint {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return FFIError::RuntimeError as c_uint,
@@ -166,7 +176,13 @@ pub extern "C" fn commy_stop_mesh(instance_id: c_uint) -> c_uint {
 
 /// Check if mesh is running using synchronous interface
 #[no_mangle]
-pub extern "C" fn commy_is_mesh_running(instance_id: c_uint) -> c_uint {
+/// # Safety
+///
+/// `instance_id` must refer to a valid instance previously created with
+/// `commy_create_mesh`. The caller must ensure the instance remains valid
+/// for the duration of the call; racing with instance teardown may produce
+/// undefined behavior.
+pub unsafe extern "C" fn commy_is_mesh_running(instance_id: c_uint) -> c_uint {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return 0,
@@ -188,8 +204,15 @@ pub extern "C" fn commy_is_mesh_running(instance_id: c_uint) -> c_uint {
 }
 
 /// Get node ID using synchronous interface
+/// # Safety
+///
+/// The returned pointer is either null or points to a newly allocated, NUL-terminated
+/// C string which the caller owns and MUST free with `commy_free_string` when no
+/// longer needed. The `instance_id` must refer to a valid mesh instance created
+/// via `commy_create_mesh` and the caller must not mutate or read past the
+/// terminating NUL byte of the returned string.
 #[no_mangle]
-pub extern "C" fn commy_get_node_id(instance_id: c_uint) -> *mut c_char {
+pub unsafe extern "C" fn commy_get_node_id(instance_id: c_uint) -> *mut c_char {
     let instances = match FFI_INSTANCES.get() {
         Some(instances) => instances,
         None => return ptr::null_mut(),
@@ -378,6 +401,13 @@ pub struct CommyServiceInfo {
     pub port: u16,
 }
 
+/// Allocate an array of `CommyServiceInfo` structures.
+///
+/// # Safety
+///
+/// The returned pointer is either null (if `count == 0` or allocation fails)
+/// or points to `count` zero-initialized `CommyServiceInfo` elements which the
+/// caller owns and MUST free using `commy_free_service_info_array` when done.
 #[no_mangle]
 pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
     if count == 0 {
@@ -391,8 +421,15 @@ pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServ
     }
 }
 
+/// Free an array previously allocated by `commy_alloc_service_info_array`.
+///
+/// # Safety
+///
+/// `ptr` must be either null or a pointer previously returned by
+/// `commy_alloc_service_info_array` with the same `count` value. Passing an
+/// arbitrary pointer or a mismatched `count` is undefined behavior.
 #[no_mangle]
-pub extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
+pub unsafe extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, count: usize) {
     if ptr.is_null() || count == 0 {
         return;
     }
@@ -403,8 +440,18 @@ pub extern "C" fn commy_free_service_info_array(ptr: *mut CommyServiceInfo, coun
     }
 }
 
+/// Discover services by name.
+///
+/// # Safety
+///
+/// `services` and `count` must be valid, non-null pointers provided by the
+/// caller and writable. If `_service_name` is non-null it must point to a
+/// NUL-terminated C string valid for reads. Passing null or invalid pointers
+/// is undefined behavior. The function will allocate or set `*services` and
+/// write the number of entries into `*count`; the caller is responsible for
+/// freeing any allocated arrays via `commy_free_service_info_array`.
 #[no_mangle]
-pub extern "C" fn commy_discover_services(
+pub unsafe extern "C" fn commy_discover_services(
     _handle: CommyHandle,
     _service_name: *const libc_c_char,
     services: *mut *mut CommyServiceInfo,
