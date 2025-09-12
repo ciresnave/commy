@@ -200,7 +200,7 @@ mod enterprise {
 
         // This test validates that all enterprise components work together
         // Initialize FFI
-        let init_result = unsafe { commy_ffi_init() };
+        let init_result = commy_ffi_init();
         assert_eq!(
             init_result, 0,
             "Enterprise FFI initialization should succeed"
@@ -220,7 +220,7 @@ mod enterprise {
         println!("📊 All enterprise components validated");
 
         // Cleanup
-        unsafe { commy_ffi_cleanup() };
+        commy_ffi_cleanup();
     }
 }
 

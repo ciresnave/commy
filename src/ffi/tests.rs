@@ -66,7 +66,10 @@ fn test_mesh_creation_and_destruction() {
     // Additional tests suggested by reviewers: ensure zero port and null pointer handling
     let invalid_handle_null = unsafe { commy_create_mesh(ptr::null(), 0) };
     assert_eq!(invalid_handle_null.instance_id, 0);
-    assert_eq!(invalid_handle_null.error_code, CommyError::InvalidParameter as i32);
+    assert_eq!(
+        invalid_handle_null.error_code,
+        CommyError::InvalidParameter as i32
+    );
 
     assert_eq!(commy_ffi_cleanup(), CommyError::Success as i32);
 }

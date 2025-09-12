@@ -76,7 +76,10 @@ fn test_basic_ffi_functionality() {
     println!("✓ Mesh confirmed stopped");
 
     // Reviewer suggestion: verify invalid/stale handles are rejected in multi-language scenario
-    let invalid_handle = CommyHandle { instance_id: 99999, error_code: 0 };
+    let invalid_handle = CommyHandle {
+        instance_id: 99999,
+        error_code: 0,
+    };
     let start_invalid = unsafe { commy_start_mesh(invalid_handle) };
     assert_eq!(start_invalid, CommyError::InstanceNotFound as i32);
     let stop_invalid = unsafe { commy_stop_mesh(invalid_handle) };

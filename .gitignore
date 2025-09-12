@@ -1,4 +1,5 @@
-/target
+# temporary: ignore
+/.vscode//target
 
 # Test artifacts and temporary files
 *.profraw
