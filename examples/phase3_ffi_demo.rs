@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize the FFI layer
     println!("📡 Initializing FFI layer...");
-    let init_result = unsafe { commy_ffi_init() };
+    let init_result = commy_ffi_init();
     if init_result != 0 {
         eprintln!("❌ Failed to initialize FFI layer: {}", init_result);
         return Err("FFI initialization failed".into());
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ FFI layer initialized successfully");
 
     // Get and display version
-    let version_ptr = unsafe { commy_ffi_version() };
+    let version_ptr = commy_ffi_version();
     if !version_ptr.is_null() {
         let version = unsafe { CStr::from_ptr(version_ptr) };
         println!("📖 Commy version: {}", version.to_string_lossy());
@@ -324,7 +324,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cleanup FFI layer
     println!("\n🧹 Cleaning up FFI layer...");
-    let cleanup_result = unsafe { commy_ffi_cleanup() };
+    let cleanup_result = commy_ffi_cleanup();
     if cleanup_result != 0 {
         println!("⚠️ FFI cleanup returned code: {}", cleanup_result);
     } else {

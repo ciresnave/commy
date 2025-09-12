@@ -17,6 +17,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
+use crate::super::super::common::ffi_helpers::assert_invalid_handle_start_stop;
 use commy::ffi::minimal::{
     commy_create_mesh, commy_ffi_cleanup, commy_ffi_init, commy_ffi_version, commy_free_string,
     commy_get_node_id, commy_is_mesh_running, commy_start_mesh, commy_stop_mesh, CommyError,
@@ -74,6 +75,9 @@ fn test_basic_ffi_functionality() {
     let is_running_after_stop = unsafe { commy_is_mesh_running(handle) };
     assert!(!is_running_after_stop);
     println!("✓ Mesh confirmed stopped");
+
+    // Reviewer suggestion: verify invalid/stale handles are rejected in multi-language scenario
+    assert_invalid_handle_start_stop();
 
     let cleanup_result = unsafe { commy_ffi_cleanup() };
     assert_eq!(cleanup_result, CommyError::Success as i32);
