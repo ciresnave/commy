@@ -371,4 +371,3 @@ fn test_multi_language_performance() {
     let cleanup_result = unsafe { commy_ffi_cleanup() };
     assert_eq!(cleanup_result, CommyError::Success as i32);
 }
-    assert_eq!(python_handle.error_code, CommyError::Success as i32);
