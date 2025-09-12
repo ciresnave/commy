@@ -75,6 +75,15 @@ fn test_basic_ffi_functionality() {
     assert!(!is_running_after_stop);
     println!("✓ Mesh confirmed stopped");
 
+    // Reviewer suggestion: verify invalid/stale handles are rejected in multi-language scenario
+    let invalid_handle = CommyHandle { instance_id: 99999, error_code: 0 };
+    let start_invalid = unsafe { commy_start_mesh(invalid_handle) };
+    assert_eq!(start_invalid, CommyError::InstanceNotFound as i32);
+    let stop_invalid = unsafe { commy_stop_mesh(invalid_handle) };
+    assert_eq!(stop_invalid, CommyError::InstanceNotFound as i32);
+    let running_invalid = unsafe { commy_is_mesh_running(invalid_handle) };
+    assert!(!running_invalid);
+
     let cleanup_result = unsafe { commy_ffi_cleanup() };
     assert_eq!(cleanup_result, CommyError::Success as i32);
     println!("✓ FFI cleanup completed");
