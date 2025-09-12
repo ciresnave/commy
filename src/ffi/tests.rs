@@ -8,6 +8,7 @@
 //! - Service registration and discovery APIs
 
 use super::working_sync::*;
+use crate::ffi::test_utils::assert_invalid_handle_start_stop_unit;
 use std::ffi::CString;
 use std::ptr;
 
@@ -98,20 +99,8 @@ fn test_mesh_start_stop() {
         CommyError::Success as i32
     );
 
-    // Test with invalid handle
-    let invalid_handle = CommyHandle {
-        instance_id: 99999,
-        error_code: 0,
-    };
-    assert_eq!(
-        unsafe { commy_start_mesh(invalid_handle) },
-        CommyError::InstanceNotFound as i32
-    );
-    assert_eq!(
-        unsafe { commy_stop_mesh(invalid_handle) },
-        CommyError::InstanceNotFound as i32
-    );
-    assert_eq!(unsafe { commy_is_mesh_running(invalid_handle) }, -1);
+    // Test with invalid handle (use shared helper for unit tests)
+    assert_invalid_handle_start_stop_unit();
 
     assert_eq!(commy_ffi_cleanup(), CommyError::Success as i32);
 }

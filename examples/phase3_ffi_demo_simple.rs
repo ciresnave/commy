@@ -35,6 +35,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let is_running = unsafe { commy_is_mesh_running(handle) };
     println!("is_running={}", is_running);
 
+    // Demonstrate memory allocation / deallocation across the FFI boundary
+    // Allocate 16 bytes using commy_malloc and then free them with commy_free
+    let buf = unsafe { commy_malloc(16) };
+    if buf.is_null() {
+        println!("commy_malloc returned null for 16 bytes");
+    } else {
+        println!("Allocated 16 bytes via commy_malloc at {:p}", buf);
+        unsafe { commy_free(buf) };
+        println!("Freed buffer via commy_free");
+    }
+
     // Cleanup
     let cleanup_result = commy_ffi_cleanup();
     println!("cleanup returned {}", cleanup_result);
