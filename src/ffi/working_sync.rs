@@ -501,7 +501,7 @@ pub unsafe extern "C" fn commy_unregister_service(
 /// The returned pointer points to a static, NUL-terminated byte string owned by
 /// the library. The caller must not attempt to free or modify the returned
 /// pointer. The pointer is valid for the lifetime of the process.
-pub unsafe extern "C" fn commy_ffi_version() -> *const libc_c_char {
+pub extern "C" fn commy_ffi_version() -> *const libc_c_char {
     b"0.2.0-sync\0".as_ptr() as *const libc_c_char
 }
 
