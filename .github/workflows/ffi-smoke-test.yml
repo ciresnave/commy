@@ -34,13 +34,18 @@ jobs:
         with:
           install-mingw: "true"
 
-      - name: Run future-incompat check (nightly)
+      - name: Run future-incompat check (nightly) - non-Windows
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            echo "future-incompat check not run on Windows runners (nightly -Z flags currently not supported reliably)"; exit 0
-          fi
           export PATH="$HOME/.cargo/bin:$PATH"
           rustup run nightly cargo check --workspace -Z future-incompat-report
+
+      - name: Run future-incompat check (nightly) - Windows (skip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "future-incompat check not run on Windows runners (nightly -Z flags currently not supported reliably)"
 
       - name: Build cdylib (stable)
         if: runner.os != 'Windows'
