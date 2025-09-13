@@ -1805,7 +1805,11 @@ impl From<u64> for BigUint {
 impl From<u64> for BigUint {
     #[inline]
     fn from(n: u64) -> Self {
-        BigUint::new_native(smallvec![n])
+        BigUint::new_native({
+            let mut d: SmallVec<[BigDigit; VEC_SIZE]> = SmallVec::with_capacity(1);
+            d.push(n);
+            d
+        })
     }
 }
 

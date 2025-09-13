@@ -5,7 +5,9 @@ use crate::algorithms::{adc, add2, sub2, sub_sign};
 use crate::big_digit::{BigDigit, DoubleBigDigit, BITS};
 use crate::bigint::Sign::{Minus, NoSign, Plus};
 use crate::biguint::IntDigits;
+use crate::VEC_SIZE;
 use crate::{BigInt, BigUint};
+use smallvec::SmallVec;
 
 #[inline]
 pub fn mac_with_carry(a: BigDigit, b: BigDigit, c: BigDigit, acc: &mut DoubleBigDigit) -> BigDigit {
@@ -140,7 +142,11 @@ fn karatsuba(acc: &mut [BigDigit], x: &[BigDigit], y: &[BigDigit]) {
      */
     let len = x1.len() + y1.len() + 1;
     let mut p = BigUint {
-        data: smallvec![0; len],
+        data: {
+            let mut d: SmallVec<[BigDigit; VEC_SIZE]> = SmallVec::with_capacity(len);
+            d.resize(len, 0);
+            d
+        },
     };
 
     // p2 = x1 * y1
