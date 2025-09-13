@@ -56,13 +56,23 @@ jobs:
 
       - name: Run future-incompat check (nightly)
         run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            echo "future-incompat check not run on Windows runners (nightly -Z flags currently not supported reliably)"; exit 0
+          fi
           export PATH="$HOME/.cargo/bin:$PATH"
           rustup run nightly cargo check --workspace -Z future-incompat-report
-        if: runner.os != 'Windows'
 
       - name: Build cdylib (stable)
+        if: runner.os != 'Windows'
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
+          rustup run stable cargo build --workspace --release --lib
+
+      - name: Build cdylib (stable) - Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:USERPROFILE\\.cargo\\bin;" + $env:PATH
           rustup run stable cargo build --workspace --release --lib
 
       - name: Make and run C smoke test (Linux/macOS)
@@ -85,16 +95,21 @@ jobs:
             '  return 0;' \
             '}' > test_com_my.c
           clang test_com_my.c -L. -lcommy -o test_com_my || gcc test_com_my.c -L. -lcommy -o test_com_my
-          export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
+          # Ensure the loader can find the library on Linux and macOS
+          if [ "${{ runner.os }}" = "macOS" ] || [ "${{ runner.os }}" = "macos-latest" ]; then
+            export DYLD_LIBRARY_PATH=.:$DYLD_LIBRARY_PATH
+          else
+            export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
+          fi
           ./test_com_my
 
-      - name: Build smoke-test for Windows (optional)
+      - name: Build smoke-test for Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Windows smoke-test is optional; attempt to find a produced DLL and compile a C test with mingw if available
+          # Locate the built DLL
           $lib = Get-ChildItem -Path target\release -Filter commy.dll -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $lib) { Write-Host "commy.dll not found; skipping Windows smoke test"; exit 0 }
+          if (-not $lib) { Write-Error "commy.dll not found; Windows build failed or artifact not produced"; exit 1 }
           Copy-Item $lib.FullName .
           $c = @'
           #include <stdio.h>
@@ -102,10 +117,10 @@ jobs:
           int main(void) { const char *v = commy_ffi_version(); if (v==NULL) return 2; printf("commy ffi version: %s\n", v); return 0; }
           '@
           Set-Content -Path test_com_my.c -Value $c
-          # Try gcc (mingw) if available
+          # Try gcc (mingw) if available; if not, fail because the artifact exists but cannot be tested
           if (Get-Command x86_64-w64-mingw32-gcc -ErrorAction SilentlyContinue) {
             x86_64-w64-mingw32-gcc test_com_my.c -L. -lcommy -o test_com_my.exe
             ./test_com_my.exe
           } else {
-            Write-Host "mingw gcc not found; skipping Windows C smoke-test"
+            Write-Error "mingw gcc not found; commy.dll present but cannot be tested on runner. Install mingw or adjust workflow."; exit 1
           }
