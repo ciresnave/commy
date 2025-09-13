@@ -1,3 +1,7 @@
+# Archived PROPOSED_IMPROVEMENTS.md
+
+Archived into RELEASE_STATUS.md
+
 # Commy Architecture Improvements (Pre-Release Optimization)
 
 Since backward compatibility is not a concern, here are the major improvements that should be implemented:

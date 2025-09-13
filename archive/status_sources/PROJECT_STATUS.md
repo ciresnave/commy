@@ -1,3 +1,7 @@
+# Archived PROJECT_STATUS.md
+
+Archived into RELEASE_STATUS.md
+
 # Commy - High-Performance Inter-Process Communication for Rust
 
 ## Project Status: COMPLETED CORE FUNCTIONALITY

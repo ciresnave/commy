@@ -1,3 +1,7 @@
+# Archived COMPILATION_STATUS.md
+
+This file has been archived into RELEASE_STATUS.md.
+
 # Commy Compilation Status Report
 
 ## 🎯 Progress Summary

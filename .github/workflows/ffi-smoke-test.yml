@@ -1,0 +1,64 @@
+name: FFI smoke test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rustup and toolchains
+        run: |
+          # Install rustup non-interactively
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # Install both stable and nightly; we'll run the nightly check only for -Z flags
+          rustup toolchain install stable
+          rustup toolchain install nightly
+          rustup default stable
+
+      - name: Install build essentials
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang
+
+      - name: Cargo check + future-incompat (nightly)
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # Run only the future-incompat check on nightly to allow -Z flags
+          rustup run nightly cargo check --workspace -Z future-incompat-report
+
+      - name: Build cdylib
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # Build using the stable toolchain
+          rustup run stable cargo build --workspace --release --lib
+
+      - name: Smoke test C program
+        run: |
+          set -e
+          LIB_DIR=target/release
+          CRATE_LIB=$(ls $LIB_DIR | grep -E "libcommy(\.so|\.dylib|\.dll)$" || true)
+          if [ -z "$CRATE_LIB" ]; then
+            echo "Library not found in $LIB_DIR"; ls -la $LIB_DIR; exit 1;
+          fi
+          cp "$LIB_DIR/$CRATE_LIB" .
+          # Create small C test that calls commy_ffi_version()
+          printf '%s\n' \
+            '#include <stdio.h>' \
+            'extern const char *commy_ffi_version(void);' \
+            'int main(void) {' \
+            '  const char *v = commy_ffi_version();' \
+            '  if (v == NULL) return 2;' \
+            '  printf("commy ffi version: %s\\n", v);' \
+            '  return 0;' \
+            '}' > test_com_my.c
+          clang test_com_my.c -L. -lcommy -o test_com_my || gcc test_com_my.c -L. -lcommy -o test_com_my
+          # Ensure the loader can find the library
+          export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
+          ./test_com_my
