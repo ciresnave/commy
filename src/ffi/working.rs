@@ -405,9 +405,11 @@ pub struct CommyServiceInfo {
 ///
 /// # Safety
 ///
-/// The returned pointer is either null (if `count == 0` or allocation fails)
-/// or points to `count` zero-initialized `CommyServiceInfo` elements which the
-/// caller owns and MUST free using `commy_free_service_info_array` when done.
+/// - The returned pointer is either null (if `count == 0` or allocation fails) or points to `count` zero-initialized `CommyServiceInfo` elements
+/// - The caller owns the returned pointer and MUST free it using `commy_free_service_info_array` with the exact same `count` value
+/// - Failure to free the returned pointer will result in memory leaks
+/// - The returned pointer must not be freed using any other mechanism (e.g., C's free())
+/// - `count` must be within reasonable bounds to prevent excessive memory allocation
 #[no_mangle]
 pub unsafe extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
     if count == 0 {

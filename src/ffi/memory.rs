@@ -238,10 +238,11 @@ static MEMORY_POOL: Lazy<parking_lot::Mutex<MemoryPool>> =
 #[no_mangle]
 /// # Safety
 ///
-/// This function initializes global memory pool state. It must not be
-/// called concurrently with other FFI memory operations that access the
-/// pool during initialization. Callers must ensure any required runtime
-/// initialization ordering guarantees.
+/// - This function initializes global memory pool state and accesses global mutable state
+/// - It must not be called concurrently with other FFI memory operations that access the pool during initialization
+/// - Callers must ensure proper ordering with other FFI initialization functions
+/// - Multiple calls to this function are safe but unnecessary
+/// - No pointers are passed, but global state is modified
 pub unsafe extern "C" fn commy_memory_pool_init() -> i32 {
     // Initialize the memory pool
     let _pool = &*MEMORY_POOL;

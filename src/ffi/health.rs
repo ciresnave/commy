@@ -286,9 +286,11 @@ pub unsafe extern "C" fn commy_free_health_status_arrays(
 #[no_mangle]
 /// # Safety
 ///
-/// `handle` must be a valid `CommyHandle`. `callback` must be a valid
-/// function pointer using the C calling convention and must remain valid
-/// for as long as the health system may call it.
+/// - `handle` must be a valid `CommyHandle` previously returned from a mesh creation function
+/// - `callback` must be a valid, non-null function pointer using the C calling convention
+/// - The callback must remain valid for as long as the health system may call it
+/// - The caller retains ownership of both the handle and callback function
+/// - Passing invalid or null pointers is undefined behavior
 pub unsafe extern "C" fn commy_set_health_callback(
     handle: CommyHandle,
     callback: CommyHealthCallback,
