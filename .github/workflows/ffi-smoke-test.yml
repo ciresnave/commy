@@ -12,25 +12,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
+      - name: Install rustup and toolchains
+        run: |
+          # Install rustup non-interactively
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # Install both stable and nightly; we'll run the nightly check only for -Z flags
+          rustup toolchain install stable
+          rustup toolchain install nightly
+          rustup default stable
 
       - name: Install build essentials
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang
 
-      - name: Cargo check + future-incompat
+      - name: Cargo check + future-incompat (nightly)
         run: |
-          cargo check --workspace -Z future-incompat-report
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # Run only the future-incompat check on nightly to allow -Z flags
+          rustup run nightly cargo check --workspace -Z future-incompat-report
 
       - name: Build cdylib
         run: |
-          cargo build --workspace --release --lib
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # Build using the stable toolchain
+          rustup run stable cargo build --workspace --release --lib
 
       - name: Smoke test C program
         run: |
