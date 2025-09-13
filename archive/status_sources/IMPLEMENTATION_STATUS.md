@@ -1,3 +1,7 @@
+# Archived IMPLEMENTATION_STATUS.md
+
+Archived into RELEASE_STATUS.md
+
 # Commy Foundation Layer Implementation Status
 
 ## ✅ COMPLETED WORK
