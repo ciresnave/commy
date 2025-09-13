@@ -284,7 +284,12 @@ pub unsafe extern "C" fn commy_free_health_status_arrays(
 /// Set health callback for notifications
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_set_health_callback(
+/// # Safety
+///
+/// `handle` must be a valid `CommyHandle`. `callback` must be a valid
+/// function pointer using the C calling convention and must remain valid
+/// for as long as the health system may call it.
+pub unsafe extern "C" fn commy_set_health_callback(
     handle: CommyHandle,
     callback: CommyHealthCallback,
 ) -> i32 {

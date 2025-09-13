@@ -164,7 +164,7 @@ pub unsafe extern "C" fn commy_discover_services(
                 return CommyError::Success as i32;
             }
 
-            let service_array = commy_alloc_service_info_array(service_count);
+            let service_array = unsafe { commy_alloc_service_info_array(service_count) };
             if service_array.is_null() {
                 return CommyError::OutOfMemory as i32;
             }
@@ -229,7 +229,7 @@ pub unsafe extern "C" fn commy_get_all_services(
                 return CommyError::Success as i32;
             }
 
-            let service_array = commy_alloc_service_info_array(service_count);
+            let service_array = unsafe { commy_alloc_service_info_array(service_count) };
             if service_array.is_null() {
                 return CommyError::OutOfMemory as i32;
             }
@@ -317,7 +317,12 @@ pub unsafe extern "C" fn commy_get_service(
 /// Set service callback for notifications
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_set_service_callback(
+/// # Safety
+///
+/// `handle` must be a valid `CommyHandle`. `callback` must be a valid
+/// function pointer using the C calling convention and must remain valid
+/// for as long as the service discovery system may call it.
+pub unsafe extern "C" fn commy_set_service_callback(
     handle: CommyHandle,
     callback: CommyServiceCallback,
 ) -> i32 {

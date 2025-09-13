@@ -187,7 +187,13 @@ pub unsafe extern "C" fn commy_is_mesh_running(handle: CommyHandle) -> i32 {
 /// Set logging callback
 #[cfg(feature = "ffi")]
 #[no_mangle]
-pub extern "C" fn commy_set_log_callback(callback: CommyLogCallback) -> i32 {
+/// # Safety
+///
+/// `callback` must be a valid function pointer using the C calling
+/// convention and must remain valid for as long as the logging system
+/// may call it. Passing an invalid pointer or one with the wrong
+/// calling convention is undefined behavior.
+pub unsafe extern "C" fn commy_set_log_callback(callback: CommyLogCallback) -> i32 {
     // Store the callback for use by the logging system
     // This would integrate with the tracing system
     // For now, just return success

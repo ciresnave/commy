@@ -409,7 +409,7 @@ pub struct CommyServiceInfo {
 /// or points to `count` zero-initialized `CommyServiceInfo` elements which the
 /// caller owns and MUST free using `commy_free_service_info_array` when done.
 #[no_mangle]
-pub extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
+pub unsafe extern "C" fn commy_alloc_service_info_array(count: usize) -> *mut CommyServiceInfo {
     if count == 0 {
         return ptr::null_mut();
     }
