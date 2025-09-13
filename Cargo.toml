@@ -145,4 +145,4 @@ proptest = "1.0"
 # Keep the copy in `vendor/num-bigint-dig` and point the patch to that path.
 # Remove this override and vendor copy once the upstream crates.io release
 # addresses the future-incompatibility warnings.
-num-bigint-dig = { path = "vendor/num-bigint-dig", package = "num-bigint" }
+num-bigint-dig = { path = "vendor/num-bigint-dig", package = "num-bigint-dig" }
