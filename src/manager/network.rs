@@ -1,8 +1,8 @@
 //! Network Transport Implementation
 
 use super::{
-    protocol::*, transport::*, transport_impl::TransportError,
-    SharedFileOperationResponse, SharedFileRequest,
+    protocol::*, transport::*, transport_impl::TransportError, SharedFileOperationResponse,
+    SharedFileRequest,
 };
 
 // Types used by both network-gated and non-gated implementations
