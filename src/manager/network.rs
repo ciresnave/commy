@@ -1,7 +1,7 @@
 //! Network Transport Implementation
 
 use super::{
-    protocol::*, transport::*, transport_impl::TransportError, SharedFileOperationResponse,
+    transport::*, transport_impl::TransportError, SharedFileOperationResponse,
     SharedFileRequest,
 };
 
