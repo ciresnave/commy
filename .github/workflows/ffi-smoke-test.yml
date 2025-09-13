@@ -8,47 +8,68 @@ on:
 
 jobs:
   build-and-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+      fail-fast: false
     steps:
-      - uses: actions/checkout@v4
+      # Pin actions to full commit SHAs for auditability and supply-chain safety
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
 
-      - name: Install rustup and toolchains
+      - name: Setup cache for cargo
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Setup rust toolchains and platform build tools
+        uses: ./.github/actions/setup-rust
+        with:
+          install-mingw: "true"
+
+      - name: Run future-incompat check (nightly) - non-Windows
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          # Install rustup non-interactively
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           export PATH="$HOME/.cargo/bin:$PATH"
-          # Install both stable and nightly; we'll run the nightly check only for -Z flags
-          rustup toolchain install stable
-          rustup toolchain install nightly
-          rustup default stable
-
-      - name: Install build essentials
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang
-
-      - name: Cargo check + future-incompat (nightly)
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          # Run only the future-incompat check on nightly to allow -Z flags
           rustup run nightly cargo check --workspace -Z future-incompat-report
 
-      - name: Build cdylib
+      - name: Run future-incompat check (nightly) - Windows (skip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "future-incompat check not run on Windows runners (nightly -Z flags currently not supported reliably)"
+
+      - name: Build cdylib (stable)
+        if: runner.os != 'Windows'
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          # Build using the stable toolchain
           rustup run stable cargo build --workspace --release --lib
 
-      - name: Smoke test C program
+      - name: Build cdylib (stable) - Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:USERPROFILE\\.cargo\\bin;" + $env:PATH
+          rustup run stable cargo build --workspace --release --lib
+
+      - name: Make and run C smoke test (Linux/macOS)
+        if: runner.os != 'Windows'
         run: |
           set -e
           LIB_DIR=target/release
-          CRATE_LIB=$(ls $LIB_DIR | grep -E "libcommy(\.so|\.dylib|\.dll)$" || true)
+          CRATE_LIB=$(ls $LIB_DIR | grep -E "libcommy(\.so|\.dylib)$" || true)
           if [ -z "$CRATE_LIB" ]; then
             echo "Library not found in $LIB_DIR"; ls -la $LIB_DIR; exit 1;
           fi
           cp "$LIB_DIR/$CRATE_LIB" .
-          # Create small C test that calls commy_ffi_version()
           printf '%s\n' \
             '#include <stdio.h>' \
             'extern const char *commy_ffi_version(void);' \
@@ -59,6 +80,32 @@ jobs:
             '  return 0;' \
             '}' > test_com_my.c
           clang test_com_my.c -L. -lcommy -o test_com_my || gcc test_com_my.c -L. -lcommy -o test_com_my
-          # Ensure the loader can find the library
-          export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
+          # Ensure the loader can find the library on Linux and macOS
+          if [ "${{ runner.os }}" = "macOS" ] || [ "${{ runner.os }}" = "macos-latest" ]; then
+            export DYLD_LIBRARY_PATH=.:$DYLD_LIBRARY_PATH
+          else
+            export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
+          fi
           ./test_com_my
+
+      - name: Build smoke-test for Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Locate the built DLL
+          $lib = Get-ChildItem -Path target\release -Filter commy.dll -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $lib) { Write-Error "commy.dll not found; Windows build failed or artifact not produced"; exit 1 }
+          Copy-Item $lib.FullName .
+          $c = @'
+          #include <stdio.h>
+          extern const char *commy_ffi_version(void);
+          int main(void) { const char *v = commy_ffi_version(); if (v==NULL) return 2; printf("commy ffi version: %s\n", v); return 0; }
+          '@
+          Set-Content -Path test_com_my.c -Value $c
+          # Try gcc (mingw) if available; if not, fail because the artifact exists but cannot be tested
+          if (Get-Command x86_64-w64-mingw32-gcc -ErrorAction SilentlyContinue) {
+            x86_64-w64-mingw32-gcc test_com_my.c -L. -lcommy -o test_com_my.exe
+            ./test_com_my.exe
+          } else {
+            Write-Error "mingw gcc not found; commy.dll present but cannot be tested on runner. Install mingw or adjust workflow."; exit 1
+          }

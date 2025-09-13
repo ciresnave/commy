@@ -1,0 +1,47 @@
+name: "Setup Rust toolchains and build tools"
+description: "Install rustup, stable and nightly toolchains and optional platform build tools (mingw/msys2 on Windows)."
+inputs:
+  install-mingw:
+    description: "If true, install MSYS2/mingw on Windows runners"
+    required: false
+    default: "false"
+runs:
+  using: "composite"
+  steps:
+    - name: Install rustup and toolchains (Linux/macOS)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -e
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        export PATH="$HOME/.cargo/bin:$PATH"
+        rustup toolchain install stable
+        rustup toolchain install nightly
+        rustup default stable
+        if [ "${RUNNER_OS}" = "Linux" ] || [ "${RUNNER_OS}" = "ubuntu-latest" ]; then
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang
+        fi
+
+    - name: Install rustup and toolchains (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        Invoke-WebRequest -Uri https://win.rustup.rs -OutFile rustup-init.exe
+        ./rustup-init.exe -y
+        $env:PATH = "$env:USERPROFILE\\.cargo\\bin;" + $env:PATH
+        rustup toolchain install stable
+        rustup toolchain install nightly
+        rustup default stable
+        if ('${{ inputs.install-mingw }}' -eq 'true') {
+          choco install -y msys2
+          # Try to update pacman and install mingw-w64 gcc
+          $msys = "C:\\tools\\msys64\\usr\\bin\\bash.exe"
+          if (Test-Path $msys) {
+            & $msys -lc "pacman -Syu --noconfirm"
+            & $msys -lc "pacman -S --noconfirm mingw-w64-x86_64-gcc"
+          } else {
+            Write-Host "msys2 not found at expected path; mingw install may require manual steps"
+          }
+        }
