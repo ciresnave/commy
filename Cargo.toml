@@ -140,9 +140,9 @@ rcgen = "0.9"
 proptest = "1.0"
 
 [patch.crates-io]
-# Local vendored override: use the in-tree fixed copy of num-bigint to avoid
-# future-incompatibility warnings until an upstream fixed release is available.
-# Keep the copy in `vendor/num-bigint-dig` and point the patch to that path.
-# Remove this override and vendor copy once the upstream crates.io release
-# addresses the future-incompatibility warnings.
-num-bigint-dig = { path = "vendor/num-bigint-dig", package = "num-bigint-dig" }
+#[patch.crates-io]
+# Local vendored override was used temporarily during investigation. We've
+# reverted to the crates.io version to allow cargo fix/build to use the
+# published `num-bigint-dig` until a permanent vendor removal or upstream
+# fix is agreed.
+# num-bigint-dig = { path = "vendor/num-bigint-dig", package = "num-bigint-dig" }
