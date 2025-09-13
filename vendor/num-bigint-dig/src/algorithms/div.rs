@@ -1,3 +1,4 @@
+use crate::VEC_SIZE;
 use core::cmp::Ordering;
 use num_traits::{One, Zero};
 use smallvec::SmallVec;
@@ -83,7 +84,11 @@ pub fn div_rem(u: &BigUint, d: &BigUint) -> (BigUint, BigUint) {
     let bn = *b.data.last().unwrap();
     let q_len = a.data.len() - b.data.len() + 1;
     let mut q = BigUint {
-        data: smallvec![0; q_len],
+        data: {
+            let mut d: SmallVec<[BigDigit; VEC_SIZE]> = SmallVec::with_capacity(q_len);
+            d.resize(q_len, 0);
+            d
+        },
     };
 
     // We reuse the same temporary to avoid hitting the allocator in our inner loop - this is

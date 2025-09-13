@@ -12,11 +12,13 @@ use alloc::vec::Vec;
 use crate::big_digit::BigDigit;
 use crate::bigint::{into_magnitude, magnitude};
 use crate::integer::Integer;
+use crate::VEC_SIZE;
 #[cfg(feature = "prime")]
 use num_iter::range_step;
 use num_traits::Zero;
 #[cfg(feature = "prime")]
 use num_traits::{FromPrimitive, ToPrimitive};
+use smallvec::SmallVec;
 
 #[cfg(feature = "prime")]
 use crate::prime::probably_prime;
@@ -47,7 +49,9 @@ impl<R: Rng + ?Sized> RandBigInt for R {
     fn gen_biguint(&mut self, bit_size: usize) -> BigUint {
         use super::big_digit::BITS;
         let (digits, rem) = bit_size.div_rem(&BITS);
-        let mut data = smallvec![BigDigit::default(); digits + (rem > 0) as usize];
+        let data_len = digits + (rem > 0) as usize;
+        let mut data: SmallVec<[BigDigit; VEC_SIZE]> = SmallVec::with_capacity(data_len);
+        data.resize(data_len, BigDigit::default());
 
         // `fill` is faster than many `gen::<u32>` calls
         // Internally this calls `SeedableRng` where implementors are responsible for adjusting endianness for reproducable values.
