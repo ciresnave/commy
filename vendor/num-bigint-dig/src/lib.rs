@@ -120,7 +120,6 @@ use core::fmt;
 #[cfg(feature = "std")]
 use std::error::Error;
 
-#[macro_use]
 mod macros;
 
 mod bigint;
