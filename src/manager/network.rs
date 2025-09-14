@@ -1,10 +1,9 @@
 //! Network Transport Implementation
 
 use super::{
-    protocol::*, transport::*, transport_impl::TransportError, NetworkEndpoint,
-    SharedFileOperationResponse, SharedFileRequest,
+    transport::*, transport_impl::TransportError, SharedFileOperationResponse,
+    SharedFileRequest,
 };
-use std::time::{Duration, Instant};
 
 // Types used by both network-gated and non-gated implementations
 use chrono::Utc;
