@@ -11,7 +11,7 @@ commy_common = { path = "commy_common" }
 commy_macro = { path = "commy_macro" }
 
 # Foundation layer dependencies
-auth-framework = { version = "0.4", optional = true }
+auth-framework = { version = "0.4.2", optional = true }
 distributed-config = { version = "0.1", optional = true }
 tokio = { version = "1.0", features = ["full"], optional = true }
 uuid = { version = "1.0", features = ["v4", "serde"], optional = true }
@@ -136,7 +136,8 @@ tokio = { version = "1.0", features = ["full"] }
 tokio-test = "0.4"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 tracing-subscriber = { version = "0.3" }
-rcgen = "0.9"
+# Updated to pick up fixes and avoid pulling old ring v0.16.x (Dependabot alert)
+rcgen = "0.14.4"
 proptest = "1.0"
 
 [patch.crates-io]
