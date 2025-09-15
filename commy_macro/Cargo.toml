@@ -11,6 +11,10 @@ commy_common = { path = "../commy_common" }
 proc-macro2 = "1.0.86"
 quote = "1.0.36"
 syn = { version = "2.0.68", features = ["full"] }
+sha2 = "0.10"
+hex = "0.4"
+capnpc = "0.21.4"
+heck = "0.4"
 
 [dev-dependencies]
 rkyv = { version = "0.8" }

@@ -1,0 +1,29 @@
+name: Cap'n Proto single-step smoke
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  capnp-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install capnp
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y capnproto
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Build and run smoke test (capnproto)
+        run: |
+          # Run only the smoke test that verifies single-step capnp codegen.
+          cargo test --features capnproto --test smoke_capnp_single_step --verbose
+        env:
+          RUSTFLAGS: "-D warnings"

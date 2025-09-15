@@ -1,6 +1,12 @@
+use hex::ToHex;
+use proc_macro2::Span;
 use proc_macro2::TokenStream as TokenStream2;
+use quote::format_ident;
 use quote::quote;
-use syn::{parse_macro_input, ItemStruct, Meta};
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::PathBuf;
+use syn::{parse_macro_input, ItemStruct, LitStr, Meta};
 
 #[proc_macro_attribute]
 pub fn create_writer(
@@ -88,7 +94,165 @@ pub fn create_writer(
         });
     }
 
+    // Build a deterministic Cap'n Proto schema for this struct.
+    // Map primitive Rust types to Cap'n Proto types (best-effort mapping for common types).
+    fn rust_ty_to_capnp(ty: &syn::Type) -> &'static str {
+        match quote::quote! { #ty }.to_string().as_str() {
+            "String" | "std :: string :: String" => "Text",
+            "Vec < u8 >" | "alloc :: vec :: Vec < u8 >" => "Data",
+            "u8" => "UInt8",
+            "u16" => "UInt16",
+            "u32" => "UInt32",
+            "u64" => "UInt64",
+            "i8" => "Int8",
+            "i16" => "Int16",
+            "i32" => "Int32",
+            "i64" => "Int64",
+            "f32" => "Float32",
+            "f64" => "Float64",
+            _ => "Text",
+        }
+    }
+
+    // Construct the schema text deterministically: fields in declared order, simple formatting.
+    let mut schema_lines = Vec::new();
+    schema_lines.push(format!("@0x{};", "{placeholder}")); // placeholder for hash-based id
+    schema_lines.push(format!("struct {} {{", struct_name));
+    let mut idx = 0usize;
+    for field in input.fields.iter() {
+        let field_name = field
+            .ident
+            .as_ref()
+            .expect("All fields must be named")
+            .to_string();
+        let capnp_ty = rust_ty_to_capnp(&field.ty);
+        schema_lines.push(format!("  {} @{} :{};", field_name, idx, capnp_ty));
+        idx += 1;
+    }
+    schema_lines.push("}".to_string());
+
+    let schema_text = schema_lines.join("\n");
+
+    // Compute SHA-256 hash of the schema text
+    let mut hasher = Sha256::new();
+    hasher.update(schema_text.as_bytes());
+    let hash = hasher.finalize();
+    let hash_hex = hash.encode_hex::<String>();
+
+    // Replace placeholder id with the first 16 hex chars to form @0xID
+    let short_id = &hash_hex[..16];
+    let schema_text = schema_text.replacen("{placeholder}", short_id, 1);
+
+    // Attempt to write the schema into a `schemas/` directory in the consumer crate if possible.
+    // Write local schema into consumer crate's schemas/ for tooling and build.rs consumption.
+    // Prepare schema filename and generated rust filename up-front so they are
+    // available in later scopes (proc-macro expansion must reference the
+    // generated filename when emitting include! tokens).
+    let struct_name_str = struct_name.to_string();
+    let schema_filename = format!("{}_{}.capnp", struct_name_str, &hash_hex[..8]);
+    let generated_name = format!("{}_{}_capnp.rs", struct_name_str, &hash_hex[..8]);
+    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+        let mut schema_dir = PathBuf::from(&manifest);
+        schema_dir.push("schemas");
+        if fs::create_dir_all(&schema_dir).is_ok() {
+            let mut schema_file = schema_dir.clone();
+            schema_file.push(&schema_filename);
+            let _ = fs::write(&schema_file, &schema_text);
+
+            // Attempt single-step code generation by invoking capnpc here so generated
+            // Rust bindings are available during the same cargo build. We use the
+            // `capnpc` crate which may in turn spawn the native `capnp` binary.
+            // This is best-effort: if codegen fails we'll emit a compile-time
+            // warning (via println! in build script style) and continue.
+            let out_dir = std::env::var("OUT_DIR").ok().map(PathBuf::from);
+            if let Some(out_dir) = out_dir {
+                // Use capnpc CompilerCommand to emit Rust file into OUT_DIR
+                let mut any_ok = false;
+                match std::panic::catch_unwind(|| {
+                    let mut cmd = capnpc::CompilerCommand::new();
+                    cmd.file(&schema_file).output_path(&out_dir);
+                    cmd.run()
+                }) {
+                    Ok(Ok(())) => {
+                        any_ok = true;
+                    }
+                    Ok(Err(e)) => {
+                        // Emit helpful compile-time warning. We can't print to build
+                        // script output here, but we can emit a warning by using
+                        // compile_error! would fail the build; instead we embed a
+                        // constant string with the warning so users see it in rustc output
+                        let warn = format!("capnp codegen failed during proc-macro expansion: {}. To enable single-step capnp codegen, install the capnp compiler and ensure it is on PATH.", e);
+                        let _ =
+                            fs::write(out_dir.join("capnp_codegen_warning.txt"), warn.as_bytes());
+                    }
+                    Err(_) => {
+                        let warn = "capnp codegen panicked during proc-macro expansion".to_string();
+                        let _ =
+                            fs::write(out_dir.join("capnp_codegen_warning.txt"), warn.as_bytes());
+                    }
+                }
+
+                // If codegen produced a Rust file, try to read it and inline into the
+                // macro output so the generated types are directly available.
+                if any_ok {
+                    let mut gen_path = out_dir.clone();
+                    gen_path.push(&generated_name);
+                    if gen_path.exists() {
+                        // We purposely do not parse/re-emit the generated tokens here.
+                        // Instead we will emit an include!(concat!(env!("OUT_DIR"), "/", "<generated>"))
+                        // into the macro output below which will cause the compiler to
+                        // load the generated bindings in the same build.
+                    }
+                }
+            }
+        }
+    }
+    // Prepare literal strings for insertion into generated tokens
+    let schema_lit = LitStr::new(&schema_text, Span::call_site());
+    let hash_lit = LitStr::new(&hash_hex, Span::call_site());
+
+    // If capnpc produced a generated Rust file in OUT_DIR, arrange to include it
+    // in the expanded output so generated bindings are available in the same build.
+    let mut include_generated_tokens = TokenStream2::new();
+    if let Some(manifest_out) = std::env::var("OUT_DIR").ok() {
+        let mut gen_path = PathBuf::from(&manifest_out);
+        gen_path.push(&generated_name);
+
+        if gen_path.exists() {
+            // Try to read the generated file. If present, attempt to parse it and
+            // inline the tokens. If parsing fails, fall back to include! so the
+            // compiler will load the generated bindings.
+            if let Ok(s) = fs::read_to_string(&gen_path) {
+                match syn::parse_file(&s) {
+                    Ok(parsed) => {
+                        include_generated_tokens.extend(quote! {
+                            // Inlined capnp-generated bindings
+                            #parsed
+                        });
+                    }
+                    Err(_) => {
+                        let gen_lit = LitStr::new(&generated_name, Span::call_site());
+                        include_generated_tokens.extend(quote! {
+                            #[allow(unused_imports, dead_code)]
+                            include!(concat!(env!("OUT_DIR"), "/", #gen_lit));
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Make unique constant names per-struct to avoid duplicates when macro is applied to
+    // multiple structs in the same crate. e.g., SCHEMA_TEXT_MyStruct
+    let name_str = struct_name.to_string();
+    let schema_ident = format_ident!("SCHEMA_TEXT_{}", name_str);
+    let hash_ident = format_ident!("SCHEMA_HASH_{}", name_str);
+
     let expanded = quote! {
+        #include_generated_tokens
+        // Export the generated schema text and hash so build.rs or other tooling can find it.
+        pub const #schema_ident: &str = #schema_lit;
+        pub const #hash_ident: &str = #hash_lit;
         #[repr(C)]
         #[derive(Debug)]
         #struct_vis struct #struct_name {

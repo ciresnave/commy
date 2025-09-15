@@ -169,6 +169,51 @@ struct FileHeader {
     }
 }
 
+// When capnproto feature is enabled, include generated bindings and provide a
+// convenience function to serialize the example `PluginExample` struct defined
+// in `schemas/example.capnp`.
+#[cfg(feature = "capnproto")]
+mod generated_adapter {
+    use super::*;
+
+    // Only include the generated bindings when the build script was able to
+    // run capnpc and set the `capnp_generated` cfg. If codegen was skipped,
+    // avoid a hard include! that would cause a compile error.
+    #[cfg(capnp_generated)]
+    mod gen {
+        include!(concat!(env!("OUT_DIR"), "/example_capnp.rs"));
+    }
+
+    /// Build and serialize a `PluginExample` message using the generated API.
+    /// If codegen didn't run, this function returns an explicit error.
+    pub fn serialize_plugin_example(
+        id: &str,
+        value: i64,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, SerializationError> {
+        #[cfg(capnp_generated)]
+        {
+            let mut message = capnp::message::Builder::new_default();
+
+            // Initialize root as the generated PluginExample struct
+            {
+                let mut root = message.init_root::<gen::plugin_example::Builder>();
+                root.set_id(id);
+                root.set_value(value);
+                root.set_payload(payload);
+            }
+
+            // Serialize into canonical Cap'n Proto words
+            return Ok(capnp::serialize::write_message_to_words(&message));
+        }
+
+        // If we reach here, codegen did not run and bindings are unavailable.
+        Err(SerializationError::SerializationFailed(
+            "capnp codegen bindings not available; install the `capnp` compiler and re-run build with --features capnproto".to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 #[cfg(feature = "capnproto")]
 mod tests {
