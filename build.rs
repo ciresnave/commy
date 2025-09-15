@@ -11,6 +11,11 @@ fn main() {
         return;
     }
 
+    // Always advertise the `capnp_generated` cfg to rustc's `check-cfg` machinery so
+    // code that contains `#[cfg(capnp_generated)]` does not trigger the
+    // `unexpected_cfgs` lint when the build script runs before generation.
+    println!("cargo:rustc-check-cfg=cfg(capnp_generated)");
+
     println!("cargo:rerun-if-changed=schemas");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
