@@ -17,6 +17,18 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y capnproto
+      - name: Cap'n Proto diagnostic info
+        run: |
+          echo "--- capnp version ---"
+          capnp --version || true
+          echo "--- which capnp ---"
+          command -v capnp || true
+          echo "--- ls workspace schemas dir ---"
+          ls -la ./schemas || true
+          echo "--- ls target build out dir (before build) ---"
+          ls -la ./target/debug/build || true
+          echo "--- show any .capnp files in repo ---"
+          find . -type f -name '*.capnp' -print -exec sed -n '1,200p' {} \; || true
       - name: Install Rust
         uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
         with:
