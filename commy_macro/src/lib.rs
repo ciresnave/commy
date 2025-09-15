@@ -96,21 +96,70 @@ pub fn create_writer(
 
     // Build a deterministic Cap'n Proto schema for this struct.
     // Map primitive Rust types to Cap'n Proto types (best-effort mapping for common types).
-    fn rust_ty_to_capnp(ty: &syn::Type) -> &'static str {
-        match quote::quote! { #ty }.to_string().as_str() {
-            "String" | "std :: string :: String" => "Text",
-            "Vec < u8 >" | "alloc :: vec :: Vec < u8 >" => "Data",
-            "u8" => "UInt8",
-            "u16" => "UInt16",
-            "u32" => "UInt32",
-            "u64" => "UInt64",
-            "i8" => "Int8",
-            "i16" => "Int16",
-            "i32" => "Int32",
-            "i64" => "Int64",
-            "f32" => "Float32",
-            "f64" => "Float64",
-            _ => "Text",
+    fn rust_ty_to_capnp(ty: &syn::Type) -> Result<&'static str, String> {
+        use syn::{GenericArgument, PathArguments, Type, TypePath};
+
+        match ty {
+            Type::Path(TypePath { path, .. }) => {
+                if let Some(seg) = path.segments.last() {
+                    let ident = seg.ident.to_string();
+                    match ident.as_str() {
+                        "String" => Ok("Text"),
+                        "u8" => Ok("UInt8"),
+                        "u16" => Ok("UInt16"),
+                        "u32" => Ok("UInt32"),
+                        "u64" => Ok("UInt64"),
+                        "i8" => Ok("Int8"),
+                        "i16" => Ok("Int16"),
+                        "i32" => Ok("Int32"),
+                        "i64" => Ok("Int64"),
+                        "f32" => Ok("Float32"),
+                        "f64" => Ok("Float64"),
+                        "Vec" => {
+                            // Check for Vec<u8>
+                            match &seg.arguments {
+                                PathArguments::AngleBracketed(args) => {
+                                    if let Some(GenericArgument::Type(Type::Path(TypePath {
+                                        path: inner_path,
+                                        ..
+                                    }))) = args.args.first()
+                                    {
+                                        if let Some(inner_seg) = inner_path.segments.last() {
+                                            if inner_seg.ident == "u8" {
+                                                return Ok("Data");
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            Ok("Text")
+                        }
+                        _ => {
+                            // Fallback for fully-qualified paths like std::string::String
+                            let full = quote::quote! { #ty }.to_string();
+                            if full.contains("std :: string :: String")
+                                || full.contains("std::string::String")
+                            {
+                                Ok("Text")
+                            } else if full.contains("alloc :: vec :: Vec") {
+                                Ok("Data")
+                            } else {
+                                Err(format!("Unmapped Rust type '{}' encountered in Cap'n Proto schema generation. Please add a mapping for this type.", full))
+                            }
+                        }
+                    }
+                } else {
+                    Err(format!(
+                        "Unable to determine path segments for type: {}",
+                        quote::quote! { #ty }.to_string()
+                    ))
+                }
+            }
+            _ => Err(format!(
+                "Unsupported type form for Cap'n Proto mapping: {}",
+                quote::quote! { #ty }.to_string()
+            )),
         }
     }
 
@@ -125,7 +174,22 @@ pub fn create_writer(
             .as_ref()
             .expect("All fields must be named")
             .to_string();
-        let capnp_ty = rust_ty_to_capnp(&field.ty);
+        // Map the Rust type to a Cap'n Proto type, returning a compile-time error
+        // if an unmapped or unsupported type is encountered.
+        let capnp_ty = match rust_ty_to_capnp(&field.ty) {
+            Ok(t) => t.to_string(),
+            Err(e) => {
+                return syn::Error::new_spanned(
+                    &field.ty,
+                    format!(
+                        "Error generating Cap'n Proto schema for field '{}': {}",
+                        field_name, e
+                    ),
+                )
+                .to_compile_error()
+                .into();
+            }
+        };
         schema_lines.push(format!("  {} @{} :{};", field_name, idx, capnp_ty));
         idx += 1;
     }
@@ -159,52 +223,13 @@ pub fn create_writer(
             schema_file.push(&schema_filename);
             let _ = fs::write(&schema_file, &schema_text);
 
-            // Attempt single-step code generation by invoking capnpc here so generated
-            // Rust bindings are available during the same cargo build. We use the
-            // `capnpc` crate which may in turn spawn the native `capnp` binary.
-            // This is best-effort: if codegen fails we'll emit a compile-time
-            // warning (via println! in build script style) and continue.
-            let out_dir = std::env::var("OUT_DIR").ok().map(PathBuf::from);
-            if let Some(out_dir) = out_dir {
-                // Use capnpc CompilerCommand to emit Rust file into OUT_DIR
-                let mut any_ok = false;
-                match std::panic::catch_unwind(|| {
-                    let mut cmd = capnpc::CompilerCommand::new();
-                    cmd.file(&schema_file).output_path(&out_dir);
-                    cmd.run()
-                }) {
-                    Ok(Ok(())) => {
-                        any_ok = true;
-                    }
-                    Ok(Err(e)) => {
-                        // Emit helpful compile-time warning. We can't print to build
-                        // script output here, but we can emit a warning by using
-                        // compile_error! would fail the build; instead we embed a
-                        // constant string with the warning so users see it in rustc output
-                        let warn = format!("capnp codegen failed during proc-macro expansion: {}. To enable single-step capnp codegen, install the capnp compiler and ensure it is on PATH.", e);
-                        let _ =
-                            fs::write(out_dir.join("capnp_codegen_warning.txt"), warn.as_bytes());
-                    }
-                    Err(_) => {
-                        let warn = "capnp codegen panicked during proc-macro expansion".to_string();
-                        let _ =
-                            fs::write(out_dir.join("capnp_codegen_warning.txt"), warn.as_bytes());
-                    }
-                }
-
-                // If codegen produced a Rust file, try to read it and inline into the
-                // macro output so the generated types are directly available.
-                if any_ok {
-                    let mut gen_path = out_dir.clone();
-                    gen_path.push(&generated_name);
-                    if gen_path.exists() {
-                        // We purposely do not parse/re-emit the generated tokens here.
-                        // Instead we will emit an include!(concat!(env!("OUT_DIR"), "/", "<generated>"))
-                        // into the macro output below which will cause the compiler to
-                        // load the generated bindings in the same build.
-                    }
-                }
-            }
+            // NOTE: We intentionally do NOT invoke capnpc here from the proc-macro
+            // expansion. Running the native capnp compiler from inside a proc-macro
+            // can cause races with the build script and produce partial or
+            // inconsistent generated artifacts. Instead we only write the
+            // deterministic .capnp schema file into the consumer crate's
+            // `schemas/` directory. The top-level `build.rs` is responsible for
+            // running capnpc and providing generated Rust bindings into OUT_DIR.
         }
     }
     // Prepare literal strings for insertion into generated tokens

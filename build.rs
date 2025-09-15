@@ -23,14 +23,42 @@ fn main() {
     }
 
     let mut capnp_files = Vec::new();
-    for entry in fs::read_dir(&schema_dir).unwrap() {
-        let entry = entry.unwrap();
+    let read_dir = match fs::read_dir(&schema_dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            println!(
+                "cargo:warning=Failed to read schemas directory: {}; skipping capnp codegen",
+                e
+            );
+            return;
+        }
+    };
+
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                println!(
+                    "cargo:warning=Failed to read entry in schemas directory: {}; skipping entry",
+                    e
+                );
+                continue;
+            }
+        };
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) == Some("capnp") {
-            let filename = path.file_name().unwrap();
+            let filename = match path.file_name() {
+                Some(f) => f,
+                None => continue,
+            };
             let dest = out_dir.join(filename);
-            fs::copy(&path, &dest).unwrap();
-            capnp_files.push(dest);
+            match fs::copy(&path, &dest) {
+                Ok(_) => capnp_files.push(dest),
+                Err(e) => println!(
+                    "cargo:warning=Failed to copy {:?} to {:?}: {}",
+                    path, dest, e
+                ),
+            }
         }
     }
 
@@ -39,34 +67,70 @@ fn main() {
         return;
     }
 
-    // Invoke capnpc to generate Rust code into OUT_DIR
-    let mut any_generated = false;
+    // Invoke capnpc to generate Rust code into OUT_DIR. Be conservative: only
+    // set the `capnp_generated` cfg if ALL schema files codegen successfully.
+    // If any file fails, remove any partially-generated *_capnp.rs artifacts
+    // to avoid exposing broken bindings to the compiler.
+    // Run capnpc once for all schema files. Running the compiler in a single
+    // invocation reduces the chance of partial successes and provides clearer
+    // combined diagnostics if something goes wrong.
+    let mut cmd = capnpc::CompilerCommand::new();
     for capnp_file in capnp_files.iter() {
-        let mut cmd = capnpc::CompilerCommand::new();
-        cmd.file(capnp_file).output_path(&out_dir);
-        match cmd.run() {
-            Ok(_) => {
-                any_generated = true;
-                println!("cargo:warning=capnp codegen succeeded for {:?}", capnp_file);
-            }
-            Err(e) => {
-                // If capnp isn't installed (capnp binary missing), the error will
-                // indicate that. We should not panic the entire build in that
-                // case; instead, emit a helpful warning and skip codegen so
-                // developers without the native toolchain can still build the
-                // crate without the `capnproto` feature.
-                println!(
-                    "cargo:warning=capnp codegen failed: {}. Skipping capnp codegen. To enable capnp codegen, install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`.",
-                    e
-                );
-            }
-        }
+        cmd.file(capnp_file);
     }
+    cmd.output_path(&out_dir);
 
-    // If any codegen succeeded, expose a cfg so the Rust code can include the
-    // generated bindings safely. When codegen was skipped (e.g. capnp binary
-    // missing), do not set the cfg so the source can fall back to a stub.
-    if any_generated {
-        println!("cargo:rustc-cfg=capnp_generated");
+    match cmd.run() {
+        Ok(_) => {
+            println!(
+                "cargo:warning=capnp codegen succeeded for {} file(s)",
+                capnp_files.len()
+            );
+            // Emit a check-cfg directive to appease `check-cfg` warnings.
+            println!("cargo:rustc-check-cfg=cfg(capnp_generated)");
+            println!("cargo:rustc-cfg=capnp_generated");
+        }
+        Err(e) => {
+            // Combined invocation failed. Attempt per-file compilation to
+            // identify which schema(s) produced errors and capture their
+            // diagnostics. Then clean up any generated *_capnp.rs files.
+            println!("cargo:warning=capnp codegen (combined) failed: {}. Attempting per-file compilation to gather diagnostics.", e);
+
+            let mut per_file_results: Vec<(PathBuf, Result<(), String>)> = Vec::new();
+            for capnp_file in capnp_files.iter() {
+                let mut single = capnpc::CompilerCommand::new();
+                single.file(capnp_file).output_path(&out_dir);
+                match single.run() {
+                    Ok(_) => {
+                        per_file_results.push((capnp_file.clone(), Ok(())));
+                    }
+                    Err(err) => {
+                        per_file_results.push((capnp_file.clone(), Err(format!("{}", err))));
+                    }
+                }
+            }
+
+            // Emit per-file diagnostics as cargo warnings to make CI logs clearer.
+            for (p, res) in per_file_results.iter() {
+                match res {
+                    Ok(_) => println!("cargo:warning=capnp: succeeded: {}", p.display()),
+                    Err(msg) => println!("cargo:warning=capnp: failed: {} -> {}", p.display(), msg),
+                }
+            }
+
+            // Clean up any generated *_capnp.rs files to avoid compiling
+            // partially-generated bindings.
+            if let Ok(dir_entries) = fs::read_dir(&out_dir) {
+                for ent in dir_entries.flatten() {
+                    if let Some(fname) = ent.path().file_name().and_then(|s| s.to_str()) {
+                        if fname.ends_with("_capnp.rs") {
+                            let _ = fs::remove_file(ent.path());
+                        }
+                    }
+                }
+            }
+
+            println!("cargo:warning=capnp codegen failed; generated bindings cleaned from OUT_DIR. To enable capnp codegen, install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. ");
+        }
     }
 }
