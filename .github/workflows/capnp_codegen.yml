@@ -1,4 +1,6 @@
 name: Cap'n Proto Codegen CI
+permissions:
+  contents: read
 
 on:
   push:
@@ -12,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
         with:
           toolchain: stable
           profile: minimal
