@@ -1,0 +1,51 @@
+name: Cap'n Proto single-step smoke
+
+on:
+  push:
+    branches: [ feat/capnp-single-step-smoke, main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    name: Smoke test (matrix)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Install Cap'n Proto (platform-specific)
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y capnproto
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            brew update || true
+            brew install capnp || true
+          else
+            echo "Installing Cap'n Proto on Windows via choco"
+            choco install -y capnproto || echo "choco install failed; ensure capnp available on PATH"
+          fi
+
+      - name: Install capnpc plugin
+        run: |
+          cargo install capnpc || true
+
+      - name: Show versions
+        run: |
+          capnp --version || true
+          ~/.cargo/bin/capnpc --version || true
+
+      - name: Build with capnproto feature
+        run: |
+          cargo build --features capnproto --verbose
