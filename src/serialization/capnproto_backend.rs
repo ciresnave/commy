@@ -209,7 +209,7 @@ mod generated_adapter {
 
         // If we reach here, codegen did not run and bindings are unavailable.
         Err(SerializationError::SerializationFailed(
-            "capnp codegen bindings not available; install the `capnp` compiler and re-run build with --features capnproto".to_string(),
+            "capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. If the problem persists, try `cargo clean` before rebuilding to clear stale artifacts.".to_string(),
         ))
     }
 }

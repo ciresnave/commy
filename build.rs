@@ -18,7 +18,16 @@ fn main() {
 
     println!("cargo:rerun-if-changed=schemas");
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_dir = match env::var("OUT_DIR") {
+        Ok(v) => PathBuf::from(v),
+        Err(e) => {
+            println!(
+                "cargo:warning=OUT_DIR not set: {}; skipping capnp codegen",
+                e
+            );
+            return;
+        }
+    };
 
     // Copy any .capnp schema files into OUT_DIR and run capnpc on them.
     let schema_dir = PathBuf::from("schemas");
@@ -28,6 +37,8 @@ fn main() {
     }
 
     let mut capnp_files = Vec::new();
+    use std::collections::HashSet;
+    let mut seen_basenames: HashSet<String> = HashSet::new();
     let read_dir = match fs::read_dir(&schema_dir) {
         Ok(rd) => rd,
         Err(e) => {
@@ -52,11 +63,18 @@ fn main() {
         };
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) == Some("capnp") {
-            let filename = match path.file_name() {
+            let filename = match path
+                .file_name()
+                .and_then(|f| f.to_str().map(|s| s.to_string()))
+            {
                 Some(f) => f,
                 None => continue,
             };
-            let dest = out_dir.join(filename);
+            let basename = filename.clone();
+            if !seen_basenames.insert(basename.clone()) {
+                println!("cargo:warning=Duplicate schema basename detected: {}. Generated artifacts may collide in OUT_DIR", basename);
+            }
+            let dest = out_dir.join(&filename);
             match fs::copy(&path, &dest) {
                 Ok(_) => capnp_files.push(dest),
                 Err(e) => println!(

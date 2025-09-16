@@ -4,8 +4,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::format_ident;
 use quote::quote;
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::path::PathBuf;
+// (no filesystem writes from the macro; build.rs handles codegen)
 use syn::{parse_macro_input, ItemStruct, LitStr, Meta};
 
 #[proc_macro_attribute]
@@ -207,65 +206,34 @@ pub fn create_writer(
     let short_id = &hash_hex[..16];
     let schema_text = schema_text.replacen("{placeholder}", short_id, 1);
 
-    // Attempt to write the schema into a `schemas/` directory in the consumer crate if possible.
-    // Write local schema into consumer crate's schemas/ for tooling and build.rs consumption.
-    // Prepare schema filename and generated rust filename up-front so they are
-    // available in later scopes (proc-macro expansion must reference the
-    // generated filename when emitting include! tokens).
+    // Prepare schema and generated filenames (used for include! below).
     let struct_name_str = struct_name.to_string();
-    let schema_filename = format!("{}_{}.capnp", struct_name_str, &hash_hex[..8]);
-    let generated_name = format!("{}_{}_capnp.rs", struct_name_str, &hash_hex[..8]);
-    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
-        let mut schema_dir = PathBuf::from(&manifest);
-        schema_dir.push("schemas");
-        if fs::create_dir_all(&schema_dir).is_ok() {
-            let mut schema_file = schema_dir.clone();
-            schema_file.push(&schema_filename);
-            let _ = fs::write(&schema_file, &schema_text);
-
-            // NOTE: We intentionally do NOT invoke capnpc here from the proc-macro
-            // expansion. Running the native capnp compiler from inside a proc-macro
-            // can cause races with the build script and produce partial or
-            // inconsistent generated artifacts. Instead we only write the
-            // deterministic .capnp schema file into the consumer crate's
-            // `schemas/` directory. The top-level `build.rs` is responsible for
-            // running capnpc and providing generated Rust bindings into OUT_DIR.
-        }
-    }
+    let generated_basename = format!("{}_{}", struct_name_str, &hash_hex[..8]);
     // Prepare literal strings for insertion into generated tokens
     let schema_lit = LitStr::new(&schema_text, Span::call_site());
     let hash_lit = LitStr::new(&hash_hex, Span::call_site());
 
-    // If capnpc produced a generated Rust file in OUT_DIR, arrange to include it
-    // in the expanded output so generated bindings are available in the same build.
-    let mut include_generated_tokens = TokenStream2::new();
-    if let Some(manifest_out) = std::env::var("OUT_DIR").ok() {
-        let mut gen_path = PathBuf::from(&manifest_out);
-        gen_path.push(&generated_name);
-
-        if gen_path.exists() {
-            // Try to read the generated file. If present, attempt to parse it and
-            // inline the tokens. If parsing fails, fall back to include! so the
-            // compiler will load the generated bindings.
-            if let Ok(s) = fs::read_to_string(&gen_path) {
-                match syn::parse_file(&s) {
-                    Ok(parsed) => {
-                        include_generated_tokens.extend(quote! {
-                            // Inlined capnp-generated bindings
-                            #parsed
-                        });
-                    }
-                    Err(_) => {
-                        let gen_lit = LitStr::new(&generated_name, Span::call_site());
-                        include_generated_tokens.extend(quote! {
-                            #[allow(unused_imports, dead_code)]
-                            include!(concat!(env!("OUT_DIR"), "/", #gen_lit));
-                        });
-                    }
-                }
-            }
+    // Emit a safe include for generated bindings. We do not perform any file
+    // system writes or run capnpc from inside the proc-macro. The project's
+    // top-level `build.rs` is responsible for running capnpc and placing
+    // generated bindings into OUT_DIR. If the `capnproto` feature is enabled
+    // but the build script did not produce bindings, we emit a helpful
+    // compile-time error so the developer knows how to proceed.
+    let gen_basename_lit = LitStr::new(&generated_basename, Span::call_site());
+    let include_generated_tokens = quote! {
+        // Include generated bindings only when the build script produced them
+        // and the `capnp_generated` cfg was set.
+        #[cfg(all(feature = "capnproto", capnp_generated))]
+        {
+            #[allow(unused_imports, dead_code)]
+            include!(concat!(env!("OUT_DIR"), "/", #gen_basename_lit, "_capnp.rs"));
         }
-    }
+
+        // If the user enabled `capnproto` but codegen did not run successfully,
+        // provide a clear compile-time error with actionable next steps.
+        #[cfg(all(feature = "capnproto", not(capnp_generated)))]
+        compile_error!("capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html), enable the `capnproto` feature and re-run the build (try `cargo clean` if issues persist)");
+    };
 
     // Make unique constant names per-struct to avoid duplicates when macro is applied to
     // multiple structs in the same crate. e.g., SCHEMA_TEXT_MyStruct

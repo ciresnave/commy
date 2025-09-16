@@ -15,33 +15,39 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
         with:
           toolchain: stable
           profile: minimal
 
-      - name: Install Cap'n Proto (platform-specific)
-        shell: bash
+      - name: Install Cap'n Proto on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y capnproto
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            brew update || true
-            brew install capnp || true
-          else
-            echo "Installing Cap'n Proto on Windows via choco"
-            choco install -y capnproto || echo "choco install failed; ensure capnp available on PATH"
-          fi
+          sudo apt-get update
+          sudo apt-get install -y capnproto
+
+      - name: Install Cap'n Proto on macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update || true
+          brew install capnp || true
+
+      - name: Install Cap'n Proto on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install -y capnproto || Write-Host "choco install failed; ensure capnp available on PATH"
 
       - name: Install capnpc plugin
+        shell: bash
         run: |
           cargo install capnpc || true
 
       - name: Show versions
+        shell: bash
         run: |
           capnp --version || true
           ~/.cargo/bin/capnpc --version || true
