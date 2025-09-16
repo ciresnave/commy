@@ -144,6 +144,41 @@ fn main() {
                 "cargo:warning=capnp codegen succeeded for {} file(s)",
                 capnp_files.len()
             );
+            // The capnp compiler may emit generated files into subdirectories
+            // that mirror the source path (for example `OUT_DIR/schemas/...`).
+            // Move any generated `*_capnp.rs` files into OUT_DIR root so our
+            // `include!(concat!(env!("OUT_DIR"), "/..._capnp.rs"))` usages
+            // find them predictably.
+            if let Err(e) = (|| -> std::io::Result<()> {
+                // Walk one level deep in OUT_DIR and move any *_capnp.rs
+                // files found in subdirectories into OUT_DIR.
+                for entry in std::fs::read_dir(&out_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.is_dir() {
+                        for sub in std::fs::read_dir(&path)? {
+                            let sub = sub?;
+                            let sub_path = sub.path();
+                            if sub_path.is_file() {
+                                if let Some(fname) = sub_path.file_name().and_then(|s| s.to_str()) {
+                                    if fname.ends_with("_capnp.rs") {
+                                        let dest = out_dir.join(fname);
+                                        // If dest exists, overwrite it.
+                                        let _ = std::fs::remove_file(&dest);
+                                        std::fs::rename(&sub_path, &dest)?;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            })() {
+                println!(
+                    "cargo:warning=Failed to normalize generated capnp outputs: {}",
+                    e
+                );
+            }
             // Emit a check-cfg directive to appease `check-cfg` warnings.
             println!("cargo:rustc-check-cfg=cfg(capnp_generated)");
             println!("cargo:rustc-cfg=capnp_generated");
@@ -176,17 +211,30 @@ fn main() {
                 }
             }
 
-            // Clean up any generated *_capnp.rs files to avoid compiling
-            // partially-generated bindings.
-            if let Ok(dir_entries) = fs::read_dir(&out_dir) {
-                for ent in dir_entries.flatten() {
-                    if let Some(fname) = ent.path().file_name().and_then(|s| s.to_str()) {
+            // Clean up any generated *_capnp.rs files (recursively) to avoid compiling
+            // partially-generated bindings. Walk OUT_DIR one level deep.
+            let _ = (|| -> std::io::Result<()> {
+                for entry in fs::read_dir(&out_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.is_dir() {
+                        for sub in fs::read_dir(&path)? {
+                            let sub = sub?;
+                            let sub_path = sub.path();
+                            if let Some(fname) = sub_path.file_name().and_then(|s| s.to_str()) {
+                                if fname.ends_with("_capnp.rs") {
+                                    let _ = fs::remove_file(&sub_path);
+                                }
+                            }
+                        }
+                    } else if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
                         if fname.ends_with("_capnp.rs") {
-                            let _ = fs::remove_file(ent.path());
+                            let _ = fs::remove_file(&path);
                         }
                     }
                 }
-            }
+                Ok(())
+            })();
 
             println!("cargo:warning=capnp codegen failed; generated bindings cleaned from OUT_DIR. To enable capnp codegen, install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. ");
         }

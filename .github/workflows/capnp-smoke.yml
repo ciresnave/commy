@@ -1,5 +1,8 @@
 name: Cap'n Proto single-step smoke
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ feat/capnp-single-step-smoke, main ]
@@ -41,16 +44,42 @@ jobs:
         run: |
           choco install -y capnproto || Write-Host "choco install failed; ensure capnp available on PATH"
 
-      - name: Install capnpc plugin
+      - name: Install capnpc plugin (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          cargo install capnpc || true
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo install capnpc --locked || true
 
-      - name: Show versions
+      - name: Install capnpc plugin (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo install capnpc --locked || true
+
+      - name: Install capnpc plugin (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
+          cargo install capnpc --locked || Write-Host "cargo install capnpc failed; ensure capnpc is available"
+
+      - name: Show versions (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           capnp --version || true
-          ~/.cargo/bin/capnpc --version || true
+          echo "capnpc:" $(command -v capnpc || echo "not found")
+          $HOME/.cargo/bin/capnpc --version || true
+
+      - name: Show versions (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          capnp --version -ErrorAction SilentlyContinue; if ($?) { } else { Write-Host 'capnp not found' }
+          $capnpc = "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe"
+          if (Test-Path $capnpc) { & $capnpc --version } else { Write-Host 'capnpc not found' }
 
       - name: Build with capnproto feature
         run: |
