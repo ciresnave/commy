@@ -76,7 +76,42 @@ fn main() {
             }
             let dest = out_dir.join(&filename);
             match fs::copy(&path, &dest) {
-                Ok(_) => capnp_files.push(dest),
+                Ok(_) => {
+                    // Emit diagnostics about the copied schema to help CI debug
+                    // cases where a schema may be truncated or corrupted.
+                    match fs::metadata(&dest) {
+                        Ok(meta) => {
+                            let size = meta.len();
+                            println!(
+                                "cargo:warning=copied schema: {} -> {} ({} bytes)",
+                                path.display(),
+                                dest.display(),
+                                size
+                            );
+                            // Try to show a short preview of the file (first 512 bytes)
+                            if let Ok(mut f) = fs::File::open(&dest) {
+                                use std::io::Read;
+                                let mut buf = [0u8; 512];
+                                if let Ok(n) = f.read(&mut buf) {
+                                    if n > 0 {
+                                        // Print as UTF-8 lossily to avoid panics on binary data.
+                                        let preview = String::from_utf8_lossy(&buf[..n]);
+                                        for line in preview.lines().take(20) {
+                                            println!("cargo:warning=schema-preview: {}", line);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => println!(
+                            "cargo:warning=Failed to stat copied schema {}: {}",
+                            dest.display(),
+                            e
+                        ),
+                    }
+
+                    capnp_files.push(dest)
+                }
                 Err(e) => println!(
                     "cargo:warning=Failed to copy {:?} to {:?}: {}",
                     path, dest, e
