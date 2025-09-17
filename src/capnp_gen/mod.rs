@@ -1,7 +1,7 @@
 // This module is intentionally minimal. The `build.rs` script will run
-# capnpc on .capnp files in `schemas/` and place generated Rust modules into
-# the crate's OUT_DIR. Consumers can `include!(concat!(env!("OUT_DIR"), "/<schema>.rs"))`
-# or this module can be expanded to re-export generated symbols as needed.
+// capnpc on .capnp files in `schemas/` and place generated Rust modules into
+// the crate's OUT_DIR. Consumers can `include!(concat!(env!("OUT_DIR"), "/<schema>.rs"))`
+// or this module can be expanded to re-export generated symbols as needed.
 
 #[cfg(feature = "capnproto")]
 pub mod generated {
