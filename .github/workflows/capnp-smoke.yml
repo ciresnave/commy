@@ -65,6 +65,21 @@ jobs:
           $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
           cargo install capnpc --locked || Write-Host "cargo install capnpc failed; ensure capnpc is available"
 
+      - name: Ensure cargo bin is on PATH for the rest of the job
+        shell: bash
+        run: |
+          echo "Adding cargo bin to PATH via GITHUB_ENV"
+          # For Linux/macOS this writes to GITHUB_ENV; on Windows the same file is available
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+        if: runner.os != 'Windows'
+
+      - name: Ensure cargo bin is on PATH for the rest of the job (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Adding cargo bin to PATH via GITHUB_ENV"
+          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:USERPROFILE\\.cargo\\bin;$env:PATH"
+
       - name: Show versions (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
