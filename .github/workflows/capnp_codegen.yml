@@ -13,7 +13,9 @@ jobs:
     name: Build with capnp codegen
     runs-on: ubuntu-latest
     env:
-      RUST_BACKTRACE: 1
+      # Request full backtraces from any Rust process so panics include verbose
+      # frames for diagnosis (helps triaging capnpc panics in CI).
+      RUST_BACKTRACE: full
     steps:
       - name: Checkout
         uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
