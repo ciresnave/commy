@@ -68,8 +68,17 @@ jobs:
         run: |
           echo "PATH=$PATH"
           capnp --version || (echo 'capnp not found' && exit 1)
-          capnpc --version || (echo 'capnpc not found' && exit 1)
-          echo "capnpc:" $(command -v capnpc || echo "not found")
+          # capnpc can be installed under several executable names (capnpc, capnpc-rust, capnpc-rust-bootstrap)
+          if command -v capnpc >/dev/null 2>&1; then
+            capnpc --version
+          elif command -v capnpc-rust >/dev/null 2>&1; then
+            capnpc-rust --version
+          elif command -v capnpc-rust-bootstrap >/dev/null 2>&1; then
+            capnpc-rust-bootstrap --version
+          else
+            echo 'capnpc not found' && exit 1
+          fi
+          echo "capnpc:" $(command -v capnpc || command -v capnpc-rust || command -v capnpc-rust-bootstrap || echo "not found")
         if: runner.os != 'Windows'
 
       - name: Show Cap'n Proto tooling (Windows)
@@ -78,8 +87,19 @@ jobs:
         run: |
           Write-Host "PATH=$env:Path"
           try { & capnp --version } catch { Write-Host 'capnp not found'; exit 1 }
-          $capnpc = "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe"
-          if (Test-Path $capnpc) { & $capnpc --version } else { Write-Host 'capnpc not found'; exit 1 }
+          # Check multiple possible capnpc executable names created by cargo install and older installers
+          $candidates = @(
+            "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe",
+            "$env:USERPROFILE\\.cargo\\bin\\capnpc-rust.exe",
+            "$env:USERPROFILE\\.cargo\\bin\\capnpc-rust-bootstrap.exe",
+            "$env:ProgramFiles\\capnproto\\bin\\capnpc.exe",
+            "$env:ProgramFiles(x86)\\capnproto\\bin\\capnpc.exe"
+          )
+          $found = $false
+          foreach ($p in $candidates) {
+            if (Test-Path $p) { & $p --version; $found = $true; break }
+          }
+          if (-not $found) { Write-Host 'capnpc not found'; exit 1 }
 
       - name: Build (capnproto feature)
         run: |

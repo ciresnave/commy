@@ -37,7 +37,16 @@ jobs:
         run: |
           echo "PATH=$PATH"
           capnp --version || (echo 'capnp not found' && exit 1)
-          capnpc --version || (echo 'capnpc not found' && exit 1)
+          # capnpc may be installed as capnpc, capnpc-rust or capnpc-rust-bootstrap
+          if command -v capnpc >/dev/null 2>&1; then
+            capnpc --version
+          elif command -v capnpc-rust >/dev/null 2>&1; then
+            capnpc-rust --version
+          elif command -v capnpc-rust-bootstrap >/dev/null 2>&1; then
+            capnpc-rust-bootstrap --version
+          else
+            echo 'capnpc not found' && exit 1
+          fi
 
       - name: Build (capnproto feature)
         run: |
