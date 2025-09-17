@@ -12,6 +12,10 @@ jobs:
   capnp:
     name: Cap'n Proto (matrix)
     runs-on: ${{ matrix.os }}
+    # Enable backtraces for any Rust process run during the job so panics in
+    # capnpc/capnp plugins surface full stack traces in logs for diagnosis.
+    env:
+      RUST_BACKTRACE: 1
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -86,8 +90,13 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "PATH=$env:Path"
+          # Ensure system capnp compiler exists; fail fast if missing as it's required.
           try { & capnp --version } catch { Write-Host 'capnp not found'; exit 1 }
-          # Check multiple possible capnpc executable names created by cargo install and older installers
+
+          # Check multiple possible capnpc executable names created by cargo install and older installers.
+          # If the executable is present but crashes when invoked (we saw a panic in CI),
+          # don't abort here — we want to continue to the build step so the build script
+          # can be run with RUST_BACKTRACE=1 and produce a full backtrace for analysis.
           $candidates = @(
             "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe",
             "$env:USERPROFILE\\.cargo\\bin\\capnpc-rust.exe",
@@ -97,7 +106,16 @@ jobs:
           )
           $found = $false
           foreach ($p in $candidates) {
-            if (Test-Path $p) { & $p --version; $found = $true; break }
+            if (Test-Path $p) {
+              Write-Host "Found capnpc candidate: $p"
+              try {
+                & $p --version
+              } catch {
+                Write-Host "capnpc executed but failed to print version (this is a diagnostic). Continuing to build to capture full backtrace."
+              }
+              $found = $true
+              break
+            }
           }
           if (-not $found) { Write-Host 'capnpc not found'; exit 1 }
 

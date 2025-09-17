@@ -12,6 +12,8 @@ jobs:
   build-capnp:
     name: Build with capnp codegen
     runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
@@ -37,13 +39,27 @@ jobs:
         run: |
           echo "PATH=$PATH"
           capnp --version || (echo 'capnp not found' && exit 1)
-          # capnpc may be installed as capnpc, capnpc-rust or capnpc-rust-bootstrap
+          # Detect capnpc binary; if it exists but crashes, continue so the
+          # subsequent build step runs with RUST_BACKTRACE=1 to capture full
+          # diagnostic information.
           if command -v capnpc >/dev/null 2>&1; then
-            capnpc --version
+            if ! capnpc --version >/dev/null 2>&1; then
+              echo "capnpc present but failed to print version; continuing for diagnostics"
+            else
+              capnpc --version
+            fi
           elif command -v capnpc-rust >/dev/null 2>&1; then
-            capnpc-rust --version
+            if ! capnpc-rust --version >/dev/null 2>&1; then
+              echo "capnpc-rust present but failed to print version; continuing for diagnostics"
+            else
+              capnpc-rust --version
+            fi
           elif command -v capnpc-rust-bootstrap >/dev/null 2>&1; then
-            capnpc-rust-bootstrap --version
+            if ! capnpc-rust-bootstrap --version >/dev/null 2>&1; then
+              echo "capnpc-rust-bootstrap present but failed to print version; continuing for diagnostics"
+            else
+              capnpc-rust-bootstrap --version
+            fi
           else
             echo 'capnpc not found' && exit 1
           fi
