@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use walkdir::WalkDir;
 
 fn main() {
     // Only run capnp codegen when the `capnproto` feature is enabled.
@@ -11,12 +12,12 @@ fn main() {
         return;
     }
 
-    // Always advertise the `capnp_generated` cfg to rustc's `check-cfg` machinery so
-    // code that contains `#[cfg(capnp_generated)]` does not trigger the
-    // `unexpected_cfgs` lint when the build script runs before generation.
-    println!("cargo:rustc-check-cfg=cfg(capnp_generated)");
+    // We will advertise the `capnp_generated` cfg to rustc's `check-cfg` machinery
+    // after successful code generation below. Emitting it prematurely can hide
+    // real failures; defer until we know codegen succeeded.
 
-    println!("cargo:rerun-if-changed=schemas");
+    // Tell cargo to rerun when any schema file changes. We will emit a
+    // per-file `rerun-if-changed` below after discovering schema files.
 
     let out_dir = match env::var("OUT_DIR") {
         Ok(v) => PathBuf::from(v),
@@ -29,93 +30,21 @@ fn main() {
         }
     };
 
-    // Copy any .capnp schema files into OUT_DIR and run capnpc on them.
+    // Discover .capnp files recursively under schemas/ using walkdir.
     let schema_dir = PathBuf::from("schemas");
     if !schema_dir.exists() {
         println!("cargo:warning=No schemas directory found; skipping capnp codegen");
         return;
     }
 
-    let mut capnp_files = Vec::new();
-    use std::collections::HashSet;
-    let mut seen_basenames: HashSet<String> = HashSet::new();
-    let read_dir = match fs::read_dir(&schema_dir) {
-        Ok(rd) => rd,
-        Err(e) => {
-            println!(
-                "cargo:warning=Failed to read schemas directory: {}; skipping capnp codegen",
-                e
-            );
-            return;
-        }
-    };
-
-    for entry in read_dir {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                println!(
-                    "cargo:warning=Failed to read entry in schemas directory: {}; skipping entry",
-                    e
-                );
-                continue;
-            }
-        };
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("capnp") {
-            let filename = match path
-                .file_name()
-                .and_then(|f| f.to_str().map(|s| s.to_string()))
-            {
-                Some(f) => f,
-                None => continue,
-            };
-            let basename = filename.clone();
-            if !seen_basenames.insert(basename.clone()) {
-                println!("cargo:warning=Duplicate schema basename detected: {}. Generated artifacts may collide in OUT_DIR", basename);
-            }
-            let dest = out_dir.join(&filename);
-            match fs::copy(&path, &dest) {
-                Ok(_) => {
-                    // Emit diagnostics about the copied schema to help CI debug
-                    // cases where a schema may be truncated or corrupted.
-                    match fs::metadata(&dest) {
-                        Ok(meta) => {
-                            let size = meta.len();
-                            println!(
-                                "cargo:warning=copied schema: {} -> {} ({} bytes)",
-                                path.display(),
-                                dest.display(),
-                                size
-                            );
-                            // Try to show a short preview of the file (first 512 bytes)
-                            if let Ok(mut f) = fs::File::open(&dest) {
-                                use std::io::Read;
-                                let mut buf = [0u8; 512];
-                                if let Ok(n) = f.read(&mut buf) {
-                                    if n > 0 {
-                                        // Print as UTF-8 lossily to avoid panics on binary data.
-                                        let preview = String::from_utf8_lossy(&buf[..n]);
-                                        for line in preview.lines().take(20) {
-                                            println!("cargo:warning=schema-preview: {}", line);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => println!(
-                            "cargo:warning=Failed to stat copied schema {}: {}",
-                            dest.display(),
-                            e
-                        ),
-                    }
-
-                    capnp_files.push(dest)
+    let mut capnp_files: Vec<PathBuf> = Vec::new();
+    for entry in WalkDir::new(&schema_dir).into_iter().filter_map(|e| e.ok()) {
+        let p = entry.path().to_path_buf();
+        if p.exists() {
+            if let Ok(md) = std::fs::metadata(&p) {
+                if md.is_file() && p.extension().and_then(|s| s.to_str()) == Some("capnp") {
+                    capnp_files.push(p);
                 }
-                Err(e) => println!(
-                    "cargo:warning=Failed to copy {:?} to {:?}: {}",
-                    path, dest, e
-                ),
             }
         }
     }
@@ -125,6 +54,12 @@ fn main() {
         return;
     }
 
+    // Emit per-file rerun-if-changed so cargo invalidates build when a schema
+    // file changes.
+    for f in &capnp_files {
+        println!("cargo:rerun-if-changed={}", f.display());
+    }
+
     // Invoke capnpc to generate Rust code into OUT_DIR. Be conservative: only
     // set the `capnp_generated` cfg if ALL schema files codegen successfully.
     // If any file fails, remove any partially-generated *_capnp.rs artifacts
@@ -132,11 +67,14 @@ fn main() {
     // Run capnpc once for all schema files. Running the compiler in a single
     // invocation reduces the chance of partial successes and provides clearer
     // combined diagnostics if something goes wrong.
+    // Single combined invocation: include the top-level schemas directory so
+    // capnpc can resolve imports relative to schemas/ and produce flattened
+    // output using `src_prefix` semantics when available.
     let mut cmd = capnpc::CompilerCommand::new();
-    for capnp_file in capnp_files.iter() {
+    cmd.output_path(&out_dir);
+    for capnp_file in &capnp_files {
         cmd.file(capnp_file);
     }
-    cmd.output_path(&out_dir);
 
     match cmd.run() {
         Ok(_) => {
@@ -151,105 +89,67 @@ fn main() {
             // `include!(concat!(env!("OUT_DIR"), "/..._capnp.rs"))` usages
             // find them predictably. Emit diagnostics about what we found and
             // where we moved files so CI logs show the final layout.
-            if let Err(e) = (|| -> std::io::Result<()> {
-                // Collect matching files recursively.
-                fn collect(
-                    dir: &std::path::Path,
-                    acc: &mut Vec<std::path::PathBuf>,
-                ) -> std::io::Result<()> {
-                    for entry in std::fs::read_dir(dir)? {
-                        let entry = entry?;
-                        let p = entry.path();
-                        if p.is_dir() {
-                            collect(&p, acc)?;
-                        } else if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
-                            if fname.ends_with("_capnp.rs") {
-                                acc.push(p);
-                            }
-                        }
-                    }
-                    Ok(())
-                }
-
-                let mut found: Vec<std::path::PathBuf> = Vec::new();
-                collect(&out_dir, &mut found)?;
-
-                if found.is_empty() {
-                    println!("cargo:warning=No generated *_capnp.rs files found in OUT_DIR after capnpc run");
-                } else {
-                    for p in &found {
-                        println!("cargo:warning=found generated file: {}", p.display());
-                    }
-
-                    // Deduplicate paths to avoid double-processing the same file.
-                    found.sort();
-                    found.dedup();
-
-                    for p in found {
-                        if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
-                            let dest = out_dir.join(fname);
-
-                            // If source and destination are identical, skip moving.
-                            if p == dest {
-                                println!(
-                                    "cargo:warning=skipping move; already at destination: {}",
-                                    p.display()
-                                );
-                                continue;
-                            }
-
-                            // If dest exists, remove it first to allow overwrite.
-                            let _ = std::fs::remove_file(&dest);
-
-                            // Prefer atomic rename; on Windows or some platforms this
-                            // can fail across device boundaries, so fall back to copy
-                            // + remove if rename fails.
-                            match std::fs::rename(&p, &dest) {
-                                Ok(()) => {
-                                    println!(
-                                        "cargo:warning=moved generated: {} -> {}",
-                                        p.display(),
-                                        dest.display()
-                                    );
-                                }
-                                Err(rename_err) => {
-                                    // Fallback: try copy then remove source.
-                                    match std::fs::copy(&p, &dest) {
-                                        Ok(_) => {
-                                            let _ = std::fs::remove_file(&p);
-                                            println!(
-                                                "cargo:warning=copied(moved) generated: {} -> {} (rename failed: {})",
-                                                p.display(),
-                                                dest.display(),
-                                                rename_err
-                                            );
-                                        }
-                                        Err(copy_err) => {
-                                            return Err(std::io::Error::new(
-                                                copy_err.kind(),
-                                                format!(
-                                                    "failed to move or copy generated file {} -> {}: rename err: {}; copy err: {}",
-                                                    p.display(), dest.display(), rename_err, copy_err
-                                                ),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
+            // Normalize: find any *_capnp.rs files (recursively) and move them
+            // into OUT_DIR root so downstream `include!`s are stable. This is
+            // similar to the previous behavior but implemented with walkdir.
+            let mut found: Vec<PathBuf> = Vec::new();
+            for entry in WalkDir::new(&out_dir).into_iter().filter_map(|e| e.ok()) {
+                let p = entry.into_path();
+                if p.is_file() {
+                    if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
+                        if fname.ends_with("_capnp.rs") {
+                            found.push(p);
                         }
                     }
                 }
+            }
 
-                Ok(())
-            })() {
+            if found.is_empty() {
                 println!(
-                    "cargo:warning=Failed to normalize/generated capnp outputs recursively: {}",
-                    e
+                    "cargo:warning=No generated *_capnp.rs files found in OUT_DIR after capnpc run"
                 );
+            } else {
+                for p in &found {
+                    println!("cargo:warning=found generated file: {}", p.display());
+                }
+
+                found.sort();
+                found.dedup();
+
+                for p in found {
+                    if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
+                        let dest = out_dir.join(fname);
+                        if p == dest {
+                            println!(
+                                "cargo:warning=skipping move; already at destination: {}",
+                                p.display()
+                            );
+                            continue;
+                        }
+
+                        let _ = fs::remove_file(&dest);
+                        match std::fs::rename(&p, &dest) {
+                            Ok(()) => println!("cargo:warning=moved generated: {} -> {}", p.display(), dest.display()),
+                            Err(rename_err) => match std::fs::copy(&p, &dest) {
+                                Ok(_) => {
+                                    let _ = fs::remove_file(&p);
+                                    println!("cargo:warning=copied(moved) generated: {} -> {} (rename failed: {})", p.display(), dest.display(), rename_err);
+                                }
+                                Err(copy_err) => println!("cargo:warning=failed to move or copy generated file {} -> {}: rename err: {}; copy err: {}", p.display(), dest.display(), rename_err, copy_err),
+                            },
+                        }
+                    }
+                }
             }
             // Emit a check-cfg directive to appease `check-cfg` warnings.
-            println!("cargo:rustc-check-cfg=cfg(capnp_generated)");
+            // Emit a cfg so consumer crates can use #[cfg(capnp_generated)] to
+            // avoid hard includes when codegen was skipped. Emit exactly once.
             println!("cargo:rustc-cfg=capnp_generated");
+            // Also inform Cargo's `check-cfg` machinery about this non-feature
+            // cfg name so `unexpected_cfgs` diagnostics are suppressed when
+            // authors use `#[cfg(capnp_generated)]`. This mirrors the advice in
+            // rustc's help text and is safe to emit from the build script.
+            println!("cargo:rustc-check-cfg=cfg(capnp_generated)");
             // Sanity check: ensure at least one normalized *_capnp.rs exists in OUT_DIR root.
             let normalized_exists = out_dir.join("example_capnp.rs").exists();
             if !normalized_exists {

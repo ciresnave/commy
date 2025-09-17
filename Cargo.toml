@@ -154,3 +154,4 @@ num-bigint-dig = { path = "vendor/num-bigint-dig", package = "num-bigint-dig" }
 # guarded by the feature so normal builds without capnproto do not require
 # the system capnp toolchain.
 capnpc = { version = "0.21.4" }
+walkdir = "2"

@@ -16,6 +16,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_phase2_mesh_manager_configuration() {
+        // Allow test-only mock auth provider. Some manager initialization paths
+        // use MockAuthProvider when `require_auth` is false; tests must opt in
+        // by setting this env var to avoid accidental panics in CI/local runs.
+        std::env::set_var("TEST_ENV", "1");
         // Test that we can create mesh manager configurations correctly
         let node_id = Uuid::new_v4();
         let manager_config = ManagerConfig {

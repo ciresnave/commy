@@ -211,10 +211,14 @@ mod generated_adapter {
 
         #[cfg(not(capnp_generated))]
         {
-            // If codegen did not run and bindings are unavailable, return a clear error.
-            return Err(SerializationError::SerializationFailed(
-                "capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. If the problem persists, try `cargo clean` before rebuilding to clear stale artifacts.".to_string(),
-            ));
+            // If codegen did not run and bindings are unavailable, return a clear error
+            // with actionable next steps. Include a pointer to OUT_DIR so CI logs
+            // and developers can quickly inspect the generated artifacts directory.
+            let out = env!("OUT_DIR");
+            return Err(SerializationError::SerializationFailed(format!(
+                "capnp codegen bindings not available; expected generated bindings in OUT_DIR='{}'. Install the `capnp` compiler (https://capnproto.org/install.html), enable the `capnproto` feature, and re-run the build. If issues persist, try `cargo clean` before rebuilding to clear stale artifacts.",
+                out
+            )));
         }
     }
 }

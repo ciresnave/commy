@@ -322,14 +322,27 @@ impl SharedFileManager {
                 token_lifetime_secs,
             ))
         } else {
-            // No-op mock provider that accepts any non-empty token
-            // Prevent usage outside of test environments
-            if std::env::var("TEST_ENV").unwrap_or_default() != "1" {
-                panic!("MockAuthProvider should only be used in test environments! Set TEST_ENV=1 to allow.");
-            } else {
-                eprintln!("WARNING: Using MockAuthProvider. This should only be enabled for testing.");
+            // No-op mock provider that accepts any non-empty token.
+            // In test builds we allow usage without requiring an env var.
+            // In non-test builds, require explicit opt-in via TEST_ENV for safety.
+            #[cfg(test)]
+            {
+                eprintln!("WARNING: Using MockAuthProvider in test build.");
+                std::sync::Arc::new(MockAuthProvider::new(true))
             }
-            std::sync::Arc::new(MockAuthProvider::new(true))
+
+            #[cfg(not(test))]
+            {
+                // Prevent usage outside of test environments unless explicitly opted in.
+                if std::env::var("TEST_ENV").unwrap_or_default() != "1" {
+                    panic!("MockAuthProvider should only be used in test environments! Set TEST_ENV=1 to allow.");
+                } else {
+                    eprintln!(
+                        "WARNING: Using MockAuthProvider. This should only be enabled for testing."
+                    );
+                }
+                std::sync::Arc::new(MockAuthProvider::new(true))
+            }
         };
 
         // Initialize distributed config
