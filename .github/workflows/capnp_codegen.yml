@@ -30,7 +30,8 @@ jobs:
       - name: Install capnpc plugin
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          cargo install capnpc --locked || true
+          cargo install capnpc --locked
+          echo "PATH=$PATH"
 
       - name: Build (capnproto feature)
         run: |

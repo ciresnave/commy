@@ -35,8 +35,8 @@ jobs:
       - name: Install Cap'n Proto (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew update || true
-          brew install capnp || true
+          brew update
+          brew install capnproto
 
       - name: Install Cap'n Proto (Windows)
         if: runner.os == 'Windows'
@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          cargo install capnpc --locked || true
+          cargo install capnpc --locked
           echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
 
       - name: Install capnpc plugin (Windows)
@@ -57,13 +57,15 @@ jobs:
         shell: pwsh
         run: |
           $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
-          cargo install capnpc --locked || Write-Host "cargo install capnpc failed; ensure capnpc is available"
+          cargo install capnpc --locked
           Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:USERPROFILE\\.cargo\\bin;$env:PATH"
 
       - name: Show Cap'n Proto tooling
         shell: bash
         run: |
-          capnp --version || true
+          echo "PATH=$PATH"
+          capnp --version
+          capnpc --version
           echo "capnpc:" $(command -v capnpc || echo "not found")
         if: runner.os != 'Windows'
 
@@ -71,9 +73,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          capnp --version -ErrorAction SilentlyContinue; if ($?) { } else { Write-Host 'capnp not found' }
+          Write-Host "PATH=$env:Path"
+          try { & capnp --version } catch { Write-Host 'capnp not found'; exit 1 }
           $capnpc = "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe"
-          if (Test-Path $capnpc) { & $capnpc --version } else { Write-Host 'capnpc not found' }
+          if (Test-Path $capnpc) { & $capnpc --version } else { Write-Host 'capnpc not found'; exit 1 }
 
       - name: Build (capnproto feature)
         run: |
