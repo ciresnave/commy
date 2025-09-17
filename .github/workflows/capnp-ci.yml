@@ -1,0 +1,92 @@
+name: Cap'n Proto CI (consolidated)
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  capnp:
+    name: Cap'n Proto (matrix)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Install Cap'n Proto (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto
+
+      - name: Install Cap'n Proto (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update || true
+          brew install capnp || true
+
+      - name: Install Cap'n Proto (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y capnproto || Write-Host "choco install failed; ensure capnp available on PATH"
+
+      - name: Install capnpc plugin (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo install capnpc --locked || true
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Install capnpc plugin (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
+          cargo install capnpc --locked || Write-Host "cargo install capnpc failed; ensure capnpc is available"
+          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:USERPROFILE\\.cargo\\bin;$env:PATH"
+
+      - name: Show Cap'n Proto tooling
+        shell: bash
+        run: |
+          capnp --version || true
+          echo "capnpc:" $(command -v capnpc || echo "not found")
+        if: runner.os != 'Windows'
+
+      - name: Show Cap'n Proto tooling (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          capnp --version -ErrorAction SilentlyContinue; if ($?) { } else { Write-Host 'capnp not found' }
+          $capnpc = "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe"
+          if (Test-Path $capnpc) { & $capnpc --version } else { Write-Host 'capnpc not found' }
+
+      - name: Build (capnproto feature)
+        run: |
+          cargo build -p commy --features capnproto --verbose
+
+      - name: Run tests (capnproto feature)
+        run: |
+          cargo test -p commy --features capnproto --verbose
+
+      # Run the focused single-step smoke test on Ubuntu to keep matrix runs fast.
+      - name: Run single-step capnp smoke test (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          cargo test --features capnproto --test smoke_capnp_single_step --verbose
+        env:
+          RUSTFLAGS: "-D warnings"
