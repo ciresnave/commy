@@ -30,8 +30,14 @@ jobs:
       - name: Install capnpc plugin
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          cargo install capnpc --locked
+          cargo install capnpc --locked || (echo "cargo install capnpc failed" && echo "PATH=$PATH" && exit 1)
+          echo "PATH=$HOME/.cargo/bin:$PATH"
+
+      - name: Show Cap'n Proto tooling
+        run: |
           echo "PATH=$PATH"
+          capnp --version || (echo 'capnp not found' && exit 1)
+          capnpc --version || (echo 'capnpc not found' && exit 1)
 
       - name: Build (capnproto feature)
         run: |
