@@ -153,7 +153,10 @@ fn main() {
             // where we moved files so CI logs show the final layout.
             if let Err(e) = (|| -> std::io::Result<()> {
                 // Collect matching files recursively.
-                fn collect(dir: &std::path::Path, acc: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+                fn collect(
+                    dir: &std::path::Path,
+                    acc: &mut Vec<std::path::PathBuf>,
+                ) -> std::io::Result<()> {
                     for entry in std::fs::read_dir(dir)? {
                         let entry = entry?;
                         let p = entry.path();
@@ -178,13 +181,61 @@ fn main() {
                         println!("cargo:warning=found generated file: {}", p.display());
                     }
 
+                    // Deduplicate paths to avoid double-processing the same file.
+                    found.sort();
+                    found.dedup();
+
                     for p in found {
                         if let Some(fname) = p.file_name().and_then(|s| s.to_str()) {
                             let dest = out_dir.join(fname);
-                            // If dest exists, overwrite it.
+
+                            // If source and destination are identical, skip moving.
+                            if p == dest {
+                                println!(
+                                    "cargo:warning=skipping move; already at destination: {}",
+                                    p.display()
+                                );
+                                continue;
+                            }
+
+                            // If dest exists, remove it first to allow overwrite.
                             let _ = std::fs::remove_file(&dest);
-                            std::fs::rename(&p, &dest)?;
-                            println!("cargo:warning=moved generated: {} -> {}", p.display(), dest.display());
+
+                            // Prefer atomic rename; on Windows or some platforms this
+                            // can fail across device boundaries, so fall back to copy
+                            // + remove if rename fails.
+                            match std::fs::rename(&p, &dest) {
+                                Ok(()) => {
+                                    println!(
+                                        "cargo:warning=moved generated: {} -> {}",
+                                        p.display(),
+                                        dest.display()
+                                    );
+                                }
+                                Err(rename_err) => {
+                                    // Fallback: try copy then remove source.
+                                    match std::fs::copy(&p, &dest) {
+                                        Ok(_) => {
+                                            let _ = std::fs::remove_file(&p);
+                                            println!(
+                                                "cargo:warning=copied(moved) generated: {} -> {} (rename failed: {})",
+                                                p.display(),
+                                                dest.display(),
+                                                rename_err
+                                            );
+                                        }
+                                        Err(copy_err) => {
+                                            return Err(std::io::Error::new(
+                                                copy_err.kind(),
+                                                format!(
+                                                    "failed to move or copy generated file {} -> {}: rename err: {}; copy err: {}",
+                                                    p.display(), dest.display(), rename_err, copy_err
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -199,6 +250,34 @@ fn main() {
             // Emit a check-cfg directive to appease `check-cfg` warnings.
             println!("cargo:rustc-check-cfg=cfg(capnp_generated)");
             println!("cargo:rustc-cfg=capnp_generated");
+            // Sanity check: ensure at least one normalized *_capnp.rs exists in OUT_DIR root.
+            let normalized_exists = out_dir.join("example_capnp.rs").exists();
+            if !normalized_exists {
+                // If we didn't find the common example name, do a broader check.
+                let mut any = false;
+                if let Ok(mut entries) = std::fs::read_dir(&out_dir) {
+                    while let Some(Ok(e)) = entries.next() {
+                        if let Some(fname) = e.file_name().to_str() {
+                            if fname.ends_with("_capnp.rs") {
+                                any = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !any {
+                    // Fail the build with an explanatory message so CI shows a clear error.
+                    println!(
+                        "cargo:warning=No normalized *_capnp.rs files present in OUT_DIR after capnp codegen and normalization.\n\
+                        This is likely caused by capnpc emitting files into an unexpected subdirectory or capnpc not being available.\n\
+                        Ensure capnpc is installed and in PATH, and that build.rs has permission to move generated files.\n\
+                        OUT_DIR={}",
+                        out_dir.display()
+                    );
+                    // Emit a rustc error by printing to stderr via panic! so the build fails loudly.
+                    panic!("capnp codegen completed but no generated Rust bindings were found in OUT_DIR");
+                }
+            }
         }
         Err(e) => {
             // Combined invocation failed. Attempt per-file compilation to

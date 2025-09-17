@@ -186,31 +186,36 @@ mod generated_adapter {
 
     /// Build and serialize a `PluginExample` message using the generated API.
     /// If codegen didn't run, this function returns an explicit error.
+    #[allow(dead_code)]
     pub fn serialize_plugin_example(
         id: &str,
         value: i64,
         payload: &[u8],
     ) -> Result<Vec<u8>, SerializationError> {
+        // Two mutually-exclusive cfg blocks so the compiler doesn't see
+        // an unconditional `return` followed by more code (which triggers
+        // an "unreachable expression" warning when `capnp_generated` is set).
         #[cfg(capnp_generated)]
         {
             let mut message = capnp::message::Builder::new_default();
 
             // Initialize root as the generated PluginExample struct
-            {
-                let mut root = message.init_root::<gen::plugin_example::Builder>();
-                root.set_id(id);
-                root.set_value(value);
-                root.set_payload(payload);
-            }
+            let mut root = message.init_root::<gen::plugin_example::Builder>();
+            root.set_id(id);
+            root.set_value(value);
+            root.set_payload(payload);
 
             // Serialize into canonical Cap'n Proto words
             return Ok(capnp::serialize::write_message_to_words(&message));
         }
 
-        // If we reach here, codegen did not run and bindings are unavailable.
-        Err(SerializationError::SerializationFailed(
-            "capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. If the problem persists, try `cargo clean` before rebuilding to clear stale artifacts.".to_string(),
-        ))
+        #[cfg(not(capnp_generated))]
+        {
+            // If codegen did not run and bindings are unavailable, return a clear error.
+            return Err(SerializationError::SerializationFailed(
+                "capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. If the problem persists, try `cargo clean` before rebuilding to clear stale artifacts.".to_string(),
+            ));
+        }
     }
 }
 
@@ -259,5 +264,19 @@ mod tests {
         assert!(schema.contains("MeshInfo"));
         assert!(schema.contains("SharedMessage"));
         assert!(schema.contains("HealthStatus"));
+    }
+
+    // Smoke test: when both the `capnproto` feature and the `capnp_generated`
+    // cfg are present, verify the build produced the generated Rust binding
+    // for `schemas/example.capnp` and placed it in OUT_DIR. This fails fast in
+    // CI when codegen didn't run or normalization didn't place the file where
+    // the proc-macro/include! expects it.
+    #[test]
+    #[cfg(all(feature = "capnproto", capnp_generated))]
+    fn test_generated_binding_present() {
+        use std::path::Path;
+
+        let p = Path::new(env!("OUT_DIR")).join("example_capnp.rs");
+        assert!(p.exists(), "Expected generated binding at {:?}", p);
     }
 }

@@ -50,6 +50,8 @@ jobs:
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo install capnpc --locked || true
+          # Persist cargo bin into GITHUB_ENV so subsequent steps see capnpc
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
 
       - name: Install capnpc plugin (macOS)
         if: matrix.os == 'macos-latest'
@@ -57,6 +59,8 @@ jobs:
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo install capnpc --locked || true
+          # Persist cargo bin into GITHUB_ENV so subsequent steps see capnpc
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
 
       - name: Install capnpc plugin (Windows)
         if: matrix.os == 'windows-latest'
@@ -64,6 +68,8 @@ jobs:
         run: |
           $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
           cargo install capnpc --locked || Write-Host "cargo install capnpc failed; ensure capnpc is available"
+          # Persist cargo bin into GITHUB_ENV so subsequent steps see capnpc
+          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:USERPROFILE\\.cargo\\bin;$env:PATH"
 
       - name: Ensure cargo bin is on PATH for the rest of the job
         shell: bash
