@@ -147,3 +147,10 @@ proptest = "1.0"
 # Remove this override and vendor copy once the upstream crates.io release
 # addresses the future-incompatibility warnings.
 num-bigint-dig = { path = "vendor/num-bigint-dig", package = "num-bigint-dig" }
+
+[build-dependencies]
+# capnpc is used by build.rs to invoke the Cap'n Proto compiler when the
+# `capnproto` feature is enabled. The build script is intentionally
+# guarded by the feature so normal builds without capnproto do not require
+# the system capnp toolchain.
+capnpc = { version = "0.21.4" }

@@ -1,0 +1,107 @@
+name: Cap'n Proto single-step smoke
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ feat/capnp-single-step-smoke, main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    name: Smoke test (matrix)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Install Cap'n Proto on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto
+
+      - name: Install Cap'n Proto on macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update || true
+          brew install capnp || true
+
+      - name: Install Cap'n Proto on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install -y capnproto || Write-Host "choco install failed; ensure capnp available on PATH"
+
+      - name: Install capnpc plugin (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo install capnpc --locked || true
+          # Persist cargo bin into GITHUB_ENV so subsequent steps see capnpc
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Install capnpc plugin (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo install capnpc --locked || true
+          # Persist cargo bin into GITHUB_ENV so subsequent steps see capnpc
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Install capnpc plugin (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
+          cargo install capnpc --locked || Write-Host "cargo install capnpc failed; ensure capnpc is available"
+          # Persist cargo bin into GITHUB_ENV so subsequent steps see capnpc
+          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:USERPROFILE\\.cargo\\bin;$env:PATH"
+
+      - name: Ensure cargo bin is on PATH for the rest of the job
+        shell: bash
+        run: |
+          echo "Adding cargo bin to PATH via GITHUB_ENV"
+          # For Linux/macOS this writes to GITHUB_ENV; on Windows the same file is available
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+        if: runner.os != 'Windows'
+
+      - name: Ensure cargo bin is on PATH for the rest of the job (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Adding cargo bin to PATH via GITHUB_ENV"
+          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:USERPROFILE\\.cargo\\bin;$env:PATH"
+
+      - name: Show versions (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          capnp --version || true
+          echo "capnpc:" $(command -v capnpc || echo "not found")
+          $HOME/.cargo/bin/capnpc --version || true
+
+      - name: Show versions (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          capnp --version -ErrorAction SilentlyContinue; if ($?) { } else { Write-Host 'capnp not found' }
+          $capnpc = "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe"
+          if (Test-Path $capnpc) { & $capnpc --version } else { Write-Host 'capnpc not found' }
+
+      - name: Build with capnproto feature
+        run: |
+          cargo build --features capnproto --verbose

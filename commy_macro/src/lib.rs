@@ -1,6 +1,11 @@
+use hex::ToHex;
+use proc_macro2::Span;
 use proc_macro2::TokenStream as TokenStream2;
+use quote::format_ident;
 use quote::quote;
-use syn::{parse_macro_input, ItemStruct, Meta};
+use sha2::{Digest, Sha256};
+// (no filesystem writes from the macro; build.rs handles codegen)
+use syn::{parse_macro_input, ItemStruct, LitStr, Meta};
 
 #[proc_macro_attribute]
 pub fn create_writer(
@@ -88,7 +93,159 @@ pub fn create_writer(
         });
     }
 
+    // Build a deterministic Cap'n Proto schema for this struct.
+    // Map primitive Rust types to Cap'n Proto types (best-effort mapping for common types).
+    fn rust_ty_to_capnp(ty: &syn::Type) -> Result<&'static str, String> {
+        use syn::{GenericArgument, PathArguments, Type, TypePath};
+
+        match ty {
+            Type::Path(TypePath { path, .. }) => {
+                if let Some(seg) = path.segments.last() {
+                    let ident = seg.ident.to_string();
+                    match ident.as_str() {
+                        "String" => Ok("Text"),
+                        "u8" => Ok("UInt8"),
+                        "u16" => Ok("UInt16"),
+                        "u32" => Ok("UInt32"),
+                        "u64" => Ok("UInt64"),
+                        "i8" => Ok("Int8"),
+                        "i16" => Ok("Int16"),
+                        "i32" => Ok("Int32"),
+                        "i64" => Ok("Int64"),
+                        "f32" => Ok("Float32"),
+                        "f64" => Ok("Float64"),
+                        "Vec" => {
+                            // Check for Vec<u8>
+                            match &seg.arguments {
+                                PathArguments::AngleBracketed(args) => {
+                                    if let Some(GenericArgument::Type(Type::Path(TypePath {
+                                        path: inner_path,
+                                        ..
+                                    }))) = args.args.first()
+                                    {
+                                        if let Some(inner_seg) = inner_path.segments.last() {
+                                            if inner_seg.ident == "u8" {
+                                                return Ok("Data");
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            Ok("Text")
+                        }
+                        _ => {
+                            // Fallback for fully-qualified paths like std::string::String
+                            let full = quote::quote! { #ty }.to_string();
+                            if full.contains("std :: string :: String")
+                                || full.contains("std::string::String")
+                            {
+                                Ok("Text")
+                            } else if full.contains("alloc :: vec :: Vec") {
+                                Ok("Data")
+                            } else {
+                                Err(format!("Unmapped Rust type '{}' encountered in Cap'n Proto schema generation. Please add a mapping for this type.", full))
+                            }
+                        }
+                    }
+                } else {
+                    Err(format!(
+                        "Unable to determine path segments for type: {}",
+                        quote::quote! { #ty }.to_string()
+                    ))
+                }
+            }
+            _ => Err(format!(
+                "Unsupported type form for Cap'n Proto mapping: {}",
+                quote::quote! { #ty }.to_string()
+            )),
+        }
+    }
+
+    // Construct the schema text deterministically: fields in declared order, simple formatting.
+    let mut schema_lines = Vec::new();
+    schema_lines.push(format!("@0x{};", "{placeholder}")); // placeholder for hash-based id
+    schema_lines.push(format!("struct {} {{", struct_name));
+    let mut idx = 0usize;
+    for field in input.fields.iter() {
+        let field_name = field
+            .ident
+            .as_ref()
+            .expect("All fields must be named")
+            .to_string();
+        // Map the Rust type to a Cap'n Proto type, returning a compile-time error
+        // if an unmapped or unsupported type is encountered.
+        let capnp_ty = match rust_ty_to_capnp(&field.ty) {
+            Ok(t) => t.to_string(),
+            Err(e) => {
+                return syn::Error::new_spanned(
+                    &field.ty,
+                    format!(
+                        "Error generating Cap'n Proto schema for field '{}': {}",
+                        field_name, e
+                    ),
+                )
+                .to_compile_error()
+                .into();
+            }
+        };
+        schema_lines.push(format!("  {} @{} :{};", field_name, idx, capnp_ty));
+        idx += 1;
+    }
+    schema_lines.push("}".to_string());
+
+    let schema_text = schema_lines.join("\n");
+
+    // Compute SHA-256 hash of the schema text
+    let mut hasher = Sha256::new();
+    hasher.update(schema_text.as_bytes());
+    let hash = hasher.finalize();
+    let hash_hex = hash.encode_hex::<String>();
+
+    // Replace placeholder id with the first 16 hex chars to form @0xID
+    let short_id = &hash_hex[..16];
+    let schema_text = schema_text.replacen("{placeholder}", short_id, 1);
+
+    // Prepare schema and generated filenames (used for include! below).
+    let struct_name_str = struct_name.to_string();
+    let generated_basename = format!("{}_{}", struct_name_str, &hash_hex[..8]);
+    // Prepare literal strings for insertion into generated tokens
+    let schema_lit = LitStr::new(&schema_text, Span::call_site());
+    let hash_lit = LitStr::new(&hash_hex, Span::call_site());
+
+    // Emit a safe include for generated bindings. We do not perform any file
+    // system writes or run capnpc from inside the proc-macro. The project's
+    // top-level `build.rs` is responsible for running capnpc and placing
+    // generated bindings into OUT_DIR. If the `capnproto` feature is enabled
+    // but the build script did not produce bindings, we emit a helpful
+    // compile-time error so the developer knows how to proceed.
+    let gen_basename_lit = LitStr::new(&generated_basename, Span::call_site());
+    let include_generated_tokens = quote! {
+        // Include generated bindings only when the build script produced them
+        // and the `capnp_generated` cfg was set.
+        #[cfg(all(feature = "capnproto", capnp_generated))]
+        {
+            #[allow(unused_imports, dead_code)]
+            include!(concat!(env!("OUT_DIR"), "/", #gen_basename_lit, "_capnp.rs"));
+        }
+
+        // If the user enabled `capnproto` but codegen did not run successfully,
+        // provide a clear compile-time error with actionable next steps.
+        #[cfg(all(feature = "capnproto", not(capnp_generated)))]
+        compile_error!("capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html), enable the `capnproto` feature and re-run the build (try `cargo clean` if issues persist)");
+    };
+
+    // Make unique constant names per-struct to avoid duplicates when macro is applied to
+    // multiple structs in the same crate. e.g., SCHEMA_TEXT_MyStruct
+    let name_str = struct_name.to_string();
+    let schema_ident = format_ident!("SCHEMA_TEXT_{}", name_str);
+    let hash_ident = format_ident!("SCHEMA_HASH_{}", name_str);
+
     let expanded = quote! {
+        #include_generated_tokens
+        // Export the generated schema text and hash so build.rs or other tooling can find it.
+        pub const #schema_ident: &str = #schema_lit;
+        pub const #hash_ident: &str = #hash_lit;
         #[repr(C)]
         #[derive(Debug)]
         #struct_vis struct #struct_name {

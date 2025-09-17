@@ -1,0 +1,43 @@
+name: Cap'n Proto single-step smoke
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  capnp-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+      - name: Install capnp
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y capnproto
+      - name: Cap'n Proto diagnostic info
+        run: |
+          echo "--- capnp version ---"
+          capnp --version || true
+          echo "--- which capnp ---"
+          command -v capnp || true
+          echo "--- ls workspace schemas dir ---"
+          ls -la ./schemas || true
+          echo "--- ls target build out dir (before build) ---"
+          ls -la ./target/debug/build || true
+          echo "--- show any .capnp files in repo ---"
+          find . -type f -name '*.capnp' -print -exec sed -n '1,200p' {} \; || true
+      - name: Install Rust
+        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Build and run smoke test (capnproto)
+        run: |
+          # Run only the smoke test that verifies single-step capnp codegen.
+          cargo test --features capnproto --test smoke_capnp_single_step --verbose
+        env:
+          RUSTFLAGS: "-D warnings"

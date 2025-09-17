@@ -1,0 +1,41 @@
+name: Cap'n Proto Codegen CI
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-capnp:
+    name: Build with capnp codegen
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Install capnp compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto
+
+      - name: Install capnpc plugin
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo install capnpc --locked || true
+
+      - name: Build (capnproto feature)
+        run: |
+          cargo build -p commy --features capnproto --verbose
+
+      - name: Run tests (capnproto feature)
+        run: |
+          cargo test -p commy --features capnproto --verbose
