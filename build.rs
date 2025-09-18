@@ -265,7 +265,10 @@ fn main() {
             let p = std::path::Path::new(cand);
             if p.exists() {
                 if let Ok(out) = std::process::Command::new(cand).arg("--version").output() {
-                    let fname: String = cand.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+                    let fname: String = cand
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                        .collect();
                     let dest = diag_dir.join(format!("{}_version.txt", fname));
                     let mut combined = Vec::new();
                     combined.extend_from_slice(&out.stdout);
@@ -413,6 +416,5 @@ fn main() {
 
         println!("cargo:warning=capnp codegen failed; generated bindings cleaned from OUT_DIR. Diagnostics written to: {}", diag_dir.display());
         println!("cargo:warning=To enable capnp codegen, install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. ");
-        return;
     }
 }

@@ -26,15 +26,35 @@ jobs:
           toolchain: stable
           profile: minimal
 
-      - name: Install capnp compiler
+      - name: Install capnp compiler (apt, fallback to build-from-source)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y capnproto
+          set -e
+          sudo apt-get update || true
+          if sudo apt-get install -y capnproto; then
+            echo "capnproto installed via apt"
+          else
+            echo "apt install failed; attempting to build capnproto from source"
+            sudo apt-get install -y build-essential cmake git pkg-config libssl-dev || true
+            TMPDIR=/tmp/capnproto-src
+            rm -rf "$TMPDIR"
+            git clone --depth 1 https://github.com/capnproto/capnproto.git "$TMPDIR"
+            pushd "$TMPDIR/c++"
+            cmake -S . -B build || (echo "cmake configure failed" && exit 1)
+            cmake --build build -- -j$(nproc) || (echo "build failed" && exit 1)
+            sudo cmake --install build || (echo "install failed" && exit 1)
+            popd
+            echo "capnproto built and installed from source"
+          fi
 
-      - name: Install capnpc plugin
+      - name: Install capnpc plugin (cargo, best-effort)
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          cargo install capnpc --locked || (echo "cargo install capnpc failed" && echo "PATH=$PATH" && exit 1)
+          if cargo install capnpc --locked; then
+            echo "capnpc plugin installed via cargo"
+          else
+            echo "cargo install capnpc failed; attempting to install capnpc-rust-bootstrap"
+            cargo install capnpc-rust-bootstrap --locked || echo "capnpc bootstrap install failed; continuing for diagnostics"
+          fi
           echo "PATH=$HOME/.cargo/bin:$PATH"
 
       - name: Show Cap'n Proto tooling

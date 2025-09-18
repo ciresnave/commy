@@ -1,0 +1,308 @@
+Cap'n Proto (matrix) (windows-latest)	Set up job	﻿2025-09-17T22:47:49.7931785Z Current runner version: '2.328.0'
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7983726Z ##[group]Runner Image Provisioner
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7984496Z Hosted Compute Agent
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7985006Z Version: 20250829.383
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7985541Z Commit: 27cb235aab5b0e52e153a26cd86b4742e89dac5d
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7986205Z Build Date: 2025-08-29T13:48:48Z
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7986757Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7987637Z ##[group]Operating System
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7988238Z Microsoft Windows Server 2025
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7988775Z 10.0.26100
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7989211Z Datacenter
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7989637Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7990080Z ##[group]Runner Image
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7990523Z Image: windows-2025
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7991010Z Version: 20250907.19.1
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7991965Z Included Software: https://github.com/actions/runner-images/blob/win25/20250907.19/images/windows/Windows2025-Readme.md
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7993215Z Image Release: https://github.com/actions/runner-images/releases/tag/win25%2F20250907.19
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7994565Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7995526Z ##[group]GITHUB_TOKEN Permissions
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7997311Z Contents: read
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7997821Z Metadata: read
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.7998294Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.8000351Z Secret source: Actions
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.8000998Z Prepare workflow directory
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.8385307Z Prepare all required actions
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:49.8440602Z Getting action download info
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:50.2989888Z Download action repository 'actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493' (SHA:ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493)
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:50.4631730Z Download action repository 'actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746' (SHA:88dc2356392166efad76775c878094f4e83ff746)
+Cap'n Proto (matrix) (windows-latest)	Set up job	2025-09-17T22:47:51.1883988Z Complete job name: Cap'n Proto (matrix) (windows-latest)
+Cap'n Proto (matrix) (windows-latest)	Checkout	﻿2025-09-17T22:47:51.4119511Z ##[group]Run actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4121887Z with:
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4122769Z   repository: ciresnave/commy
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4124219Z   token: ***
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4125061Z   ssh-strict: true
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4126403Z   ssh-user: git
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4127311Z   persist-credentials: true
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4128300Z   clean: true
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4129186Z   sparse-checkout-cone-mode: true
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4130106Z   fetch-depth: 1
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4130798Z   fetch-tags: false
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4131549Z   show-progress: true
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4132283Z   lfs: false
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4132939Z   submodules: false
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4133647Z   set-safe-directory: true
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4134782Z env:
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4135429Z   RUST_BACKTRACE: 1
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.4136109Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.5690424Z Syncing repository: ciresnave/commy
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.5692980Z ##[group]Getting Git version info
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.5694111Z Working directory is 'D:\a\commy\commy'
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:51.6707677Z [command]"C:\Program Files\Git\bin\git.exe" version
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.1870283Z git version 2.51.0.windows.1
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.1922346Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.1944813Z Temporarily overriding HOME='D:\a\_temp\26bd69d5-584a-4b68-9c88-f072e713102d' before making global git config changes
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.1949057Z Adding repository directory to the temporary git global config as a safe directory
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.1957051Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\commy\commy
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.2734097Z Deleting the contents of 'D:\a\commy\commy'
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.2740766Z ##[group]Initializing the repository
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.2748989Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\commy\commy
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.4182489Z Initialized empty Git repository in D:/a/commy/commy/.git/
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.4227325Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/ciresnave/commy
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.4825906Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.4827246Z ##[group]Disabling automatic garbage collection
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.4833364Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.5128379Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.5129638Z ##[group]Setting up auth
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.5139436Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:52.5439165Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:54.5142212Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:54.5435123Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:55.0566863Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:55.0861324Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:55.0862232Z ##[group]Fetching the repository
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:55.0874435Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +66193c4d810e9a777da63f6196f96ad73d82934e:refs/remotes/pull/21/merge
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.6890451Z From https://github.com/ciresnave/commy
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.6891343Z  * [new ref]         66193c4d810e9a777da63f6196f96ad73d82934e -> pull/21/merge
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.7227728Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.7228525Z ##[group]Determining the checkout info
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.7230638Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.7241160Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.7837636Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.8114829Z ##[group]Checking out the ref
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:56.8122767Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force refs/remotes/pull/21/merge
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0157247Z Note: switching to 'refs/remotes/pull/21/merge'.
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0158022Z 
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0158369Z You are in 'detached HEAD' state. You can look around, make experimental
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0159116Z changes and commit them, and you can discard any commits you make in this
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0159860Z state without impacting any branches by switching back to a branch.
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0160308Z 
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0160586Z If you want to create a new branch to retain commits you create, you may
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0161261Z do so (now or later) by using -c with the switch command. Example:
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0161746Z 
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0161949Z   git switch -c <new-branch-name>
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0162252Z 
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0162406Z Or undo this operation with:
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0162661Z 
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0162774Z   git switch -
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0163067Z 
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0163426Z Turn off this advice by setting config variable advice.detachedHead to false
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0163920Z 
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0164510Z HEAD is now at 66193c4 Merge a3ed33bee7c8092da85febfa26b7ed8a9458414d into 807b5d018ecae014de7b523d487a00aaec40186f
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0201968Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0623953Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+Cap'n Proto (matrix) (windows-latest)	Checkout	2025-09-17T22:47:57.0926865Z 66193c4d810e9a777da63f6196f96ad73d82934e
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	﻿2025-09-17T22:47:57.1313128Z ##[group]Run actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1313552Z with:
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1313730Z   toolchain: stable
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1313901Z   profile: minimal
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1314073Z   override: true
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1315186Z   default: false
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1315347Z env:
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1315488Z   RUST_BACKTRACE: 1
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.1315657Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:57.4555943Z [command]C:\Users\runneradmin\.cargo\bin\rustup.exe show
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.3133625Z Default host: x86_64-pc-windows-msvc
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.3141228Z rustup home:  C:\Users\runneradmin\.rustup
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.3141637Z 
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6005501Z installed toolchains
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6005904Z --------------------
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6006307Z stable-x86_64-pc-windows-msvc (active, default)
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6009148Z 
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6009384Z active toolchain
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6009592Z ----------------
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6009888Z name: stable-x86_64-pc-windows-msvc
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6066198Z active because: it's the default toolchain
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6066587Z installed targets:
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6066861Z   i686-pc-windows-msvc
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6067152Z   x86_64-pc-windows-gnu
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6067488Z   x86_64-pc-windows-msvc
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6116502Z [command]C:\Users\runneradmin\.cargo\bin\rustup.exe -V
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6309146Z rustup 1.28.2 (e4f3ad6f8 2025-04-28)
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:47:58.6507578Z info: This is the version for the rustup toolchain manager, not the rustc compiler.
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.2130304Z info: The currently active `rustc` version is `rustc 1.89.0 (29483883e 2025-08-04)`
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.2168633Z Installed rustup 1.28.2 support profiles
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.2174623Z [command]C:\Users\runneradmin\.cargo\bin\rustup.exe set profile minimal
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.2458706Z info: profile set to 'minimal'
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.2491002Z [command]C:\Users\runneradmin\.cargo\bin\rustup.exe toolchain install stable
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.3730688Z info: syncing channel updates for 'stable-x86_64-pc-windows-msvc'
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.9733343Z 
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.9932779Z   stable-x86_64-pc-windows-msvc unchanged - rustc 1.89.0 (29483883e 2025-08-04)
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.9933379Z 
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:03.9977549Z [command]C:\Users\runneradmin\.cargo\bin\rustup.exe override set stable
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:04.0145820Z info: override toolchain for 'D:\a\commy\commy' set to 'stable-x86_64-pc-windows-msvc'
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:04.0279977Z ##[group]Gathering installed versions
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:04.1824429Z [command]C:\Users\runneradmin\.cargo\bin\rustc.exe -V
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:04.9652337Z rustc 1.89.0 (29483883e 2025-08-04)
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:04.9731879Z ##[warning]The `set-output` command is deprecated and will be disabled soon. Please upgrade to using Environment Files. For more information see: https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:04.9741818Z ##[warning]The `set-output` command is deprecated and will be disabled soon. Please upgrade to using Environment Files. For more information see: https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:05.1295645Z [command]C:\Users\runneradmin\.cargo\bin\cargo.exe -V
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:06.8161747Z cargo 1.89.0 (c24e10642 2025-06-23)
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:06.8218590Z ##[warning]The `set-output` command is deprecated and will be disabled soon. Please upgrade to using Environment Files. For more information see: https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:06.9723257Z [command]C:\Users\runneradmin\.cargo\bin\rustup.exe -V
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:06.9873966Z rustup 1.28.2 (e4f3ad6f8 2025-04-28)
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:06.9876059Z info: This is the version for the rustup toolchain manager, not the rustc compiler.
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:07.0482364Z info: The currently active `rustc` version is `rustc 1.89.0 (29483883e 2025-08-04)`
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:07.0509695Z ##[warning]The `set-output` command is deprecated and will be disabled soon. Please upgrade to using Environment Files. For more information see: https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/
+Cap'n Proto (matrix) (windows-latest)	Set up Rust	2025-09-17T22:48:07.0512769Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	﻿2025-09-17T22:48:07.0789016Z ##[group]Run # Chocolatey package is 'capnproto'
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:07.0789820Z [36;1m# Chocolatey package is 'capnproto'[0m
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:07.0790176Z [36;1mchoco install -y capnproto[0m
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:07.2209266Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:07.2209761Z env:
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:07.2210120Z   RUST_BACKTRACE: 1
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:07.2210457Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:17.7562936Z Chocolatey v2.5.1
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:18.1169594Z Installing the following packages:
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:18.1179530Z capnproto
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:18.1185158Z By installing, you accept licenses for the packages.
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:25.5607833Z Downloading package from source 'https://community.chocolatey.org/api/v2/'
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:25.8003094Z 
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:25.8004908Z Progress: Downloading capnproto 1.0.2... 20%
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:25.8007125Z Progress: Downloading capnproto 1.0.2... 61%
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:25.8008005Z Progress: Downloading capnproto 1.0.2... 100%
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:26.0417531Z 
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:26.0417992Z capnproto v1.0.2 [Approved]
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:26.0665956Z capnproto package files install completed. Performing other installation steps.
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.3373906Z Downloading capnproto 
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.3374376Z   from 'https://capnproto.org/capnproto-c++-win32-1.0.2.zip'
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4363954Z 
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4379539Z Progress: 0% - Saving 12.9 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4391664Z Progress: 0% - Saving 26.27 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4409380Z Progress: 0% - Saving 39.64 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4432545Z Progress: 1% - Saving 53.01 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4452956Z Progress: 2% - Saving 91.51 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4472268Z Progress: 2% - Saving 132.81 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4491586Z Progress: 3% - Saving 174.11 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4513879Z Progress: 4% - Saving 215.41 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4555123Z Progress: 8% - Saving 363.54 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4585622Z Progress: 11% - Saving 523.54 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4612411Z Progress: 15% - Saving 683.54 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4641083Z Progress: 18% - Saving 843.54 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4656251Z Progress: 22% - Saving 1003.54 KB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4670981Z Progress: 25% - Saving 1.14 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4687086Z Progress: 29% - Saving 1.29 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4712325Z Progress: 32% - Saving 1.45 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4727263Z Progress: 36% - Saving 1.61 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4741956Z Progress: 39% - Saving 1.76 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4759884Z Progress: 43% - Saving 1.92 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4775902Z Progress: 47% - Saving 2.07 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4789438Z Progress: 50% - Saving 2.23 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4804989Z Progress: 54% - Saving 2.39 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4826575Z Progress: 57% - Saving 2.54 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4839684Z Progress: 61% - Saving 2.7 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4852162Z Progress: 64% - Saving 2.86 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4864302Z Progress: 68% - Saving 3.01 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4877715Z Progress: 71% - Saving 3.17 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4895434Z Progress: 75% - Saving 3.32 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4907370Z Progress: 78% - Saving 3.48 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4919400Z Progress: 82% - Saving 3.64 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4931998Z Progress: 86% - Saving 3.79 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4944152Z Progress: 89% - Saving 3.95 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.4957568Z Progress: 93% - Saving 4.11 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.5001468Z Progress: 96% - Saving 4.26 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.5008455Z Progress: 100% - Saving 4.41 MB of 4.41 MB
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.5014307Z Progress: 100% - Completed download of C:\Users\runneradmin\AppData\Local\Temp\chocolatey\capnproto\1.0.2\capnproto-c++-win32-1.0.2.zip (4.41 MB).
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:28.5023774Z Download of capnproto-c++-win32-1.0.2.zip (4.41 MB) completed.
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:33.8305984Z Hashes match.
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:33.8925197Z Extracting C:\Users\runneradmin\AppData\Local\Temp\chocolatey\capnproto\1.0.2\capnproto-c++-win32-1.0.2.zip to C:\ProgramData\chocolatey\lib\capnproto\tools...
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:35.0605139Z C:\ProgramData\chocolatey\lib\capnproto\tools
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.3021297Z  ShimGen has successfully created a shim for capnp.exe
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.5115499Z  ShimGen has successfully created a shim for capnpc-c++.exe
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.7444844Z  ShimGen has successfully created a shim for capnpc-capnp.exe
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.7784922Z  The install of capnproto was successful.
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.7790087Z   Deployed to 'C:\ProgramData\chocolatey\lib\capnproto\tools'
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.8063585Z 
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.8063980Z Chocolatey installed 1/1 packages. 
+Cap'n Proto (matrix) (windows-latest)	Install Cap'n Proto (Windows)	2025-09-17T22:48:36.8064454Z  See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	﻿2025-09-17T22:48:37.7621511Z ##[group]Run $env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:37.7622014Z [36;1m$env:Path = "$env:USERPROFILE\\.cargo\\bin;" + $env:Path[0m
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:37.7622349Z [36;1mcargo install capnpc --locked[0m
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:37.7622762Z [36;1mAdd-Content -Path $env:GITHUB_ENV -Value "PATH=$env:USERPROFILE\\.cargo\\bin;$env:PATH"[0m
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:37.7680112Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:37.7680429Z env:
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:37.7680591Z   RUST_BACKTRACE: 1
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:37.7680764Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:39.1031895Z     Updating crates.io index
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:39.3992271Z  Downloading crates ...
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:39.4816451Z   Downloaded capnpc v0.21.4
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:40.2503517Z   Installing capnpc v0.21.4
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:40.3695969Z     Updating crates.io index
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:41.3990502Z     Updating crates.io index
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:41.4312839Z  Downloading crates ...
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:41.4751172Z   Downloaded embedded-io v0.6.1
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:41.5221914Z   Downloaded capnp v0.21.5
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:41.8866605Z    Compiling capnp v0.21.5
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:48:53.6688385Z    Compiling capnpc v0.21.4
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:49:09.2971322Z     Finished `release` profile [optimized] target(s) in 31.10s
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:49:09.3231412Z   Installing C:\Users\runneradmin\.cargo\bin\capnpc-rust-bootstrap.exe
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:49:09.3234811Z   Installing C:\Users\runneradmin\.cargo\bin\capnpc-rust.exe
+Cap'n Proto (matrix) (windows-latest)	Install capnpc plugin (Windows)	2025-09-17T22:49:09.3508244Z    Installed package `capnpc v0.21.4` (executables `capnpc-rust-bootstrap.exe`, `capnpc-rust.exe`)
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	﻿2025-09-17T22:49:09.6008919Z ##[group]Run Write-Host "PATH=$env:Path"
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6009334Z [36;1mWrite-Host "PATH=$env:Path"[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6009711Z [36;1m# Ensure system capnp compiler exists; fail fast if missing as it's required.[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6010208Z [36;1mtry { & capnp --version } catch { Write-Host 'capnp not found'; exit 1 }[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6010527Z [36;1m[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6010891Z [36;1m# Check multiple possible capnpc executable names created by cargo install and older installers.[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6011456Z [36;1m# If the executable is present but crashes when invoked (we saw a panic in CI),[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6011929Z [36;1m# don't abort here — we want to continue to the build step so the build script[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6012408Z [36;1m# can be run with RUST_BACKTRACE=1 and produce a full backtrace for analysis.[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6012752Z [36;1m$candidates = @([0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6012996Z [36;1m  "$env:USERPROFILE\\.cargo\\bin\\capnpc.exe",[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6013338Z [36;1m  "$env:USERPROFILE\\.cargo\\bin\\capnpc-rust.exe",[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6013697Z [36;1m  "$env:USERPROFILE\\.cargo\\bin\\capnpc-rust-bootstrap.exe",[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6014762Z [36;1m  "$env:ProgramFiles\\capnproto\\bin\\capnpc.exe",[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6015109Z [36;1m  "$env:ProgramFiles(x86)\\capnproto\\bin\\capnpc.exe"[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6015381Z [36;1m)[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6015549Z [36;1m$found = $false[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6015757Z [36;1mforeach ($p in $candidates) {[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6015997Z [36;1m  if (Test-Path $p) {[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6016251Z [36;1m    Write-Host "Found capnpc candidate: $p"[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6016497Z [36;1m    try {[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6016682Z [36;1m      & $p --version[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6016874Z [36;1m    } catch {[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6017340Z [36;1m      Write-Host "capnpc executed but failed to print version (this is a diagnostic). Continuing to build to capture full backtrace."[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6017838Z [36;1m    }[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6018002Z [36;1m    $found = $true[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6018195Z [36;1m    break[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6018355Z [36;1m  }[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6018509Z [36;1m}[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6018847Z [36;1mif (-not $found) { Write-Host 'capnpc not found'; exit 1 }[0m
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6079984Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6080304Z env:
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6080459Z   RUST_BACKTRACE: 1
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6088039Z   PATH: C:\Users\runneradmin\\.cargo\\bin;C:\Users\runneradmin\\.cargo\\bin;C:\Program Files\PowerShell\7;C:\Program Files\MongoDB\Server\7.0\bin;C:\vcpkg;C:\tools\zstd;C:\hostedtoolcache\windows\stack\3.7.1\x64;C:\cabal\bin;C:\\ghcup\bin;C:\mingw64\bin;C:\Program Files\dotnet;C:\Program Files\MySQL\MySQL Server 8.0\bin;C:\Program Files\R\R-4.4.2\bin\x64;C:\SeleniumWebDrivers\GeckoDriver;C:\SeleniumWebDrivers\EdgeDriver\;C:\SeleniumWebDrivers\ChromeDriver;C:\Program Files (x86)\sbt\bin;C:\Program Files (x86)\GitHub CLI;C:\Program Files\Git\bin;C:\Program Files (x86)\pipx_bin;C:\npm\prefix;C:\hostedtoolcache\windows\go\1.24.7\x64\bin;C:\hostedtoolcache\windows\Python\3.9.13\x64\Scripts;C:\hostedtoolcache\windows\Python\3.9.13\x64;C:\hostedtoolcache\windows\Ruby\3.3.9\x64\bin;C:\Program Files\OpenSSL\bin;C:\tools\kotlinc\bin;C:\hostedtoolcache\windows\Java_Temurin-Hotspot_jdk\17.0.16-8\x64\bin;C:\Program Files\ImageMagick-7.1.2-Q16-HDRI;C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;C:\ProgramData\kind;C:\ProgramData\Chocolatey\bin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\PowerShell\7\;C:\Program Files\Microsoft\Web Platform Installer\;C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\;C:\Program Files\Microsoft SQL Server\150\Tools\Binn\;C:\Program Files\dotnet\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files (x86)\WiX Toolset v3.14\bin;C:\Program Files\Microsoft SQL Server\130\DTS\Binn\;C:\Program Files\Microsoft SQL Server\140\DTS\Binn\;C:\Program Files\Microsoft SQL Server\150\DTS\Binn\;C:\Program Files\Microsoft SQL Server\160\DTS\Binn\;C:\ProgramData\chocolatey\lib\pulumi\tools\Pulumi\bin;C:\Program Files\CMake\bin;C:\Strawberry\c\bin;C:\Strawberry\perl\site\bin;C:\Strawberry\perl\bin;C:\ProgramData\chocolatey\lib\maven\apache-maven-3.9.11\bin;C:\Program Files\Microsoft Service Fabric\bin\Fabric\Fabric.Code;C:\Program Files\Microsoft SDKs\Service Fabric\Tools\ServiceFabricLocalClusterManager;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Program Files\GitHub CLI\;c:\tools\php;C:\Program Files (x86)\sbt\bin;C:\Program Files\Amazon\AWSCLIV2\;C:\Program Files\Amazon\SessionManagerPlugin\bin\;C:\Program Files\Amazon\AWSSAMCLI\bin\;C:\Program Files\Microsoft SQL Server\130\Tools\Binn\;C:\Program Files\mongosh\;C:\Program Files\LLVM\bin;C:\Program Files (x86)\LLVM\bin;C:\Users\runneradmin\.dotnet\tools;C:\Users\runneradmin\.cargo\bin;C:\Users\runneradmin\AppData\Local\Microsoft\WindowsApps
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:09.6097640Z ##[endgroup]
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.4261924Z PATH=C:\Program Files\PowerShell\7;C:\Users\runneradmin\\.cargo\\bin;C:\Users\runneradmin\\.cargo\\bin;C:\Program Files\PowerShell\7;C:\Program Files\MongoDB\Server\7.0\bin;C:\vcpkg;C:\tools\zstd;C:\hostedtoolcache\windows\stack\3.7.1\x64;C:\cabal\bin;C:\\ghcup\bin;C:\mingw64\bin;C:\Program Files\dotnet;C:\Program Files\MySQL\MySQL Server 8.0\bin;C:\Program Files\R\R-4.4.2\bin\x64;C:\SeleniumWebDrivers\GeckoDriver;C:\SeleniumWebDrivers\EdgeDriver\;C:\SeleniumWebDrivers\ChromeDriver;C:\Program Files (x86)\sbt\bin;C:\Program Files (x86)\GitHub CLI;C:\Program Files\Git\bin;C:\Program Files (x86)\pipx_bin;C:\npm\prefix;C:\hostedtoolcache\windows\go\1.24.7\x64\bin;C:\hostedtoolcache\windows\Python\3.9.13\x64\Scripts;C:\hostedtoolcache\windows\Python\3.9.13\x64;C:\hostedtoolcache\windows\Ruby\3.3.9\x64\bin;C:\Program Files\OpenSSL\bin;C:\tools\kotlinc\bin;C:\hostedtoolcache\windows\Java_Temurin-Hotspot_jdk\17.0.16-8\x64\bin;C:\Program Files\ImageMagick-7.1.2-Q16-HDRI;C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;C:\ProgramData\kind;C:\ProgramData\Chocolatey\bin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\PowerShell\7\;C:\Program Files\Microsoft\Web Platform Installer\;C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\;C:\Program Files\Microsoft SQL Server\150\Tools\Binn\;C:\Program Files\dotnet\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files (x86)\WiX Toolset v3.14\bin;C:\Program Files\Microsoft SQL Server\130\DTS\Binn\;C:\Program Files\Microsoft SQL Server\140\DTS\Binn\;C:\Program Files\Microsoft SQL Server\150\DTS\Binn\;C:\Program Files\Microsoft SQL Server\160\DTS\Binn\;C:\ProgramData\chocolatey\lib\pulumi\tools\Pulumi\bin;C:\Program Files\CMake\bin;C:\Strawberry\c\bin;C:\Strawberry\perl\site\bin;C:\Strawberry\perl\bin;C:\ProgramData\chocolatey\lib\maven\apache-maven-3.9.11\bin;C:\Program Files\Microsoft Service Fabric\bin\Fabric\Fabric.Code;C:\Program Files\Microsoft SDKs\Service Fabric\Tools\ServiceFabricLocalClusterManager;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Program Files\GitHub CLI\;c:\tools\php;C:\Program Files (x86)\sbt\bin;C:\Program Files\Amazon\AWSCLIV2\;C:\Program Files\Amazon\SessionManagerPlugin\bin\;C:\Program Files\Amazon\AWSSAMCLI\bin\;C:\Program Files\Microsoft SQL Server\130\Tools\Binn\;C:\Program Files\mongosh\;C:\Program Files\LLVM\bin;C:\Program Files (x86)\LLVM\bin;C:\Users\runneradmin\.dotnet\tools;C:\Users\runneradmin\.cargo\bin;C:\Users\runneradmin\AppData\Local\Microsoft\WindowsApps
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.5150813Z Cap'n Proto version 1.0.2
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.5677868Z Found capnpc candidate: C:\Users\runneradmin\\.cargo\\bin\\capnpc-rust.exe
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.5781365Z 
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.5781994Z thread 'main' panicked at C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\capnpc-0.21.4\src\capnpc-rust.rs:34:10:
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.5782709Z failed to generate code: Error { kind: PrematureEndOfFile, extra: "" }
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.5783024Z stack backtrace:
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.6685943Z note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+Cap'n Proto (matrix) (windows-latest)	Show Cap'n Proto tooling (Windows)	2025-09-17T22:49:10.7249617Z ##[error]Process completed with exit code 1.
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	﻿2025-09-17T22:49:10.7446761Z Post job cleanup.
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:10.9188223Z [command]"C:\Program Files\Git\bin\git.exe" version
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:10.9529432Z git version 2.51.0.windows.1
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:10.9619344Z Temporarily overriding HOME='D:\a\_temp\367c2c89-4d97-410e-a182-bc67962c08b7' before making global git config changes
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:10.9620673Z Adding repository directory to the temporary git global config as a safe directory
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:10.9631968Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\commy\commy
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:10.9971942Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:11.0321585Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:11.6230342Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:11.6498225Z http.https://github.com/.extraheader
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:11.6545153Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+Cap'n Proto (matrix) (windows-latest)	Post Checkout	2025-09-17T22:49:11.6865198Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Cap'n Proto (matrix) (windows-latest)	Complete job	﻿2025-09-17T22:49:12.2434931Z Cleaning up orphan processes
+Cap'n Proto (matrix) (windows-latest)	Complete job	2025-09-17T22:49:12.2744714Z Terminate orphan process: pid (7864) (vctip)

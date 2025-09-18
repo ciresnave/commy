@@ -11,9 +11,9 @@ $patterns = @(
 )
 foreach ($pat in $patterns) {
   Write-Host "\n=== Matches for: '$pat' ==="
-  $matches = Select-String -Path $log -Pattern $pat -SimpleMatch -CaseSensitive:$false -Context 3, 1
-  if ($matches) {
-    foreach ($m in $matches) {
+  $searchResults = Select-String -Path $log -Pattern $pat -SimpleMatch -CaseSensitive:$false -Context 3, 1
+  if ($searchResults) {
+    foreach ($m in $searchResults) {
       Write-Host "Line $($m.LineNumber): $($m.Line)"
       if ($m.Context.PreContext) { foreach ($l in $m.Context.PreContext) { Write-Host "  PRE: $l" } }
       if ($m.Context.PostContext) { foreach ($l in $m.Context.PostContext) { Write-Host "  POST: $l" } }

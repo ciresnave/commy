@@ -23,7 +23,7 @@ patterns = [
     ),
 ]
 
-matches = []
+matches: list[tuple[int, str, str, list[str]]] = []
 for i, line in enumerate(lines, start=1):
     for name, pat in patterns:
         if pat.search(line):
