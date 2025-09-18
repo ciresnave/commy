@@ -66,10 +66,19 @@ jobs:
             echo 'capnpc not found' && exit 1
           fi
 
-      - name: Build (capnproto feature)
+      - name: Build (capnproto + all_formats)
         run: |
-          cargo build -p commy --features capnproto --verbose
+          cargo build -p commy --features "all_formats" --verbose
 
-      - name: Run tests (capnproto feature)
+      - name: Run tests (capnproto + all_formats)
         run: |
-          cargo test -p commy --features capnproto --verbose
+          cargo test -p commy --features "all_formats" --verbose
+
+      - name: Upload capnpc diagnostics (if present)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capnpc-diagnostics-${{ runner.os }}
+          path: |
+            **/capnpc_diagnostics/**
+          if-no-files-found: ignore
