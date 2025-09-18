@@ -34,6 +34,15 @@ impl TestEnvironment {
             security_config: Default::default(),
             enable_mesh_capabilities: false, // Disable mesh for testing
         };
+        // Ensure integration tests that use this TestEnvironment opt into
+        // test-only behaviors which the library gates behind the TEST_ENV
+        // environment variable when compiled as a normal (non-unit-test)
+        // build. Integration tests compile the library without
+        // `cfg(test)`, so set the variable here so the library permits
+        // usage of MockAuthProvider during tests.
+        if std::env::var("TEST_ENV").unwrap_or_default() != "1" {
+            std::env::set_var("TEST_ENV", "1");
+        }
 
         Ok(TestEnvironment { temp_dir, config })
     }
