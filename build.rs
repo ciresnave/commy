@@ -222,7 +222,57 @@ fn main() {
                 );
                 panic!(
                     "capnp codegen completed but no generated Rust bindings were found in OUT_DIR"
-                );
+                )
+            }
+        }
+        // Write a small diagnostics marker on success so CI can capture
+        // which plugin/version was used even when codegen succeeded. This
+        // helps correlate runs and identify plugin versions without
+        // requiring a failure to produce artifacts.
+        let diag_dir = out_dir.join("capnpc_diagnostics");
+        let _ = std::fs::create_dir_all(&diag_dir);
+        let success_path = diag_dir.join("capnpc_success.txt");
+        let mut success_contents = String::new();
+        success_contents.push_str("capnp codegen: success\n");
+        success_contents.push_str(&format!("OUT_DIR={}\n", out_dir.display()));
+        // list normalized generated files
+        if let Ok(entries) = std::fs::read_dir(&out_dir) {
+            for e in entries.flatten() {
+                if let Some(fname) = e.file_name().to_str() {
+                    if fname.ends_with("_capnp.rs") {
+                        success_contents.push_str(&format!("generated: {}\n", fname));
+                    }
+                }
+            }
+        }
+        let _ = std::fs::write(&success_path, success_contents.as_bytes());
+        // Probe common capnpc candidates for --version and write outputs.
+        let mut candidates: Vec<String> = Vec::new();
+        if cfg!(windows) {
+            if let Ok(up) = std::env::var("USERPROFILE") {
+                candidates.push(format!("{}\\.cargo\\bin\\capnpc-rust.exe", up));
+                candidates.push(format!("{}\\.cargo\\bin\\capnpc.exe", up));
+                candidates.push(format!("{}\\.cargo\\bin\\capnpc-rust-bootstrap.exe", up));
+            }
+            candidates.push("C:\\Program Files\\capnproto\\bin\\capnpc.exe".to_string());
+        } else {
+            candidates.push("/usr/bin/capnpc".to_string());
+            candidates.push("/usr/local/bin/capnpc".to_string());
+            candidates.push("/usr/bin/capnpc-rust".to_string());
+            candidates.push("/usr/local/bin/capnpc-rust".to_string());
+        }
+        for cand in candidates.iter() {
+            let p = std::path::Path::new(cand);
+            if p.exists() {
+                if let Ok(out) = std::process::Command::new(cand).arg("--version").output() {
+                    let fname: String = cand.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+                    let dest = diag_dir.join(format!("{}_version.txt", fname));
+                    let mut combined = Vec::new();
+                    combined.extend_from_slice(&out.stdout);
+                    combined.extend_from_slice(b"\n---STDERR---\n");
+                    combined.extend_from_slice(&out.stderr);
+                    let _ = std::fs::write(&dest, &combined);
+                }
             }
         }
     } else {
@@ -233,6 +283,12 @@ fn main() {
         // Prepare diagnostics directory
         let diag_dir = out_dir.join("capnpc_diagnostics");
         let _ = std::fs::create_dir_all(&diag_dir);
+        // Print a clear cargo warning so CI logs surface the diagnostics
+        // directory path; this makes it easy to locate artifacts in job logs.
+        println!(
+            "cargo:warning=capnp: diagnostics directory created at {}",
+            diag_dir.display()
+        );
         // Write combined error to file
         let combined_path = diag_dir.join("capnpc_combined_error.txt");
         let _ = std::fs::write(&combined_path, &err_msg);
@@ -250,7 +306,7 @@ fn main() {
         let mut probes: Vec<(String, std::process::Output)> = Vec::new();
         let mut candidates: Vec<String> = Vec::new();
         if cfg!(windows) {
-            if let Some(up) = std::env::var("USERPROFILE").ok() {
+            if let Ok(up) = std::env::var("USERPROFILE") {
                 candidates.push(format!("{}\\.cargo\\bin\\capnpc-rust.exe", up));
                 candidates.push(format!("{}\\.cargo\\bin\\capnpc.exe", up));
                 candidates.push(format!("{}\\.cargo\\bin\\capnpc-rust-bootstrap.exe", up));
