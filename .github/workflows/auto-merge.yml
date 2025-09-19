@@ -17,15 +17,33 @@ jobs:
         name: Check event payload
         if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
         run: |
-          echo "Workflow run for PR concluded successfully. Attempting to merge..."
+          echo "Workflow run for PR concluded successfully. Preparing to evaluate merge policy..."
           PR_NUMBER=$(jq --raw-output '.workflow_run.pull_requests[0].number' < "$GITHUB_EVENT_PATH")
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             echo "No PR associated with workflow_run; exiting"
             exit 0
           fi
+          echo "Found PR number: $PR_NUMBER"
+          # Fetch PR details to evaluate policy (title and review_decision)
+          PR_JSON=$(curl -s -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}")
+          PR_TITLE=$(jq -r '.title' <<< "$PR_JSON")
+          REVIEW_DECISION=$(jq -r '.review_decision' <<< "$PR_JSON")
+          echo "PR title: $PR_TITLE"
+          echo "PR review_decision: $REVIEW_DECISION"
+          # Policy: auto-merge only for pinning PRs (title starts with 'ci: pin') OR when review_decision == 'APPROVED'
+          if echo "$PR_TITLE" | grep -qE '^ci: pin'; then
+            echo "PR looks like a pinning PR; allowing auto-merge"
+            echo "can_merge=true" >> $GITHUB_OUTPUT
+          elif [ "$REVIEW_DECISION" = "APPROVED" ]; then
+            echo "PR has an approved review; allowing auto-merge"
+            echo "can_merge=true" >> $GITHUB_OUTPUT
+          else
+            echo "PR does not meet auto-merge policy (not a pin PR and not approved). Skipping auto-merge."
+            echo "can_merge=false" >> $GITHUB_OUTPUT
+          fi
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
       - name: Merge pull request
-        if: ${{ steps.check_event.outputs.PR_NUMBER != '' }}
+        if: ${{ steps.check_event.outputs.can_merge == 'true' }}
         env:
           PR_NUMBER: ${{ steps.check_event.outputs.PR_NUMBER }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
