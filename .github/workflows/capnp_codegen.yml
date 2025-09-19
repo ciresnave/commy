@@ -97,7 +97,7 @@ jobs:
 
       - name: Upload capnpc diagnostics (if present)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # TODO: pin to a SHA in production workflows
         with:
           name: capnpc-diagnostics-${{ runner.os }}
           path: |
