@@ -230,7 +230,7 @@ jobs:
         rust: [stable, beta]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+  - uses: actions/checkout@v3 # TODO: pin to a SHA before copying into production workflows
       - name: Run enterprise test suite
         run: cargo test --features enterprise --release
       - name: Run multi-language tests
