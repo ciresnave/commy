@@ -1,15 +1,9 @@
 name: Continuous Integration
-permissions:
-  contents: read
-
 on:
   push:
     branches: [ main, ci/pin-capnp-workflows ]
   pull_request:
     branches: [ main ]
-
-permissions:
-  contents: read
 
 env:
   CARGO_TERM_COLOR: always
