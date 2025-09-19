@@ -32,7 +32,7 @@ jobs:
           profile: minimal
 
       - name: Cache cargo dependencies
-        uses: actions/cache@v4 # TODO: pin to a SHA in production workflows (no stable SHA recorded in repo logs)
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
         with:
           path: |
             ~/.cargo/bin/
