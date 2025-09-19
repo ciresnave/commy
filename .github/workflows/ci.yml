@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
@@ -32,7 +32,7 @@ jobs:
           profile: minimal
 
       - name: Cache cargo dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v4 # TODO: pin to a SHA in production workflows (no stable SHA recorded in repo logs)
         with:
           path: |
             ~/.cargo/bin/
@@ -167,7 +167,7 @@ jobs:
 
       - name: Upload capnpc diagnostics (if present)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # TODO: pin to a SHA in production workflows
         with:
           name: capnpc-diagnostics-${{ matrix.os }}
           path: |
@@ -181,10 +181,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5 # TODO: pin to a SHA in production workflows
         with:
           python-version: '3.10'
 
@@ -196,7 +196,7 @@ jobs:
           # pytest
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4 # TODO: pin to a SHA in production workflows
         with:
           node-version: '18'
 
