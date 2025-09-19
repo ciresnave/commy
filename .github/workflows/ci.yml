@@ -13,6 +13,32 @@ env:
   TEST_ENV: '1'
 
 jobs:
+  scan-actions:
+    name: Scan workflows for floating action versions
+    runs-on: ubuntu-latest
+    outputs:
+      found: ${{ steps.find.outputs.found }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+
+      - name: Find floating action versions
+        id: find
+        run: |
+          set -e
+          echo "Scanning .github/workflows for uses: .*@v[0-9] pattern..."
+          matches=$(grep -En "uses:\s+.*@v[0-9]+" .github/workflows || true)
+          if [ -n "$matches" ]; then
+            echo "Found floating action versions:" >&2
+            echo "$matches" >&2
+            echo "found=true" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "No floating action versions found."
+          fi
+
+  # existing test-rust job continues below
   test-rust:
     name: Test Core (Rust)
     runs-on: ${{ matrix.os }}
