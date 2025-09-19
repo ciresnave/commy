@@ -25,23 +25,42 @@ impl SerializationBackend for CapnProtoBackend {
     where
         T: ?Sized + serde::Serialize,
     {
-        // For now, we use serde as a bridge since the trait is constrained to serde::Serialize
-        // In a production implementation, we'd generate Cap'n Proto schemas and use those directly
-        // This would be much more efficient than going through serde
-
-        // TODO: Generate Cap'n Proto schemas for core Commy types
-        // TODO: Implement direct Cap'n Proto serialization bypassing serde
-
-        // Temporary bridge implementation
+        // FIXME: Temporary serde_json bridge
+        //
+        // This implementation exists only because the public
+        // `SerializationBackend` trait currently requires `serde::Serialize`.
+        // That trait constraint forces us to use serde (here via JSON) as a
+        // bridge to obtain bytes. This undermines Commy's performance goals
+        // (zero-copy, cross-language Cap'n Proto and rkyv integration).
+        //
+        // Long-term approach:
+        //  - Replace the serde-bound trait with a generated trait (for
+        //    example `CapnpSerialize`) produced by a proc-macro. The macro
+        //    will emit per-type Cap'n Proto (and rkyv) builders/readers.
+        //  - The generated trait should provide methods like:
+        //      fn capnp_serialize<'a, B: capnp::private::layout::Allocator +'a>(&self, builder: &'a mut <Self as CapnpSchema>::Builder<'a>);
+        //      fn capnp_deserialize<'a>(reader: <Self as CapnpSchema>::Reader<'a>) -> Result<Self, Error>;
+        //  - The proc-macro would also emit the corresponding .capnp schema
+        //    text and optionally write it to `OUT_DIR` so language bindings
+        //    can be generated for polyglot consumers.
+        //
+        // Example of the desired direct implementation (pseudocode):
+        //
+        // let mut message = capnp::message::Builder::new_default();
+        // let mut root = message.init_root::<<T as CapnpSchema>::Builder<'_>>();
+        // value.capnp_serialize(&mut root);
+        // let mut buffer = Vec::new();
+        // capnp::serialize::write_message(&mut buffer, &message)
+        //     .map_err(|e| SerializationError::SerializationFailed(e.to_string()))?;
+        // Ok(buffer)
+        //
+        // Until the trait is refactored and the proc-macro implemented,
+        // fall back to the serde_json bridge with a clear diagnostic message.
         serde_json::to_vec(value).map_err(|e| {
-            use crate::manager::transport_impl::map_commy_error_to_transport_error;
-            use crate::manager::SerializationFormat;
-            // Use JsonSerialization for the serde bridge error but indicate Compact
-            // as the intended target format for mapping context.
-            let com_err = crate::errors::CommyError::JsonSerialization(e);
-            let trans_err =
-                map_commy_error_to_transport_error(com_err, Some(SerializationFormat::Compact));
-            SerializationError::SerializationFailed(format!("{:?}", trans_err))
+            SerializationError::SerializationFailed(format!(
+                "Temporary serde_json bridge failed: {}",
+                e
+            ))
         })
     }
 
@@ -49,14 +68,13 @@ impl SerializationBackend for CapnProtoBackend {
     where
         T: serde::de::DeserializeOwned,
     {
-        // TODO: Implement direct Cap'n Proto deserialization
+        // FIXME: Temporary serde_json bridge for deserialization. See the
+        // comment in `serialize` for the intended proc-macro-based design.
         serde_json::from_slice(data).map_err(|e| {
-            use crate::manager::transport_impl::map_commy_error_to_transport_error;
-            use crate::manager::SerializationFormat;
-            let com_err = crate::errors::CommyError::JsonSerialization(e);
-            let trans_err =
-                map_commy_error_to_transport_error(com_err, Some(SerializationFormat::Compact));
-            SerializationError::DeserializationFailed(format!("{:?}", trans_err))
+            SerializationError::DeserializationFailed(format!(
+                "Temporary serde_json bridge failed: {}",
+                e
+            ))
         })
     }
 }
@@ -211,10 +229,14 @@ mod generated_adapter {
 
         #[cfg(not(capnp_generated))]
         {
-            // If codegen did not run and bindings are unavailable, return a clear error.
-            return Err(SerializationError::SerializationFailed(
-                "capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html) and re-run the build with `--features capnproto`. If the problem persists, try `cargo clean` before rebuilding to clear stale artifacts.".to_string(),
-            ));
+            // If codegen did not run and bindings are unavailable, return a clear error
+            // with actionable next steps. Include a pointer to OUT_DIR so CI logs
+            // and developers can quickly inspect the generated artifacts directory.
+            let out = env!("OUT_DIR");
+            return Err(SerializationError::SerializationFailed(format!(
+                "capnp codegen bindings not available; expected generated bindings in OUT_DIR='{}'. Install the `capnp` compiler (https://capnproto.org/install.html), enable the `capnproto` feature, and re-run the build. If issues persist, try `cargo clean` before rebuilding to clear stale artifacts.",
+                out
+            )));
         }
     }
 }

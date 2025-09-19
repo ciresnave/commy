@@ -825,6 +825,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "walkdir",
  "webpki-roots 1.0.2",
 ]
 

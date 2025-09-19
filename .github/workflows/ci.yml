@@ -1,0 +1,206 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, ci/pin-capnp-workflows ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+
+jobs:
+  test-rust:
+    name: Test Core (Rust)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install capnp compiler (Ubuntu, fallback build-from-source)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -e
+          sudo apt-get update || true
+          if sudo apt-get install -y capnproto; then
+            echo "capnproto installed via apt"
+          else
+            echo "apt install failed; attempting to build capnproto from source"
+            sudo apt-get install -y build-essential cmake git pkg-config libssl-dev || true
+            TMPDIR=/tmp/capnproto-src
+            rm -rf "$TMPDIR"
+            git clone --depth 1 https://github.com/capnproto/capnproto.git "$TMPDIR"
+            pushd "$TMPDIR/c++"
+            cmake -S . -B build || (echo "cmake configure failed" && exit 1)
+            cmake --build build -- -j$(nproc) || (echo "build failed" && exit 1)
+            sudo cmake --install build || (echo "install failed" && exit 1)
+            popd
+            echo "capnproto built and installed from source"
+          fi
+
+      - name: Install capnp compiler (macOS, fallback to download)
+        if: matrix.os == 'macos-latest'
+        run: |
+          set -e
+          if command -v capnp >/dev/null 2>&1; then
+            echo "capnp present: $(capnp --version)"
+          else
+            if brew install capnp || brew install capnproto; then
+              echo "capnp installed via brew"
+            else
+              echo "brew install failed; attempting to download prebuilt capnproto"
+              TMPDIR="/tmp/capnproto"
+              rm -rf "$TMPDIR"
+              mkdir -p "$TMPDIR"
+              # Try the official releases (best-effort); prefer macOS intel/arm where available
+              URL="https://capnproto.org/capnproto-1.0.1-osx.tar.gz"
+              curl -fsSL "$URL" -o "$TMPDIR/capnproto.tar.gz" || true
+              if [ -f "$TMPDIR/capnproto.tar.gz" ]; then
+                tar -xzf "$TMPDIR/capnproto.tar.gz" -C "$TMPDIR"
+                sudo cp "$TMPDIR"/capnproto-*/bin/capnp /usr/local/bin/ || true
+              else
+                echo "download fallback failed; continuing for diagnostics"
+              fi
+            fi
+          fi
+
+      - name: Install capnp compiler (Windows, fallback to direct download)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command capnp -ErrorAction SilentlyContinue) {
+            capnp --version
+          } else {
+            try {
+              choco install capnproto -y -y
+              capnp --version
+            } catch {
+              Write-Output "choco install failed; attempting to download prebuilt capnp"
+              $arch = if ($env:PROCESSOR_ARCHITECTURE -match 'ARM') { 'arm64' } else { 'x86_64' }
+              $tmp = Join-Path $env:TEMP "capnproto"
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp
+              New-Item -ItemType Directory -Path $tmp | Out-Null
+              $zip = Join-Path $tmp "capnproto.zip"
+              $url = "https://capnproto.org/capnproto-1.0.1-win32.zip"
+              Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -ErrorAction SilentlyContinue
+              if (Test-Path $zip) {
+                Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+                $bin = Get-ChildItem -Path $tmp -Recurse -Filter capnp.exe | Select-Object -First 1
+                if ($null -ne $bin) {
+                  $dest = "${env:ProgramFiles}\capnproto\bin"
+                  New-Item -ItemType Directory -Path $dest -Force | Out-Null
+                  Copy-Item $bin.FullName -Destination $dest -Force
+                  $env:Path = "$dest;$env:Path"
+                  Write-Output "Installed capnp to $dest"
+                  capnp --version
+                } else {
+                  Write-Output "capnp binary not found in downloaded archive"
+                }
+              } else {
+                Write-Output "download fallback failed; continuing for diagnostics"
+              }
+            }
+          }
+
+      - name: Show capnpc diagnostics (Unix)
+        if: ${{ always() && matrix.os != 'windows-latest' }}
+        run: |
+          echo "=== capnpc_diagnostics contents (head 200 lines) ==="
+          find . -type d -name capnpc_diagnostics -print0 | while IFS= read -r -d '' d; do
+            echo "Diagnostics in $d"
+            for f in "$d"/*; do
+              echo "---- $f ----"
+              if [ -f "$f" ]; then
+                head -n 200 "$f" || true
+              fi
+            done
+          done
+
+      - name: Show capnpc diagnostics (Windows)
+        if: ${{ always() && matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          Write-Output "=== capnpc_diagnostics contents (first 200 lines) ==="
+          Get-ChildItem -Recurse -Filter capnpc_diagnostics -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $d = $_.FullName
+            Write-Output "Diagnostics in $d"
+            Get-ChildItem -Path $d | ForEach-Object {
+              $f = $_.FullName
+              Write-Output "---- $f ----"
+              if (Test-Path $f) {
+                Get-Content -Path $f -TotalCount 200 | ForEach-Object { Write-Output $_ }
+              }
+            }
+          }
+
+      - name: Build
+        run: cargo build --workspace --features "all_formats" --verbose
+
+      - name: Run tests
+        run: cargo test --workspace --features "all_formats" --verbose
+
+      - name: Upload capnpc diagnostics (if present)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capnpc-diagnostics-${{ matrix.os }}
+          path: |
+            **/capnpc_diagnostics/**
+          if-no-files-found: ignore
+
+  test-sdks:
+    name: Test SDKs (placeholder)
+    runs-on: ubuntu-latest
+    needs: test-rust
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run Python SDK tests (Placeholder)
+        run: |
+          echo ">>> Running Python SDK tests..."
+          # cd sdks/python
+          # pip install -r requirements.txt
+          # pytest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Run Node.js SDK tests (Placeholder)
+        run: |
+          echo ">>> Running Node.js SDK tests..."
+          # cd sdks/nodejs
+          # npm install
+          # npm test

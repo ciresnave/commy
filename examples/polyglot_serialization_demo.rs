@@ -258,28 +258,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - Health metrics included");
 
     // JSON - Web/API compatibility
-    benchmark_format::<JsonBackend>(
-        "JSON",
-        &service_data,
-        iterations,
-        "Web APIs, debugging, human-readable config",
-    )?;
+    #[cfg(feature = "json")]
+    {
+        benchmark_format::<JsonBackend>(
+            "JSON",
+            &service_data,
+            iterations,
+            "Web APIs, debugging, human-readable config",
+        )?;
+    }
 
     // MessagePack - Efficient traditional format
-    benchmark_format::<MessagePackBackend>(
-        "MessagePack",
-        &service_data,
-        iterations,
-        "Compact binary, language-agnostic RPC",
-    )?;
+    #[cfg(feature = "messagepack")]
+    {
+        benchmark_format::<MessagePackBackend>(
+            "MessagePack",
+            &service_data,
+            iterations,
+            "Compact binary, language-agnostic RPC",
+        )?;
+    }
 
     // Compact - Size-optimized
-    benchmark_format::<CompactBackend>(
-        "Compact",
-        &service_data,
-        iterations,
-        "Size-critical scenarios, embedded systems",
-    )?;
+    #[cfg(feature = "compact")]
+    {
+        benchmark_format::<CompactBackend>(
+            "Compact",
+            &service_data,
+            iterations,
+            "Size-critical scenarios, embedded systems",
+        )?;
+    }
 
     // rkyv - Rust zero-copy
     #[cfg(feature = "zerocopy")]

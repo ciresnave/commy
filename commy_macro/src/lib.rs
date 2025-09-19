@@ -135,17 +135,39 @@ pub fn create_writer(
                             Ok("Text")
                         }
                         _ => {
-                            // Fallback for fully-qualified paths like std::string::String
-                            let full = quote::quote! { #ty }.to_string();
-                            if full.contains("std :: string :: String")
-                                || full.contains("std::string::String")
+                            // Robustly handle fully-qualified common paths by examining
+                            // the path segments rather than relying on string formatting.
+                            // Examples we care about: `std::string::String`, `alloc::vec::Vec`.
+                            let segments: Vec<String> =
+                                path.segments.iter().map(|s| s.ident.to_string()).collect();
+
+                            // Check for `std::string::String` or just `String`
+                            if segments
+                                == [
+                                    "std".to_string(),
+                                    "string".to_string(),
+                                    "String".to_string(),
+                                ]
                             {
-                                Ok("Text")
-                            } else if full.contains("alloc :: vec :: Vec") {
-                                Ok("Data")
-                            } else {
-                                Err(format!("Unmapped Rust type '{}' encountered in Cap'n Proto schema generation. Please add a mapping for this type.", full))
+                                return Ok("Text");
                             }
+
+                            // Check for `alloc::vec::Vec<T>` or `std::vec::Vec<T>`
+                            if segments
+                                == ["alloc".to_string(), "vec".to_string(), "Vec".to_string()]
+                                || segments
+                                    == ["std".to_string(), "vec".to_string(), "Vec".to_string()]
+                            {
+                                // If it's Vec<u8> we'd have already returned Data above. Default to Text.
+                                return Ok("Text");
+                            }
+
+                            // As a last resort, return a helpful error indicating the unmapped type
+                            // so the caller (the macro) will surface a compile-time error.
+                            Err(format!(
+                                    "Unmapped Rust type encountered in Cap'n Proto schema generation: path segments = {:?}. Please add a mapping for this type.",
+                                    segments
+                                ))
                         }
                     }
                 } else {
@@ -220,19 +242,33 @@ pub fn create_writer(
     // but the build script did not produce bindings, we emit a helpful
     // compile-time error so the developer knows how to proceed.
     let gen_basename_lit = LitStr::new(&generated_basename, Span::call_site());
+    // Build a valid identifier for the generated module name. Replace any
+    // non-alphanumeric characters with underscores to ensure the ident is legal.
+    let sanitized_basename: String = generated_basename
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let gen_mod_ident = format_ident!("__commy_generated_bindings_for_{}", sanitized_basename);
+
+    // Emit item-level code so the macro expansion remains syntactically valid
+    // at module scope. We create a private module with the sanitized name and
+    // place the `include!` inside it. The `compile_error!` is emitted as an
+    // item guarded by cfg when codegen was requested but did not run.
     let include_generated_tokens = quote! {
-        // Include generated bindings only when the build script produced them
-        // and the `capnp_generated` cfg was set.
+        // When both the feature and the build-time cfg are present, include
+        // the generated bindings inside a private module so the include! is
+        // a valid item.
         #[cfg(all(feature = "capnproto", capnp_generated))]
-        {
-            #[allow(unused_imports, dead_code)]
+        #[allow(non_camel_case_types, unused_imports, dead_code)]
+        mod #gen_mod_ident {
             include!(concat!(env!("OUT_DIR"), "/", #gen_basename_lit, "_capnp.rs"));
         }
 
-        // If the user enabled `capnproto` but codegen did not run successfully,
-        // provide a clear compile-time error with actionable next steps.
+        // If the user enabled `capnproto` but codegen did not run
+        // successfully, emit a top-level compile_error to provide an
+        // actionable message.
         #[cfg(all(feature = "capnproto", not(capnp_generated)))]
-        compile_error!("capnp codegen bindings not available; install the `capnp` compiler (https://capnproto.org/install.html), enable the `capnproto` feature and re-run the build (try `cargo clean` if issues persist)");
+        compile_error!("capnp codegen bindings not available; install the `capnproto` compiler (https://capnproto.org/install.html), enable the `capnproto` feature and re-run the build (try `cargo clean` if issues persist). If you are running in CI, inspect the job logs for capnpc installation or permission issues.");
     };
 
     // Make unique constant names per-struct to avoid duplicates when macro is applied to

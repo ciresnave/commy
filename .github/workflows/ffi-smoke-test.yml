@@ -9,6 +9,10 @@ on:
 jobs:
   build-and-smoke:
     runs-on: ${{ matrix.os }}
+    env:
+      # Request full backtraces from any Rust process so panics include verbose
+      # frames for diagnosis (helps triaging capnpc panics in CI).
+      RUST_BACKTRACE: full
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
