@@ -130,7 +130,7 @@
 +        uses: actions/checkout@v4
 +
 +      - name: Install Rust toolchain
-+        uses: actions-rs/toolchain@v1
++        uses: actions-rs/toolchain@88dc2356392166efad76775c878094f4e83ff746
 +        with:
 +          toolchain: stable
 +          profile: minimal
