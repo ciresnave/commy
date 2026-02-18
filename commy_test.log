@@ -1,0 +1,93 @@
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Initializing Commy Server
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Server ID: node-1
+[Commy] Client listen address: 127.0.0.1:8443
+[Commy] TLS enabled: true
+[Commy] TLS cert: Some("dev-cert.pem")
+[Commy] TLS key: Some("dev-key.pem")
+[Commy] Clustering enabled: false
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Configuring authentication:
+[Commy]   Backend: PostgreSQL
+[Commy]   Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy] Γ£ô Tenant created: my_tenant
+[Commy] Γ£ô Initializing auth-framework... Γ£à
+[Commy] Γ£ô Auth-framework initialized with PostgreSQL backend
+[Commy] Γ£ô Displaying test API keys in PostgreSQL...
+[Commy]
+[Commy] ≡ƒô¥ Test API Keys for Examples
+[Commy] ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+[Commy]
+[Commy] Γä╣ Test API keys are pre-configured in PostgreSQL
+[Commy]
+[Commy] Available API Keys for Testing:
+[Commy]   ΓÇó test_key_123
+[Commy]     Used by: basic_client, hybrid_client examples
+[Commy]     Permissions: read, write
+[Commy]
+[Commy]   ΓÇó admin_key_with_all_perms
+[Commy]     Used by: permissions_example (admin user)
+[Commy]     Permissions: admin, manage_tenants, manage_users
+[Commy]
+[Commy]   ΓÇó read_only_key
+[Commy]     Used by: permissions_example (read-only user)
+[Commy]     Permissions: read
+[Commy]
+[Commy]   ΓÇó  creator_key
+[Commy]     Used by: permissions_example (creator user)
+[Commy]     Permissions: admin, create_services, manage_variables
+[Commy] ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+[Commy]
+TLS initialized: cert=dev-cert.pem, key=dev-key.pem
+[Commy] Γ£ô TLS initialized successfully (WSS mode)
+Token cleanup task skipped - auth-framework handles cleanup internally (interval: 300s)
+[Commy] Γ£ô Server initialized, starting WSS listener...
+[Commy] Remote clients connect to: wss://127.0.0.1:8443
+[Commy] 
+WebSocket Secure (WSS) server listening on 127.0.0.1:8443 (RFC 6455 + TLS)
+TLS handshake successful: 127.0.0.1:59680
+WebSocket connection established from 127.0.0.1:59680 (session_id: 58495493-7819-47ab-8734-f6bb39100d69)
+Received SDK message from 127.0.0.1:59680: Some(String("Authenticate"))
+Received SDK message from 127.0.0.1:59680: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:59680: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:59680: Some(String("Disconnect"))
+Client 58495493-7819-47ab-8734-f6bb39100d69 session cleaned up
+WebSocket protocol error for 58495493-7819-47ab-8734-f6bb39100d69: IO error: unexpected end of file
+TLS handshake successful: 127.0.0.1:64088
+WebSocket connection established from 127.0.0.1:64088 (session_id: e1c27aac-9e7c-4f90-9271-8f3ee1600638)
+Received SDK message from 127.0.0.1:64088: Some(String("Authenticate"))
+Received SDK message from 127.0.0.1:64088: Some(String("Heartbeat"))
+TLS handshake successful: 127.0.0.1:55913
+WebSocket connection established from 127.0.0.1:55913 (session_id: 8cd442b5-00d0-40cd-8b22-012228c63468)
+Received SDK message from 127.0.0.1:55913: Some(String("Authenticate"))
+Received SDK message from 127.0.0.1:55913: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:64088: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:64088: Some(String("Disconnect"))
+Failed to send response: IO error: An established connection was aborted by the software in your host machine. (os error 10053)
+Client e1c27aac-9e7c-4f90-9271-8f3ee1600638 session cleaned up
+Received SDK message from 127.0.0.1:55913: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:55913: Some(String("Disconnect"))
+Failed to send response: IO error: An established connection was aborted by the software in your host machine. (os error 10053)
+Client 8cd442b5-00d0-40cd-8b22-012228c63468 session cleaned up
+TLS handshake successful: 127.0.0.1:54336
+WebSocket connection established from 127.0.0.1:54336 (session_id: 5d9db274-21bb-4c75-987f-486c2edc404f)
+Received SDK message from 127.0.0.1:54336: Some(String("Authenticate"))
+Received SDK message from 127.0.0.1:54336: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:54336: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:54336: Some(String("Disconnect"))
+WebSocket protocol error for 5d9db274-21bb-4c75-987f-486c2edc404f: IO error: unexpected end of file
+Client 5d9db274-21bb-4c75-987f-486c2edc404f session cleaned up
+TLS handshake successful: 127.0.0.1:54337
+WebSocket connection established from 127.0.0.1:54337 (session_id: f28b48dd-2c9c-4a43-9d9a-93a15bbd4ea3)
+Received SDK message from 127.0.0.1:54337: Some(String("Authenticate"))
+Received SDK message from 127.0.0.1:54337: Some(String("Heartbeat"))
+TLS handshake successful: 127.0.0.1:52683
+WebSocket connection established from 127.0.0.1:52683 (session_id: 94324eec-0ff3-47bc-b819-0b6e7794ea35)
+Received SDK message from 127.0.0.1:52683: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:52683: Some(String("Heartbeat"))
+Received SDK message from 127.0.0.1:52683: Some(String("Disconnect"))
+WebSocket protocol error for f28b48dd-2c9c-4a43-9d9a-93a15bbd4ea3: IO error: unexpected end of file
+Client f28b48dd-2c9c-4a43-9d9a-93a15bbd4ea3 session cleaned up
+WebSocket protocol error for 94324eec-0ff3-47bc-b819-0b6e7794ea35: IO error: unexpected end of file
+Client 94324eec-0ff3-47bc-b819-0b6e7794ea35 session cleaned up

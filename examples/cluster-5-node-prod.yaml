@@ -1,0 +1,97 @@
+/// Example YAML configuration for a 5-node production cluster with PostgreSQL
+///
+/// Usage:
+///   - Copy to commy-cluster-prod.yaml
+///   - Update node addresses to match your infrastructure
+///   - Set PostgreSQL connection URL and credentials
+///   - Pass to: ClusteringConfig::from_yaml_file("commy-cluster-prod.yaml")
+
+server_id: "server-1"
+
+nodes:
+  - id: "server-1"
+    address: "10.0.1.10:9001"
+    max_connections: 20
+    tls:
+      cert_path: "/etc/commy/certs/server-1.crt"
+      key_path: "/etc/commy/certs/server-1.key"
+      ca_path: "/etc/commy/certs/ca.crt"
+      verify_peer: true
+
+  - id: "server-2"
+    address: "10.0.1.11:9001"
+    max_connections: 20
+    tls:
+      cert_path: "/etc/commy/certs/server-2.crt"
+      key_path: "/etc/commy/certs/server-2.key"
+      ca_path: "/etc/commy/certs/ca.crt"
+      verify_peer: true
+
+  - id: "server-3"
+    address: "10.0.1.12:9001"
+    max_connections: 20
+    tls:
+      cert_path: "/etc/commy/certs/server-3.crt"
+      key_path: "/etc/commy/certs/server-3.key"
+      ca_path: "/etc/commy/certs/ca.crt"
+      verify_peer: true
+
+  - id: "server-4"
+    address: "10.0.1.13:9001"
+    max_connections: 20
+    tls:
+      cert_path: "/etc/commy/certs/server-4.crt"
+      key_path: "/etc/commy/certs/server-4.key"
+      ca_path: "/etc/commy/certs/ca.crt"
+      verify_peer: true
+
+  - id: "server-5"
+    address: "10.0.1.14:9001"
+    max_connections: 20
+    tls:
+      cert_path: "/etc/commy/certs/server-5.crt"
+      key_path: "/etc/commy/certs/server-5.key"
+      ca_path: "/etc/commy/certs/ca.crt"
+      verify_peer: true
+
+replication:
+  # Aggressive sync for production consistency
+  sync_interval_ms: 50
+  batch_size: 2000
+  max_concurrent_tasks: 8
+  gossip_enabled: true
+  replication_timeout_ms: 10000
+  enable_checksums: true
+  enable_resume: true
+
+consistency:
+  # Last-Write-Wins for deterministic conflict resolution
+  strategy:
+    last_write_wins:
+      tie_breaker: null
+  enable_vector_clocks: true
+  quorum_size: 3  # Require 3 of 5 servers for writes
+  detect_conflicts: true
+  conflict_log_enabled: true
+  conflict_log_path: "/var/log/commy/conflicts.log"
+
+network:
+  # Shorter heartbeat for faster failure detection
+  heartbeat_interval_ms: 500
+  heartbeat_timeout_ms: 2000
+  max_heartbeat_failures: 2
+  connection_pooling: true
+  max_queue_size: 50000
+  tcp_keepalive: true
+  tcp_keepalive_ms: 10000
+
+storage:
+  # PostgreSQL for distributed state
+  backend:
+    postgresql:
+      url: "postgresql://commy_user:secure_password@10.0.2.10:5432/commy_cluster"
+      max_connections: 20
+  persist_cluster_state: true
+  metadata_dir: "/var/lib/commy/cluster"
+  enable_snapshots: true
+  snapshot_interval_ms: 30000

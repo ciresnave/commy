@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for cluster state (optional, for production-like testing)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: commy_user
+      POSTGRES_PASSWORD: commy_password
+      POSTGRES_DB: commy_cluster
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commy_user -d commy_cluster"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Commy Server 1
+  commy-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      COMMY_SERVER_ID: "server-1"
+      COMMY_LISTEN_ADDR: "0.0.0.0:8001"
+      COMMY_BIND_ADDR: "commy-1:9001"
+      COMMY_CLUSTER_ENABLED: "true"
+      COMMY_CLUSTER_NODES: "server-1:commy-1:9001,server-2:commy-2:9001,server-3:commy-3:9001"
+      COMMY_HEARTBEAT_INTERVAL: "1000"
+      COMMY_HEARTBEAT_TIMEOUT: "3000"
+      COMMY_SYNC_INTERVAL: "100"
+      RUST_LOG: "info"
+    ports:
+      - "8001:8001"
+      - "9001:9001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - commy_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - commy_1_data:/var/lib/commy
+
+  # Commy Server 2
+  commy-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      COMMY_SERVER_ID: "server-2"
+      COMMY_LISTEN_ADDR: "0.0.0.0:8002"
+      COMMY_BIND_ADDR: "commy-2:9002"
+      COMMY_CLUSTER_ENABLED: "true"
+      COMMY_CLUSTER_NODES: "server-1:commy-1:9001,server-2:commy-2:9001,server-3:commy-3:9001"
+      COMMY_HEARTBEAT_INTERVAL: "1000"
+      COMMY_HEARTBEAT_TIMEOUT: "3000"
+      COMMY_SYNC_INTERVAL: "100"
+      RUST_LOG: "info"
+    ports:
+      - "8002:8002"
+      - "9002:9002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - commy_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - commy_2_data:/var/lib/commy
+
+  # Commy Server 3
+  commy-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      COMMY_SERVER_ID: "server-3"
+      COMMY_LISTEN_ADDR: "0.0.0.0:8003"
+      COMMY_BIND_ADDR: "commy-3:9003"
+      COMMY_CLUSTER_ENABLED: "true"
+      COMMY_CLUSTER_NODES: "server-1:commy-1:9001,server-2:commy-2:9001,server-3:commy-3:9001"
+      COMMY_HEARTBEAT_INTERVAL: "1000"
+      COMMY_HEARTBEAT_TIMEOUT: "3000"
+      COMMY_SYNC_INTERVAL: "100"
+      RUST_LOG: "info"
+    ports:
+      - "8003:8003"
+      - "9003:9003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - commy_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - commy_3_data:/var/lib/commy
+
+  # Optional: Monitoring/Admin Panel
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    networks:
+      - commy_network
+
+volumes:
+  postgres_data:
+  commy_1_data:
+  commy_2_data:
+  commy_3_data:
+
+networks:
+  commy_network:
+    driver: bridge

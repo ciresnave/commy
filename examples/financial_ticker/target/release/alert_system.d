@@ -1,0 +1,1 @@
+C:\Users\cires\OneDrive\Documents\projects\commy\examples\financial_ticker\target\release\alert_system.exe: C:\Users\cires\OneDrive\Documents\projects\commy\examples\financial_ticker\src\bin\alert_system.rs C:\Users\cires\OneDrive\Documents\projects\commy\examples\financial_ticker\src\lib.rs

@@ -1,0 +1,1 @@
+C:\Users\cires\OneDrive\Documents\projects\commy\examples\real_world_chat\target\release\chat_client.exe: C:\Users\cires\OneDrive\Documents\projects\commy\examples\real_world_chat\src\bin\chat_client.rs C:\Users\cires\OneDrive\Documents\projects\commy\examples\real_world_chat\src\lib.rs

@@ -1,0 +1,20 @@
+[Commy] DATABASE_URL environment variable found: postgresql://commy2_test:***@127.0.0.1:5434/commy2_test
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Initializing Commy Server
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Server ID: node-1
+[Commy] Client listen address: 127.0.0.1:8443
+[Commy] TLS enabled: true
+[Commy] TLS cert: Some("dev-cert.pem")
+[Commy] TLS key: Some("dev-key.pem")
+[Commy] Clustering enabled: false
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Configuring authentication:
+[Commy]   Backend: PostgreSQL
+[Commy]   Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy] Γ£ô Tenant created: my_tenant
+[Commy] Γ£ô Initializing auth-framework... Γ¥î
+[Commy] Γ£ù Auth-framework initialization failed
+[Commy]   Error: Auth framework error: Configuration { message: "Configuration validation failed: Configuration error: Memory storage is not suitable for production environments. Use PostgreSQL, Redis, or MySQL storage.", source: None, help: None, docs_url: None, suggested_fix: None }
+[Commy] 
+[Commy]   Troubleshooting:

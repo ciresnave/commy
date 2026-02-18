@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "dynamic-grounding": {
+      "command": "C:\\Users\\cires\\.cargo\\bin\\dynamic_grounding_for_github_copilot.exe",
+      "args": [],
+      "env": {},
+      "description": "Google Gemini AI for codebase search and analysis"
+    }
+  }
+}

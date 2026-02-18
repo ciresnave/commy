@@ -1,0 +1,60 @@
+/// Example YAML configuration for a 3-node local cluster
+/// 
+/// Usage:
+///   - Copy to commy-cluster.yaml
+///   - Adjust server_id and node addresses as needed
+///   - Pass to: ClusteringConfig::from_yaml_file("commy-cluster.yaml")
+
+server_id: "server-1"
+
+nodes:
+  - id: "server-1"
+    address: "127.0.0.1:9001"
+    max_connections: 10
+    tls: null
+
+  - id: "server-2"
+    address: "127.0.0.1:9002"
+    max_connections: 10
+    tls: null
+
+  - id: "server-3"
+    address: "127.0.0.1:9003"
+    max_connections: 10
+    tls: null
+
+replication:
+  sync_interval_ms: 100
+  batch_size: 1000
+  max_concurrent_tasks: 4
+  gossip_enabled: true
+  replication_timeout_ms: 5000
+  enable_checksums: true
+  enable_resume: true
+
+consistency:
+  strategy:
+    last_write_wins:
+      tie_breaker: null
+  enable_vector_clocks: true
+  quorum_size: null
+  detect_conflicts: true
+  conflict_log_enabled: false
+  conflict_log_path: ""
+
+network:
+  heartbeat_interval_ms: 1000
+  heartbeat_timeout_ms: 3000
+  max_heartbeat_failures: 3
+  connection_pooling: true
+  max_queue_size: 10000
+  tcp_keepalive: true
+  tcp_keepalive_ms: 30000
+
+storage:
+  backend:
+    memory: null
+  persist_cluster_state: true
+  metadata_dir: ".commy/cluster"
+  enable_snapshots: true
+  snapshot_interval_ms: 60000

@@ -1,0 +1,58 @@
+[package]
+name = "commy-ticker"
+version = "1.0.0"
+edition = "2021"
+authors = ["Commy Contributors"]
+license = "Apache-2.0"
+description = "Real-time financial ticker demonstrating Commy's ultra-low latency capabilities"
+
+[[bin]]
+name = "market_data_source"
+path = "src/bin/market_data_source.rs"
+
+[[bin]]
+name = "dashboard"
+path = "src/bin/dashboard.rs"
+
+[[bin]]
+name = "alert_system"
+path = "src/bin/alert_system.rs"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tungstenite = "0.23"
+tokio-tungstenite = "0.23"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = "0.4"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+clap = { version = "4.0", features = ["derive"] }
+futures = "0.3"
+rand = "0.8"
+time = "0.3"
+
+# Commy dependencies
+# Note: Adjust these paths to point to your local Commy installation
+# or use the published crates from crates.io when available
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+# Maximum performance for ticker
+[profile.release-ticker]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+
+[profile.dev]
+opt-level = 0
+
+[profile.test]
+opt-level = 2

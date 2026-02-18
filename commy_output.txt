@@ -1,0 +1,52 @@
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Initializing Commy Server
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Server ID: node-1
+[Commy] Client listen address: 127.0.0.1:8443
+[Commy] TLS enabled: true
+[Commy] TLS cert: Some("dev-cert.pem")
+[Commy] TLS key: Some("dev-key.pem")
+[Commy] Clustering enabled: true
+[Commy] Cluster nodes: node-1:9000,node-2:9000,node-3:9000
+[Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+[Commy] Γ£ô Clustering configuration initialized
+[Commy] Configuring authentication:
+[Commy]   Backend: PostgreSQL
+[Commy]   Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy] Γ£ô Tenant created: my_tenant
+[Commy] Γ£ô Initializing auth-framework... Γ£à
+[Commy] Γ£ô Auth-framework initialized with PostgreSQL backend
+[Commy] Γ£ô Registering test API keys in PostgreSQL...
+[Commy]
+[Commy] ≡ƒô¥ Test API Keys for Examples
+[Commy] ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+[Commy]
+[Commy] Γä╣ Attempting to register test API keys through auth-framework...
+[Commy]
+[Commy] Available API Keys for Testing:
+[Commy]   ΓÇó test_key_123
+[Commy]     Used by: basic_client, hybrid_client examples
+[Commy]     Permissions: read, write
+[Commy]
+[Commy]   ΓÇó admin_key_with_all_perms
+[Commy]     Used by: permissions_example (admin user)
+[Commy]     Permissions: admin, manage_tenants, manage_users
+[Commy]
+[Commy]   ΓÇó read_only_key
+[Commy]     Used by: permissions_example (read-only user)
+[Commy]     Permissions: read
+[Commy]
+[Commy]   ΓÇó  creator_key
+[Commy]     Used by: permissions_example (creator user)
+[Commy]     Permissions: admin, create_services, manage_variables
+[Commy]
+[Commy] Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy] ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+[Commy]
+TLS initialized: cert=dev-cert.pem, key=dev-key.pem
+[Commy] Γ£ô TLS initialized successfully (WSS mode)
+Token cleanup task skipped - auth-framework handles cleanup internally (interval: 300s)
+[Commy] Γ£ô Server initialized, starting WSS listener...
+[Commy] Remote clients connect to: wss://127.0.0.1:8443
+[Commy] 
+WebSocket Secure (WSS) server listening on 127.0.0.1:8443 (RFC 6455 + TLS)
