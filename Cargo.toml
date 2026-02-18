@@ -1,10 +1,11 @@
 [package]
-    authors    = ["Eric Evans <ciresnave@gmail.com>"]
-    edition    = "2021"
-    license    = "MIT"
-    name       = "commy"
-    repository = "https://github.com/CireSnave/commy"
-    version    = "0.1.0"
+    authors      = ["Eric Evans <ciresnave@gmail.com>"]
+    description  = "A hierarchical, multi-tenant shared memory coordination system for Windows enabling secure, efficient data sharing between multiple processes via WebSocket and direct memory-mapping"
+    edition      = "2021"
+    license      = "MIT"
+    name         = "commy"
+    repository   = "https://github.com/CireSnave/commy"
+    version      = "0.1.0"
 
 [lib]
 
