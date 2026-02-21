@@ -122,16 +122,23 @@ jobs:
           $version = "${{ steps.version.outputs.version }}"
           $asset   = "target\release\commy.exe"
 
+          $notes = @"
+Release of Commy server $tag.
+
+## Download
+- **commy.exe** - Windows server executable
+
+## Changelog
+See commits on https://github.com/${{ github.repository }}/commits/main for details.
+"@
+          $notesFile = [System.IO.Path]::GetTempFileName()
+          Set-Content -Path $notesFile -Value $notes -Encoding UTF8
+
           gh release create $tag `
             --repo $env:GITHUB_REPOSITORY `
             --title "Commy $tag" `
-            --notes "Release of Commy server $tag.
-
-## Download
-- **commy.exe** — Windows server executable
-
-## Changelog
-See [commits since previous release](https://github.com/${{ github.repository }}/commits/main) for details." `
+            --notes-file $notesFile `
             "$asset#commy-$version-windows-x86_64.exe"
 
+          Remove-Item $notesFile -Force
           Write-Host "Release $tag created successfully."
