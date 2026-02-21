@@ -88,7 +88,7 @@ mod tests {
         // Register JWT method
         let jwt_method = JwtMethod::new()
             .secret_key("test-secret-at-least-32-characters-long")
-            .issuer("commy2-test");
+            .issuer("commy-test");
 
         auth.register_method("jwt", AuthMethodEnum::Jwt(jwt_method));
         auth.initialize().await.unwrap();

@@ -1,4 +1,4 @@
-//! WebSocket protocol for COMMY2
+//! WebSocket protocol for COMMY
 //!
 //! Defines messages and message routing for remote Client-Server communication
 //! over WSS (WebSocket Secure).
@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// Unique identifier for WSS connections/clients
 pub type ClientSessionId = String;
 
-/// WebSocket message types for COMMY2 protocol
+/// WebSocket message types for COMMY protocol
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum WssMessage {

@@ -1,6 +1,6 @@
-//! Multi-server clustering support for COMMY2
+//! Multi-server clustering support for COMMY
 //! 
-//! Enables multiple COMMY2 servers to work together:
+//! Enables multiple COMMY servers to work together:
 //! - Service replication across servers
 //! - Token/session synchronization via MessagePack
 //! - Cluster-wide client discovery

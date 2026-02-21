@@ -149,7 +149,7 @@ impl TenantAuthContext {
     /// let config = TenantAuthConfig {
     ///     tenant_id: "my_tenant".to_string(),
     ///     storage_backend: StorageBackend::PostgreSQL {
-    ///         url: "postgresql://user:pass@localhost:5432/commy2".to_string(),
+    ///         url: "postgresql://user:pass@localhost:5432/commy".to_string(),
     ///         max_connections: 100,
     ///     },
     ///     ..Default::default()
@@ -191,8 +191,8 @@ impl TenantAuthContext {
 
         // Register JWT method by default
         let jwt_method = JwtMethod::new()
-            .secret_key(&format!("commy2-tenant-{}-secret-key", config.tenant_id))
-            .issuer(&format!("commy2-tenant-{}", config.tenant_id));
+            .secret_key(&format!("commy-tenant-{}-secret-key", config.tenant_id))
+            .issuer(&format!("commy-tenant-{}", config.tenant_id));
 
         auth_fw.register_method("jwt", AuthMethodEnum::Jwt(jwt_method));
 

@@ -29,9 +29,9 @@ docker-compose up -d
 docker-compose ps
 
 # Test connectivity
-docker exec commy-postgres-1 psql -U commy2_test -d commy2_test -c "SELECT 1"
+docker exec commy-postgres-1 psql -U commy_test -d commy_test -c "SELECT 1"
 docker exec commy-redis-1 redis-cli ping
-docker exec commy-mysql-1 mysql -u commy2_test -ptest_password -e "SELECT 1"
+docker exec commy-mysql-1 mysql -u commy_test -ptest_password -e "SELECT 1"
 
 # Stop services
 docker-compose down
@@ -41,17 +41,17 @@ docker-compose down
 
 ### PostgreSQL 15
 - **Port**: 5434
-- **User**: commy2_test
+- **User**: commy_test
 - **Password**: test_password
-- **Database**: commy2_test
-- **Connection**: `postgresql://commy2_test:test_password@localhost:5434/commy2_test`
+- **Database**: commy_test
+- **Connection**: `postgresql://commy_test:test_password@localhost:5434/commy_test`
 
 ### MySQL 8
 - **Port**: 3306
-- **User**: commy2_test
+- **User**: commy_test
 - **Password**: test_password
-- **Database**: commy2_test
-- **Connection**: `mysql://commy2_test:test_password@localhost:3306/commy2_test`
+- **Database**: commy_test
+- **Connection**: `mysql://commy_test:test_password@localhost:3306/commy_test`
 
 ### Redis 7
 - **Port**: 6379
@@ -148,10 +148,10 @@ docker-compose ps
 ### Test Database Connectivity
 ```bash
 # PostgreSQL
-docker exec commy-postgres-1 psql -U commy2_test -d commy2_test -c "SELECT version();"
+docker exec commy-postgres-1 psql -U commy_test -d commy_test -c "SELECT version();"
 
 # MySQL
-docker exec commy-mysql-1 mysql -u commy2_test -ptest_password -e "SELECT VERSION();"
+docker exec commy-mysql-1 mysql -u commy_test -ptest_password -e "SELECT VERSION();"
 
 # Redis
 docker exec commy-redis-1 redis-cli info

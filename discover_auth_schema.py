@@ -12,8 +12,8 @@ def run_psql_command(cmd):
         "-e", "PGPASSWORD=test_password",
         "commy-postgres-1",
         "psql",
-        "-U", "commy2_test",
-        "-d", "commy2_test",
+        "-U", "commy_test",
+        "-d", "commy_test",
         "-c", cmd,
         "--quiet"
     ]
@@ -43,7 +43,7 @@ def main():
         print()
         print("This likely means auth-framework hasn't initialized yet.")
         print("Make sure the Commy server is running with:")
-        print("  $env:DATABASE_URL='postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test'")
+        print("  $env:DATABASE_URL='postgresql://commy_test:test_password@127.0.0.1:5434/commy_test'")
         print("  .\\target\\release\\commy.exe")
         return 1
     

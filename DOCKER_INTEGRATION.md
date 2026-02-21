@@ -125,7 +125,7 @@ Commy supports configurable storage backends. Set via code:
 ```rust
 let config = TenantAuthConfig {
     storage_backend: StorageBackend::PostgreSQL {
-        url: "postgresql://commy2_test:test_password@commy-postgres-1:5432/commy2_test".to_string(),
+        url: "postgresql://commy_test:test_password@commy-postgres-1:5432/commy_test".to_string(),
         max_connections: 100,
     },
     ..Default::default()
@@ -136,7 +136,7 @@ let config = TenantAuthConfig {
 ```rust
 let config = TenantAuthConfig {
     storage_backend: StorageBackend::MySQL {
-        url: "mysql://commy2_test:test_password@commy-mysql-1:3306/commy2_test".to_string(),
+        url: "mysql://commy_test:test_password@commy-mysql-1:3306/commy_test".to_string(),
         max_connections: 100,
     },
     ..Default::default()
@@ -286,8 +286,8 @@ netstat -ano | findstr :8000
 When Commy connects to databases, use full service names:
 
 ```
-❌ Wrong:  postgresql://commy2_test:test_password@localhost:5434/commy2_test
-✅ Correct: postgresql://commy2_test:test_password@commy-postgres-1:5432/commy2_test
+❌ Wrong:  postgresql://commy_test:test_password@localhost:5434/commy_test
+✅ Correct: postgresql://commy_test:test_password@commy-postgres-1:5432/commy_test
 ```
 
 Note: Docker Compose DNS resolution uses service names, not localhost.

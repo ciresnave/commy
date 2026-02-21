@@ -1,6 +1,6 @@
-# COMMY2: Quick Start Guide
+# COMMY: Quick Start Guide
 
-Get up and running with COMMY2 in 5 minutes.
+Get up and running with COMMY in 5 minutes.
 
 ## Installation
 
@@ -15,7 +15,7 @@ edition = "2021"
 [dependencies]
 memmap2 = "0.7"
 
-# Add commy2 from your local path
+# Add commy from your local path
 ```
 
 Copy the `src/allocator.rs` and `src/containers.rs` files into your project.

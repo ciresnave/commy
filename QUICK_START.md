@@ -12,7 +12,7 @@
 ## What Works Right Now
 
 1. **Commy server starts successfully** with auth-framework
-2. **Database connection** is working (PostgreSQL commy2_test)
+2. **Database connection** is working (PostgreSQL commy_test)
 3. **TLS certificates** are in place and valid
 4. **Examples can connect** to the server via WSS
 
@@ -41,7 +41,7 @@ Once we identify the correct table schema, manually insert:
 
 ```sql
 -- Connect to the database
-docker exec -i commy-postgres-1 psql -U commy2_test -d commy2_test
+docker exec -i commy-postgres-1 psql -U commy_test -d commy_test
 
 -- Insert test API key (schema may vary)
 INSERT INTO auth_credentials (...) VALUES (...);
@@ -59,15 +59,15 @@ Visit the auth-framework library documentation to understand:
 The Commy server successfully created auth-framework tables in PostgreSQL:
 
 ```
-Database: commy2_test
-User: commy2_test
+Database: commy_test
+User: commy_test
 Host: commy-postgres-1:5432
 ```
 
 To inspect the schema:
 ```bash
 docker exec -e PGPASSWORD=test_password commy-postgres-1 \
-  psql -U commy2_test -d commy2_test -c "\dt"
+  psql -U commy_test -d commy_test -c "\dt"
 ```
 
 ## Next Steps
@@ -100,8 +100,8 @@ docker exec -e PGPASSWORD=test_password commy-postgres-1 \
 ## Troubleshooting
 
 **Error: "Role 'postgres' does not exist"**
-- Use `commy2_test` user instead of `postgres`
-- Container has: POSTGRES_USER=commy2_test, PASSWORD=test_password
+- Use `commy_test` user instead of `postgres`
+- Container has: POSTGRES_USER=commy_test, PASSWORD=test_password
 
 **Error: "Table not found"**
 - Auth-framework creates tables lazily  
@@ -137,7 +137,7 @@ PostgreSQL (commy-postgres-1:5434)
 
 - **Port 8443**: Commy WSS server
 - **Port 5434**: PostgreSQL (mapped from 5432 inside container)
-- **Database**: commy2_test
+- **Database**: commy_test
 - **Auth Backend**: PostgreSQL (not memory-based)
 - **TLS**: Required for WSS connections
 - **Auth Framework Version**: v0.4.2

@@ -91,10 +91,10 @@ docker-compose logs -f mysql
 ### Test Connectivity
 ```bash
 # PostgreSQL
-docker exec commy-postgres-1 psql -U commy2_test -d commy2_test -c "SELECT 1"
+docker exec commy-postgres-1 psql -U commy_test -d commy_test -c "SELECT 1"
 
 # MySQL
-docker exec commy-mysql-1 mysql -u commy2_test -ptest_password -e "SELECT 1"
+docker exec commy-mysql-1 mysql -u commy_test -ptest_password -e "SELECT 1"
 
 # Redis
 docker exec commy-redis-1 redis-cli ping
@@ -123,18 +123,18 @@ docker-compose down -v && docker system prune -a
 ## 🔑 Connection Credentials
 
 ### All Databases
-- **User**: `commy2_test`
+- **User**: `commy_test`
 - **Password**: `test_password`
-- **Database**: `commy2_test`
+- **Database**: `commy_test`
 
 ### Root Access
 - **MySQL Root Password**: `root_password`
-- **PostgreSQL**: Connect as `commy2_test`
+- **PostgreSQL**: Connect as `commy_test`
 
 ### Connection Strings
 ```
-PostgreSQL: postgresql://commy2_test:test_password@localhost:5434/commy2_test
-MySQL:      mysql://commy2_test:test_password@localhost:3306/commy2_test
+PostgreSQL: postgresql://commy_test:test_password@localhost:5434/commy_test
+MySQL:      mysql://commy_test:test_password@localhost:3306/commy_test
 Redis:      redis://localhost:6379
 ```
 
@@ -181,9 +181,9 @@ docker-compose ps
 
 ### 3. Test Connectivity
 ```bash
-docker exec commy-postgres-1 psql -U commy2_test -d commy2_test -c "SELECT 1"
+docker exec commy-postgres-1 psql -U commy_test -d commy_test -c "SELECT 1"
 docker exec commy-redis-1 redis-cli ping
-docker exec commy-mysql-1 mysql -u commy2_test -ptest_password -e "SELECT 1"
+docker exec commy-mysql-1 mysql -u commy_test -ptest_password -e "SELECT 1"
 ```
 
 ### 4. Start Development

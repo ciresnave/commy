@@ -12,7 +12,7 @@
 [Commy] Γ£ô Clustering configuration initialized
 [Commy] Configuring authentication:
 [Commy]   Backend: PostgreSQL
-[Commy]   Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy]   Database: postgresql://commy_test:test_password@127.0.0.1:5434/commy_test
 [Commy] Γ£ô Tenant created: my_tenant
 [Commy] Γ£ô Initializing auth-framework... Γ£à
 [Commy] Γ£ô Auth-framework initialized with PostgreSQL backend
@@ -40,7 +40,7 @@
 [Commy]     Used by: permissions_example (creator user)
 [Commy]     Permissions: admin, create_services, manage_variables
 [Commy]
-[Commy] Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy] Database: postgresql://commy_test:test_password@127.0.0.1:5434/commy_test
 [Commy] ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 [Commy]
 TLS initialized: cert=dev-cert.pem, key=dev-key.pem

@@ -1,8 +1,8 @@
-# COMMY2: Project Status & Release Notes
+# COMMY: Project Status & Release Notes
 
 ## Current Status: Production Ready (v2.0)
 
-COMMY2 is a **production-ready** zero-copy shared memory library for Windows with comprehensive testing, documentation, and proven cross-process coordination.
+COMMY is a **production-ready** zero-copy shared memory library for Windows with comprehensive testing, documentation, and proven cross-process coordination.
 
 ---
 
@@ -364,7 +364,7 @@ All performance metrics are measured on Windows 10/11 with:
 
 ## Conclusion
 
-COMMY2 v2.0 represents a fully functional, well-tested, and production-ready shared memory library. The critical recursive mutex deadlock fix in this release resolves the final blocker to production deployment.
+COMMY v2.0 represents a fully functional, well-tested, and production-ready shared memory library. The critical recursive mutex deadlock fix in this release resolves the final blocker to production deployment.
 
 ### What You Can Do Now
 ✅ Create zero-copy shared containers between processes  

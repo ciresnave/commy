@@ -1,6 +1,6 @@
 //! WSS Server Module
 //!
-//! Provides the WebSocket Secure (WSS) server implementation for COMMY2.
+//! Provides the WebSocket Secure (WSS) server implementation for COMMY.
 //! Implements RFC 6455 (WebSocket Protocol) with RFC 5246 (TLS 1.2+) support.
 //! Accepts remote client connections, manages protocol message routing,
 //! maintains client sessions, and broadcasts variable changes.

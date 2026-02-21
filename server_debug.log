@@ -1,4 +1,4 @@
-[Commy] DATABASE_URL environment variable found: postgresql://commy2_test:***@127.0.0.1:5434/commy2_test
+[Commy] DATABASE_URL environment variable found: postgresql://commy_test:***@127.0.0.1:5434/commy_test
 [Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 [Commy] Initializing Commy Server
 [Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
@@ -11,7 +11,7 @@
 [Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 [Commy] Configuring authentication:
 [Commy]   Backend: PostgreSQL
-[Commy]   Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy]   Database: postgresql://commy_test:test_password@127.0.0.1:5434/commy_test
 [Commy] Γ£ô Tenant created: my_tenant
 [Commy] Γ£ô Initializing auth-framework... Γ¥î
 [Commy] Γ£ù Auth-framework initialization failed

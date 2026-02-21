@@ -1,4 +1,4 @@
-//! Client liveness detection system for COMMY2
+//! Client liveness detection system for COMMY
 //! 
 //! Monitors client connections for:
 //! - Connection drops (WSS disconnect)

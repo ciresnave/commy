@@ -1,6 +1,6 @@
 //! Permission management for multi-tenant access control
 //! 
-//! This module defines the permission model for COMMY2:
+//! This module defines the permission model for COMMY:
 //! - Per-(Client, Tenant) permission tracking
 //! - Fine-grained resource-level permissions
 //! - Permission inheritance and delegation
@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// A granular permission in COMMY2
+/// A granular permission in COMMY
 /// 
 /// Permissions are hierarchical and resource-specific
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]

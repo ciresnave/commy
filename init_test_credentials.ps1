@@ -4,9 +4,9 @@
 
 param(
     [string]$DockerContainer = "",
-    [string]$PostgresUser = "commy2_test",
+    [string]$PostgresUser = "commy_test",
     [string]$PostgresPassword = "test_password",
-    [string]$PostgresDb = "commy2_test"
+    [string]$PostgresDb = "commy_test"
 )
 
 Write-Host "Initializing test credentials in PostgreSQL..." -ForegroundColor Green
@@ -26,7 +26,7 @@ Write-Host ""
 # Auto-detect container if not specified
 if ([string]::IsNullOrEmpty($DockerContainer)) {
     # Look for common PostgreSQL container names used in Commy projects
-    $possibleContainers = @("commy-postgres-1", "postgres-1", "commy2-postgres-1")
+    $possibleContainers = @("commy-postgres-1", "postgres-1", "commy-postgres-1")
     
     foreach ($container in $possibleContainers) {
         $output = & docker inspect -f '{{.State.Running}}' $container 2>$null

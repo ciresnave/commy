@@ -80,7 +80,7 @@ println!("Shared data: {:?}", numbers.len());
 ## 🏗️ Architecture Highlights
 
 ### Offset-Based Pointers
-Instead of storing raw memory pointers (process-specific), COMMY2 uses offsets, enabling true cross-process access:
+Instead of storing raw memory pointers (process-specific), COMMY uses offsets, enabling true cross-process access:
 
 ```
 Process A              Process B

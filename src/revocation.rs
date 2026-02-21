@@ -1,4 +1,4 @@
-//! Permission revocation protocol for COMMY2
+//! Permission revocation protocol for COMMY
 //! 
 //! Handles revoking client permissions and migrating them to new service files
 //! with optional honeypot detection.

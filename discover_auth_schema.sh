@@ -4,9 +4,9 @@
 set -e
 
 CONTAINER="commy-postgres-1"
-USER="commy2_test"
+USER="commy_test"
 PASSWORD="test_password"
-DB="commy2_test"
+DB="commy_test"
 
 echo "🔍 Discovering Auth-Framework PostgreSQL Schema"
 echo "================================================"
@@ -42,7 +42,7 @@ if [ -z "$TABLES" ]; then
     echo "  3. Tables were created in a different schema"
     echo ""
     echo "🔧 Try starting the server with:"
-    echo "   \$env:DATABASE_URL='postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test'"
+    echo "   \$env:DATABASE_URL='postgresql://commy_test:test_password@127.0.0.1:5434/commy_test'"
     echo "   .\\target\\release\\commy.exe"
     exit 0
 fi

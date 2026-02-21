@@ -10,7 +10,7 @@
 [Commy] ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 [Commy] Configuring authentication:
 [Commy]   Backend: PostgreSQL
-[Commy]   Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+[Commy]   Database: postgresql://commy_test:test_password@127.0.0.1:5434/commy_test
 [Commy] Γ£ô Tenant created: my_tenant
 [Commy] Γ£ô Initializing auth-framework... Γ£à
 [Commy] Γ£ô Auth-framework initialized with PostgreSQL backend

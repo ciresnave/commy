@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         eprintln!("[Commy] ⚠ Warning: Running WITHOUT TLS (insecure)");
         eprintln!("[Commy]   Set COMMY_TLS_CERT_PATH and COMMY_TLS_KEY_PATH for secure WSS");
-        return Err("TLS not configured. COMMY2 requires WSS for client connections.".into());
+        return Err("TLS not configured. COMMY requires WSS for client connections.".into());
     }
 
     // Start token cleanup task (auth-framework handles this internally)

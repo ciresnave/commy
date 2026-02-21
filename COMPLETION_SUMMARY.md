@@ -13,8 +13,8 @@
 
 ### 2. Services Deployed ✅
 ```
-✓ PostgreSQL 15           - Port 5434, user: commy2_test
-✓ MySQL 8                 - Port 3306, user: commy2_test
+✓ PostgreSQL 15           - Port 5434, user: commy_test
+✓ MySQL 8                 - Port 3306, user: commy_test
 ✓ Redis 7                 - Port 6379, persistent cache
 ✓ All services HEALTHY    - Verified and tested
 ```
@@ -99,10 +99,10 @@ docker-compose logs -f
 ### Quick Connect
 ```bash
 # PostgreSQL
-psql postgresql://commy2_test:test_password@localhost:5434/commy2_test
+psql postgresql://commy_test:test_password@localhost:5434/commy_test
 
 # MySQL
-mysql -h localhost -u commy2_test -ptest_password commy2_test
+mysql -h localhost -u commy_test -ptest_password commy_test
 
 # Redis
 redis-cli -h localhost -p 6379
@@ -111,10 +111,10 @@ redis-cli -h localhost -p 6379
 ### From Code
 ```rust
 // PostgreSQL
-let db_url = "postgresql://commy2_test:test_password@localhost:5434/commy2_test";
+let db_url = "postgresql://commy_test:test_password@localhost:5434/commy_test";
 
 // MySQL  
-let db_url = "mysql://commy2_test:test_password@localhost:3306/commy2_test";
+let db_url = "mysql://commy_test:test_password@localhost:3306/commy_test";
 
 // Redis
 let redis_url = "redis://localhost:6379";

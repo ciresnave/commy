@@ -2,9 +2,9 @@
 # discover_auth_schema.ps1 - Discover auth-framework's PostgreSQL schema
 
 $Container = "commy-postgres-1"
-$PostgresUser = "commy2_test"
+$PostgresUser = "commy_test"
 $PostgresPassword = "test_password"
-$PostgresDb = "commy2_test"
+$PostgresDb = "commy_test"
 
 Write-Host "🔍 Discovering Auth-Framework PostgreSQL Schema" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
@@ -45,7 +45,7 @@ if ($tables.Count -eq 0 -or [string]::IsNullOrWhiteSpace($tables[0])) {
     Write-Host ""
     Write-Host "🔧 Try starting the server with:" -ForegroundColor Cyan
     Write-Host @"
-`$env:DATABASE_URL = 'postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test'
+`$env:DATABASE_URL = 'postgresql://commy_test:test_password@127.0.0.1:5434/commy_test'
 .\target\release\commy.exe
 "@ -ForegroundColor Cyan
     exit 0

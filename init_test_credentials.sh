@@ -4,9 +4,9 @@
 # Usage: ./init_test_credentials.sh
 
 DOCKER_CONTAINER=${DOCKER_CONTAINER:-}
-POSTGRES_USER=${POSTGRES_USER:-commy2_test}
+POSTGRES_USER=${POSTGRES_USER:-commy_test}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-test_password}
-POSTGRES_DB=${POSTGRES_DB:-commy2_test}
+POSTGRES_DB=${POSTGRES_DB:-commy_test}
 
 echo "Initializing test credentials in PostgreSQL..."
 echo ""
@@ -14,7 +14,7 @@ echo ""
 # Auto-detect container if not specified
 if [ -z "$DOCKER_CONTAINER" ]; then
     # Look for common PostgreSQL container names used in Commy projects
-    for container in "commy-postgres-1" "postgres-1" "commy2-postgres-1"; do
+    for container in "commy-postgres-1" "postgres-1" "commy-postgres-1"; do
         RUNNING=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null)
         if [ "$RUNNING" = "true" ]; then
             DOCKER_CONTAINER="$container"

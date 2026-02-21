@@ -35,9 +35,9 @@ docker-compose ps
 docker-compose ps
 
 # Test individual services:
-docker exec commy-postgres-1 psql -U commy2_test -d commy2_test -c "SELECT 1"
+docker exec commy-postgres-1 psql -U commy_test -d commy_test -c "SELECT 1"
 docker exec commy-redis-1 redis-cli ping
-docker exec commy-mysql-1 mysql -u commy2_test -ptest_password -e "SELECT 1"
+docker exec commy-mysql-1 mysql -u commy_test -ptest_password -e "SELECT 1"
 ```
 
 ### 4. Stop Services
@@ -50,27 +50,27 @@ docker-compose down
 ### PostgreSQL (Port 5434)
 - **Image**: postgres:15
 - **Container Name**: commy-postgres-1
-- **Database**: commy2_test
-- **User**: commy2_test
+- **Database**: commy_test
+- **User**: commy_test
 - **Password**: test_password
 - **Health Check**: Every 5 seconds
 - **Use Case**: Production-ready relational database for Commy storage backend
 
 **Connection String**:
 ```
-postgresql://commy2_test:test_password@localhost:5434/commy2_test
+postgresql://commy_test:test_password@localhost:5434/commy_test
 ```
 
 **Test Connection**:
 ```bash
-psql postgresql://commy2_test:test_password@localhost:5434/commy2_test
+psql postgresql://commy_test:test_password@localhost:5434/commy_test
 ```
 
 ### MySQL (Port 3306)
 - **Image**: mysql:8
 - **Container Name**: commy-mysql-1
-- **Database**: commy2_test
-- **User**: commy2_test
+- **Database**: commy_test
+- **User**: commy_test
 - **Password**: test_password
 - **Root Password**: root_password
 - **Health Check**: Every 5 seconds via mysqladmin ping
@@ -78,12 +78,12 @@ psql postgresql://commy2_test:test_password@localhost:5434/commy2_test
 
 **Connection String**:
 ```
-mysql://commy2_test:test_password@localhost:3306/commy2_test
+mysql://commy_test:test_password@localhost:3306/commy_test
 ```
 
 **Test Connection**:
 ```bash
-mysql -h localhost -u commy2_test -ptest_password commy2_test
+mysql -h localhost -u commy_test -ptest_password commy_test
 ```
 
 ### Redis (Port 6379)
@@ -104,13 +104,13 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: commy2_test
-      POSTGRES_USER: commy2_test
+      POSTGRES_DB: commy_test
+      POSTGRES_USER: commy_test
       POSTGRES_PASSWORD: test_password
     ports:
       - "5434:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U commy2_test"]
+      test: ["CMD-SHELL", "pg_isready -U commy_test"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -118,8 +118,8 @@ services:
   mysql:
     image: mysql:8
     environment:
-      MYSQL_DATABASE: commy2_test
-      MYSQL_USER: commy2_test
+      MYSQL_DATABASE: commy_test
+      MYSQL_USER: commy_test
       MYSQL_PASSWORD: test_password
       MYSQL_ROOT_PASSWORD: root_password
     ports:
@@ -212,10 +212,10 @@ docker-compose logs --tail=50 postgres
 docker-compose exec postgres bash
 
 # Execute command in container
-docker-compose exec postgres psql -U commy2_test -d commy2_test -c "SELECT 1"
+docker-compose exec postgres psql -U commy_test -d commy_test -c "SELECT 1"
 
 # Interactive MySQL
-docker-compose exec mysql bash -c "mysql -u commy2_test -ptest_password commy2_test"
+docker-compose exec mysql bash -c "mysql -u commy_test -ptest_password commy_test"
 ```
 
 ### Stop and Clean Up
@@ -273,7 +273,7 @@ Commy supports multiple storage backends. Configure via environment:
 ### PostgreSQL Backend
 ```rust
 StorageBackend::PostgreSQL {
-    url: "postgresql://commy2_test:test_password@localhost:5434/commy2_test",
+    url: "postgresql://commy_test:test_password@localhost:5434/commy_test",
     max_connections: 100,
 }
 ```
@@ -281,7 +281,7 @@ StorageBackend::PostgreSQL {
 ### MySQL Backend
 ```rust
 StorageBackend::MySQL {
-    url: "mysql://commy2_test:test_password@localhost:3306/commy2_test",
+    url: "mysql://commy_test:test_password@localhost:3306/commy_test",
     max_connections: 100,
 }
 ```
@@ -326,10 +326,10 @@ netstat -ano | findstr :6379  # Redis
 ### Database Connection Issues
 ```bash
 # Test PostgreSQL
-docker-compose exec postgres psql -U commy2_test -d commy2_test -c "\dt"
+docker-compose exec postgres psql -U commy_test -d commy_test -c "\dt"
 
 # Test MySQL
-docker-compose exec mysql mysql -u commy2_test -ptest_password -e "SHOW DATABASES;"
+docker-compose exec mysql mysql -u commy_test -ptest_password -e "SHOW DATABASES;"
 
 # Test Redis
 docker-compose exec redis redis-cli info

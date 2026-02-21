@@ -3,7 +3,7 @@
 ## ✅ What's Working
 
 - **PostgreSQL**: Running in Docker (`commy-postgres-1` on port 5434)
-- **Credentials**: User `commy2_test` / Password `test_password` / Database `commy2_test`
+- **Credentials**: User `commy_test` / Password `test_password` / Database `commy_test`
 - **Commy Server**: Builds successfully and initializes auth-framework
 - **TLS**: Certificates configured (`dev-cert.pem` / `dev-key.pem`)
 - **Auth-Framework**: Successfully integrates with PostgreSQL backend
@@ -35,9 +35,9 @@ $env:COMMY_CLUSTERING="disabled"
 
 ```
 PostgreSQL: commy-postgres-1 (port 5434)
-├─ User: commy2_test
+├─ User: commy_test
 ├─ Password: test_password
-└─ Database: commy2_test
+└─ Database: commy_test
 
 Commy Server: (When fixed)
 ├─ Listen: wss://127.0.0.1:8443
@@ -45,7 +45,7 @@ Commy Server: (When fixed)
 └─ Tenant: my_tenant
 
 Auth-Framework: PostgreSQL Backend
-├─ Database: postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test
+├─ Database: postgresql://commy_test:test_password@127.0.0.1:5434/commy_test
 ├─ Status: Ready to create tables on first access
 └─ Tables: Lazy-created (will be created when first authentication attempt is made)
 ```
@@ -57,7 +57,7 @@ The server cannot initialize WSS listener while clustering configuration fails
 
 ### 2. Start Server
 ```powershell
-$env:DATABASE_URL = "postgresql://commy2_test:test_password@127.0.0.1:5434/commy2_test"
+$env:DATABASE_URL = "postgresql://commy_test:test_password@127.0.0.1:5434/commy_test"
 $env:COMMY_TLS_CERT_PATH = "dev-cert.pem"
 $env:COMMY_TLS_KEY_PATH = "dev-key.pem"
 .\target\release\commy.exe
@@ -72,7 +72,7 @@ cargo run --release --example basic_client -- --api-key test_key_123
 ### 4. Discover Table Schema
 Once tables are created, inspect them:
 ```bash
-docker exec -e PGPASSWORD=test_password commy-postgres-1 psql -U commy2_test -d commy2_test -c "\dt"
+docker exec -e PGPASSWORD=test_password commy-postgres-1 psql -U commy_test -d commy_test -c "\dt"
 ```
 
 ### 5. Insert Test Credentials

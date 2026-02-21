@@ -26,10 +26,10 @@ docker-compose logs -f <service>     # Follow logs in real-time
 ### Access Containers
 ```bash
 # PostgreSQL
-docker-compose exec postgres psql -U commy2_test -d commy2_test
+docker-compose exec postgres psql -U commy_test -d commy_test
 
 # MySQL
-docker-compose exec mysql mysql -u commy2_test -ptest_password commy2_test
+docker-compose exec mysql mysql -u commy_test -ptest_password commy_test
 
 # Redis
 docker-compose exec redis redis-cli
@@ -39,15 +39,15 @@ docker-compose exec redis redis-cli
 
 | Service    | Port | User        | Password      | Database    |
 | ---------- | ---- | ----------- | ------------- | ----------- |
-| PostgreSQL | 5434 | commy2_test | test_password | commy2_test |
-| MySQL      | 3306 | commy2_test | test_password | commy2_test |
+| PostgreSQL | 5434 | commy_test | test_password | commy_test |
+| MySQL      | 3306 | commy_test | test_password | commy_test |
 | Redis      | 6379 | -           | -             | -           |
 
 ## Connection Strings
 
 ```
-PostgreSQL: postgresql://commy2_test:test_password@localhost:5434/commy2_test
-MySQL:      mysql://commy2_test:test_password@localhost:3306/commy2_test
+PostgreSQL: postgresql://commy_test:test_password@localhost:5434/commy_test
+MySQL:      mysql://commy_test:test_password@localhost:3306/commy_test
 Redis:      redis://localhost:6379
 ```
 
@@ -58,10 +58,10 @@ Redis:      redis://localhost:6379
 docker-compose ps
 
 # Test PostgreSQL
-docker exec commy-postgres-1 psql -U commy2_test -d commy2_test -c "SELECT 1"
+docker exec commy-postgres-1 psql -U commy_test -d commy_test -c "SELECT 1"
 
 # Test MySQL  
-docker exec commy-mysql-1 mysql -u commy2_test -ptest_password -e "SELECT 1"
+docker exec commy-mysql-1 mysql -u commy_test -ptest_password -e "SELECT 1"
 
 # Test Redis
 docker exec commy-redis-1 redis-cli ping

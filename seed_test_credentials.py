@@ -14,9 +14,9 @@ from typing import Dict, List, Tuple
 DB_CONFIG = {
     'host': '127.0.0.1',
     'port': 5434,  # commy-postgres-1 container mapped port
-    'user': 'commy2_test',
+    'user': 'commy_test',
     'password': 'test_password',
-    'database': 'commy2_test',
+    'database': 'commy_test',
 }
 
 # Test API keys to insert
