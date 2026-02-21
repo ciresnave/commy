@@ -72,19 +72,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
-          # gh release view exits non-zero when the release does not exist
-          $exists = $false
-          try {
-            gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
-            $exists = $true
-          } catch {
-            $exists = $false
-          }
-          if ($LASTEXITCODE -eq 0) {
-            $exists = $true
-          } else {
-            $exists = $false
-          }
+          # gh release view exits non-zero when the release does not exist;
+          # capture output to suppress it and reset exit code so the step doesn't fail.
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
+          $exists = ($LASTEXITCODE -eq 0)
+          $global:LASTEXITCODE = 0
           Write-Host "Release $tag exists: $exists"
           "release_exists=$($exists.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
