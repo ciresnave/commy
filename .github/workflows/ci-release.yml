@@ -43,7 +43,7 @@ jobs:
     needs: test
     runs-on: windows-latest
     # Only attempt a release on pushes to main
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/main'"
 
     steps:
       - name: Checkout repository
@@ -122,23 +122,10 @@ jobs:
           $version = "${{ steps.version.outputs.version }}"
           $asset   = "target\release\commy.exe"
 
-          $notes = @"
-Release of Commy server $tag.
-
-## Download
-- **commy.exe** - Windows server executable
-
-## Changelog
-See commits on https://github.com/${{ github.repository }}/commits/main for details.
-"@
-          $notesFile = [System.IO.Path]::GetTempFileName()
-          Set-Content -Path $notesFile -Value $notes -Encoding UTF8
-
           gh release create $tag `
             --repo $env:GITHUB_REPOSITORY `
             --title "Commy $tag" `
-            --notes-file $notesFile `
+            --generate-notes `
             "$asset#commy-$version-windows-x86_64.exe"
 
-          Remove-Item $notesFile -Force
           Write-Host "Release $tag created successfully."
