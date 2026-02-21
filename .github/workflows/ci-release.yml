@@ -1,0 +1,137 @@
+name: CI & Release
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run all tests
+        run: cargo test --all
+
+  release:
+    name: Release
+    needs: test
+    runs-on: windows-latest
+    # Only attempt a release on pushes to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from Cargo.toml
+        id: version
+        shell: pwsh
+        run: |
+          $cargoToml = Get-Content Cargo.toml -Raw
+          if ($cargoToml -match 'version\s*=\s*"([^"]+)"') {
+            $version = $Matches[1]
+          } else {
+            Write-Error "Could not parse version from Cargo.toml"
+            exit 1
+          }
+          $tag = "v$version"
+          Write-Host "Detected version: $version (tag: $tag)"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Check whether this version is already released
+        id: check_release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          # gh release view exits non-zero when the release does not exist
+          $exists = $false
+          try {
+            gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+            $exists = $true
+          } catch {
+            $exists = $false
+          }
+          if ($LASTEXITCODE -eq 0) {
+            $exists = $true
+          } else {
+            $exists = $false
+          }
+          Write-Host "Release $tag exists: $exists"
+          "release_exists=$($exists.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Install Rust toolchain
+        if: steps.check_release.outputs.release_exists == 'false'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Cache Cargo registry and build artifacts
+        if: steps.check_release.outputs.release_exists == 'false'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        if: steps.check_release.outputs.release_exists == 'false'
+        run: cargo build --release --bin commy
+
+      - name: Create GitHub Release
+        if: steps.check_release.outputs.release_exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag     = "${{ steps.version.outputs.tag }}"
+          $version = "${{ steps.version.outputs.version }}"
+          $asset   = "target\release\commy.exe"
+
+          gh release create $tag `
+            --repo $env:GITHUB_REPOSITORY `
+            --title "Commy $tag" `
+            --notes "Release of Commy server $tag.
+
+## Download
+- **commy.exe** — Windows server executable
+
+## Changelog
+See [commits since previous release](https://github.com/${{ github.repository }}/commits/main) for details." `
+            "$asset#commy-$version-windows-x86_64.exe"
+
+          Write-Host "Release $tag created successfully."
