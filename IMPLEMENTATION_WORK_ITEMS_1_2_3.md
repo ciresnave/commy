@@ -41,7 +41,7 @@ Updated `src/main.rs` to replace the TCP-only health check server with a full We
 **Environment Variables for Configuration:**
 ```bash
 COMMY_SERVER_ID              # Unique server identifier (default: node-1)
-COMMY_LISTEN_ADDR            # Bind address for WebSocket (default: 0.0.0.0:8000)
+COMMY_LISTEN_ADDR            # Bind host for WSS listener (default: 0.0.0.0) — host only, no port
 COMMY_LISTEN_PORT            # WebSocket port (default: 8443)
 COMMY_TLS_CERT_PATH          # Path to PEM certificate file (REQUIRED)
 COMMY_TLS_KEY_PATH           # Path to PEM private key file (REQUIRED)

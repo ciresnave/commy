@@ -98,7 +98,8 @@ cargo run --bin commy
 
 # Environment variables (optional)
 export COMMY_SERVER_ID=node-1
-export COMMY_LISTEN_ADDR=0.0.0.0:8000
+export COMMY_LISTEN_ADDR=0.0.0.0
+export COMMY_LISTEN_PORT=8443
 cargo run --bin commy
 ```
 

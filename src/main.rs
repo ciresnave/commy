@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse environment variables for configuration
     let server_id = env::var("COMMY_SERVER_ID").unwrap_or_else(|_| "node-1".to_string());
 
-    let listen_addr = env::var("COMMY_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
+    let listen_addr = env::var("COMMY_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0".to_string());
 
     let listen_port: u16 = env::var("COMMY_LISTEN_PORT")
         .unwrap_or_else(|_| "8443".to_string())

@@ -73,11 +73,12 @@ services:
         condition: service_healthy
     environment:
       COMMY_SERVER_ID: node-1
-      COMMY_LISTEN_ADDR: 0.0.0.0:8000
+      COMMY_LISTEN_ADDR: 0.0.0.0
+      COMMY_LISTEN_PORT: 8443
       COMMY_BIND_ADDR: 0.0.0.0:9000
       COMMY_CLUSTER_ENABLED: true
     ports:
-      - "8000:8000"  # Client WebSocket
+      - "8443:8443"  # Client WebSocket (WSS)
       - "8001:8001"  # Additional client port
       - "8002:8002"  # Additional client port
       - "8003:8003"  # Additional client port
@@ -113,7 +114,8 @@ The Commy server respects these environment variables:
 | Variable                | Default      | Purpose                                 |
 | ----------------------- | ------------ | --------------------------------------- |
 | `COMMY_SERVER_ID`       | node-1       | Unique identifier for this server       |
-| `COMMY_LISTEN_ADDR`     | 0.0.0.0:8000 | WebSocket listener for clients          |
+| `COMMY_LISTEN_ADDR`     | 0.0.0.0      | Bind host for the WSS listener          |
+| `COMMY_LISTEN_PORT`     | 8443         | WSS port for client connections         |
 | `COMMY_BIND_ADDR`       | 0.0.0.0:9000 | Inter-server communication bind address |
 | `COMMY_CLUSTER_ENABLED` | true         | Enable clustering mode                  |
 
@@ -166,11 +168,12 @@ services:
     depends_on: [postgres, mysql, redis]
     environment:
       COMMY_SERVER_ID: node-1
-      COMMY_LISTEN_ADDR: 0.0.0.0:8000
+      COMMY_LISTEN_ADDR: 0.0.0.0
+      COMMY_LISTEN_PORT: 8443
       COMMY_BIND_ADDR: 0.0.0.0:9000
       COMMY_CLUSTER_ENABLED: true
     ports:
-      - "8000:8000"
+      - "8443:8443"
       - "9000:9000"
     networks: [commy-net]
 
@@ -179,11 +182,12 @@ services:
     depends_on: [postgres, mysql, redis]
     environment:
       COMMY_SERVER_ID: node-2
-      COMMY_LISTEN_ADDR: 0.0.0.0:8000
+      COMMY_LISTEN_ADDR: 0.0.0.0
+      COMMY_LISTEN_PORT: 8444
       COMMY_BIND_ADDR: 0.0.0.0:9000
       COMMY_CLUSTER_ENABLED: true
     ports:
-      - "8001:8000"
+      - "8444:8444"
       - "9001:9000"
     networks: [commy-net]
 
@@ -192,11 +196,12 @@ services:
     depends_on: [postgres, mysql, redis]
     environment:
       COMMY_SERVER_ID: node-3
-      COMMY_LISTEN_ADDR: 0.0.0.0:8000
+      COMMY_LISTEN_ADDR: 0.0.0.0
+      COMMY_LISTEN_PORT: 8445
       COMMY_BIND_ADDR: 0.0.0.0:9000
       COMMY_CLUSTER_ENABLED: true
     ports:
-      - "8002:8000"
+      - "8445:8445"
       - "9002:9000"
     networks: [commy-net]
 ```

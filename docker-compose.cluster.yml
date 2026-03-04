@@ -25,7 +25,8 @@ services:
       dockerfile: Dockerfile
     environment:
       COMMY_SERVER_ID: "server-1"
-      COMMY_LISTEN_ADDR: "0.0.0.0:8001"
+      COMMY_LISTEN_ADDR: "0.0.0.0"
+      COMMY_LISTEN_PORT: "8001"
       COMMY_BIND_ADDR: "commy-1:9001"
       COMMY_CLUSTER_ENABLED: "true"
       COMMY_CLUSTER_NODES: "server-1:commy-1:9001,server-2:commy-2:9001,server-3:commy-3:9001"
@@ -56,7 +57,8 @@ services:
       dockerfile: Dockerfile
     environment:
       COMMY_SERVER_ID: "server-2"
-      COMMY_LISTEN_ADDR: "0.0.0.0:8002"
+      COMMY_LISTEN_ADDR: "0.0.0.0"
+      COMMY_LISTEN_PORT: "8002"
       COMMY_BIND_ADDR: "commy-2:9002"
       COMMY_CLUSTER_ENABLED: "true"
       COMMY_CLUSTER_NODES: "server-1:commy-1:9001,server-2:commy-2:9001,server-3:commy-3:9001"
@@ -87,7 +89,8 @@ services:
       dockerfile: Dockerfile
     environment:
       COMMY_SERVER_ID: "server-3"
-      COMMY_LISTEN_ADDR: "0.0.0.0:8003"
+      COMMY_LISTEN_ADDR: "0.0.0.0"
+      COMMY_LISTEN_PORT: "8003"
       COMMY_BIND_ADDR: "commy-3:9003"
       COMMY_CLUSTER_ENABLED: "true"
       COMMY_CLUSTER_NODES: "server-1:commy-1:9001,server-2:commy-2:9001,server-3:commy-3:9001"

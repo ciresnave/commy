@@ -256,8 +256,10 @@ The Commy server supports these environment variables (from src/main.rs):
 # Server identification
 COMMY_SERVER_ID=node-1
 
-# Client connection address (WebSocket listener)
-COMMY_LISTEN_ADDR=0.0.0.0:8000
+# Bind host for WSS listener (host only, no port)
+COMMY_LISTEN_ADDR=0.0.0.0
+# WSS port for client connections
+COMMY_LISTEN_PORT=8443
 
 # Inter-server communication address
 COMMY_BIND_ADDR=0.0.0.0:9000
@@ -445,11 +447,12 @@ services:
         condition: service_healthy
     environment:
       COMMY_SERVER_ID: node-1
-      COMMY_LISTEN_ADDR: 0.0.0.0:8000
+      COMMY_LISTEN_ADDR: 0.0.0.0
+      COMMY_LISTEN_PORT: 8443
       COMMY_BIND_ADDR: 0.0.0.0:9000
       COMMY_CLUSTER_ENABLED: true
     ports:
-      - "8000:8000"
+      - "8443:8443"
       - "9000:9000"
     networks:
       - commy-net
