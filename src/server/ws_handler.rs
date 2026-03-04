@@ -814,6 +814,12 @@ async fn handle_sdk_message(
             permissions.grant(crate::auth::Permission::ServiceWrite);
             session.permissions = Some(permissions);
 
+            // Ensure the tenant record exists in the server so services can be created under it
+            {
+                let mut server_guard = server.write().await;
+                let _ = server_guard.get_tenant(tenant_id);
+            }
+
             println!(
                 "Client {} authenticated successfully (DEV MODE) to tenant: {} with admin permissions",
                 session.session_id, tenant_id
@@ -875,14 +881,41 @@ async fn handle_sdk_message(
                 }
             }
 
-            // TODO: Actual service creation deferred to rsqlx integration
-            // For now, just return success response immediately
+            // Generate cryptographically random service ID; only Server records the file mapping
             let service_id = uuid::Uuid::new_v4().to_string();
+            let tenant_dir = format!("tenant_{}", tenant_id);
+            let file_path = format!("{}/service_{}.mem", tenant_dir, service_id);
 
-            println!(
-                "[CreateService] Creating service '{}' in tenant '{}' with ID {}",
-                service_name, tenant_id, service_id
-            );
+            if let Err(e) = std::fs::create_dir_all(&tenant_dir) {
+                return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InternalError", "message": format!("Failed to create tenant directory: {}", e) }
+                }));
+            }
+
+            let mut server_guard = server.write().await;
+            let tenant = match server_guard.tenants.get_mut(tenant_id) {
+                Some(t) => t,
+                None => return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "NotFound", "message": format!("Tenant '{}' not found", tenant_id) }
+                })),
+            };
+
+            if let Err(e) = tenant.register_service(service_name, &file_path) {
+                return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InternalError", "message": format!("Failed to create service file: {}", e) }
+                }));
+            }
+
+            server_guard.service_registry.insert(service_id.clone(), crate::ServiceRecord {
+                tenant_name: tenant_id.to_string(),
+                service_name: service_name.to_string(),
+                file_path,
+            });
+
+            println!("[CreateService] Created service '{}' in tenant '{}' with ID {}", service_name, tenant_id, service_id);
 
             Some(serde_json::json!({
                 "type": "Service",
@@ -937,23 +970,35 @@ async fn handle_sdk_message(
                 }
             }
 
-            // Get service from tenant
-            // TODO: Actual service lookup deferred to rsqlx integration
-            // For now, just return success response immediately with generated ID
-            let service_id = uuid::Uuid::new_v4().to_string();
-            println!(
-                "[GetService] Retrieving service '{}' from tenant '{}' with ID {}",
-                service_name, tenant_id, service_id
-            );
+            // Look up service in registry — only Server knows the (tenant, service) → file mapping
+            let server_guard = server.read().await;
+            let found = server_guard.service_registry.iter()
+                .find(|(_, r)| r.tenant_name == tenant_id && r.service_name == service_name)
+                .map(|(id, _)| id.clone());
 
-            Some(serde_json::json!({
-                "type": "Service",
-                "data": {
-                    "service_id": service_id,
-                    "service_name": service_name,
-                    "tenant_id": tenant_id
+            match found {
+                Some(service_id) => {
+                    println!("[GetService] Found service '{}' in tenant '{}' → id={}", service_name, tenant_id, service_id);
+                    Some(serde_json::json!({
+                        "type": "Service",
+                        "data": {
+                            "service_id": service_id,
+                            "service_name": service_name,
+                            "tenant_id": tenant_id
+                        }
+                    }))
                 }
-            }))
+                None => {
+                    println!("[GetService] Service '{}' not found in tenant '{}'", service_name, tenant_id);
+                    Some(serde_json::json!({
+                        "type": "Error",
+                        "data": {
+                            "code": "NotFound",
+                            "message": format!("Service '{}' not found in tenant '{}'", service_name, tenant_id)
+                        }
+                    }))
+                }
+            }
         }
 
         "DeleteService" => {
@@ -1096,13 +1141,384 @@ async fn handle_sdk_message(
             }))
         }
 
+        "AllocateVariable" => {
+            let service_id = data
+                .and_then(|d| d.get("service_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let variable_name = data
+                .and_then(|d| d.get("variable_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let initial_data: Vec<u8> = data
+                .and_then(|d| d.get("initial_data"))
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            if service_id.is_empty() || variable_name.is_empty() {
+                return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InvalidRequest", "message": "service_id and variable_name are required" }
+                }));
+            }
+
+            let mut server_guard = server.write().await;
+            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
+                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
+                None => return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                })),
+            };
+
+            let svc = match server_guard.tenants.get_mut(&tenant_name)
+                .and_then(|t| t.get_service_mut_by_name(&svc_name)) {
+                Some(s) => s,
+                None => return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "NotFound", "message": "Service not found in tenant" }
+                })),
+            };
+
+            let size = if initial_data.is_empty() { 8 } else { initial_data.len() };
+            match svc.allocate_variable(variable_name.to_string(), size) {
+                Some(slot) => {
+                    let copy_len = slot.len().min(initial_data.len());
+                    if copy_len > 0 {
+                        slot[..copy_len].copy_from_slice(&initial_data[..copy_len]);
+                    }
+                    println!("[AllocateVariable] service={} var={} size={}", service_id, variable_name, size);
+                    Some(serde_json::json!({
+                        "type": "Result",
+                        "data": {
+                            "request_id": uuid::Uuid::new_v4().to_string(),
+                            "success": true,
+                            "message": format!("Variable '{}' allocated ({} bytes)", variable_name, size)
+                        }
+                    }))
+                }
+                None => Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InternalError", "message": "Allocation failed (service file may be full)" }
+                })),
+            }
+        }
+
+        "ReadVariable" => {
+            let service_id = data
+                .and_then(|d| d.get("service_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let variable_name = data
+                .and_then(|d| d.get("variable_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let server_guard = server.read().await;
+            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
+                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
+                None => return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                })),
+            };
+
+            let data_copy = server_guard.tenants
+                .get(&tenant_name)
+                .and_then(|t| t.get_service_by_name(&svc_name))
+                .and_then(|svc| svc.get_variable(variable_name))
+                .map(|bytes| bytes.to_vec());
+
+            match data_copy {
+                Some(var_data) => Some(serde_json::json!({
+                    "type": "VariableData",
+                    "data": {
+                        "service_id": service_id,
+                        "variable_name": variable_name,
+                        "data": var_data,
+                        "version": 1
+                    }
+                })),
+                None => Some(serde_json::json!({
+                    "type": "Error",
+                    "data": {
+                        "code": "NotFound",
+                        "message": format!("Variable '{}' not found in service '{}'", variable_name, service_id)
+                    }
+                })),
+            }
+        }
+
+        "WriteVariable" => {
+            let service_id = data
+                .and_then(|d| d.get("service_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let variable_name = data
+                .and_then(|d| d.get("variable_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let new_data: Vec<u8> = data
+                .and_then(|d| d.get("data"))
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            if service_id.is_empty() || variable_name.is_empty() {
+                return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InvalidRequest", "message": "service_id and variable_name are required" }
+                }));
+            }
+
+            let mut server_guard = server.write().await;
+            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
+                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
+                None => return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                })),
+            };
+
+            let svc = match server_guard.tenants.get_mut(&tenant_name)
+                .and_then(|t| t.get_service_mut_by_name(&svc_name)) {
+                Some(s) => s,
+                None => return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "NotFound", "message": "Service not found in tenant" }
+                })),
+            };
+
+            // Existing size determines whether we write in-place, resize, or auto-allocate
+            let existing_size = svc.get_variable(variable_name).map(|d| d.len());
+            let ok = match existing_size {
+                Some(size) if size == new_data.len() => {
+                    // Same size: write directly into the mmap slot
+                    svc.get_variable_mut(variable_name)
+                        .map(|slot| slot.copy_from_slice(&new_data))
+                        .is_some()
+                }
+                Some(_) => {
+                    // Size changed: deallocate old slot and re-allocate
+                    svc.deallocate_variable(variable_name);
+                    svc.allocate_variable(variable_name.to_string(), new_data.len())
+                        .map(|slot| slot.copy_from_slice(&new_data))
+                        .is_some()
+                }
+                None => {
+                    // Variable not yet allocated: auto-allocate
+                    svc.allocate_variable(variable_name.to_string(), new_data.len())
+                        .map(|slot| slot.copy_from_slice(&new_data))
+                        .is_some()
+                }
+            };
+
+            if ok {
+                println!("[WriteVariable] service={} var={} bytes={}", service_id, variable_name, new_data.len());
+                Some(serde_json::json!({
+                    "type": "Result",
+                    "data": {
+                        "request_id": uuid::Uuid::new_v4().to_string(),
+                        "success": true,
+                        "message": "Variable written"
+                    }
+                }))
+            } else {
+                Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InternalError", "message": "Write failed (service file may be full)" }
+                }))
+            }
+        }
+
+        "DeallocateVariable" => {
+            let service_id = data
+                .and_then(|d| d.get("service_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let variable_name = data
+                .and_then(|d| d.get("variable_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let mut server_guard = server.write().await;
+            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
+                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
+                None => return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                })),
+            };
+
+            let removed = server_guard.tenants.get_mut(&tenant_name)
+                .and_then(|t| t.get_service_mut_by_name(&svc_name))
+                .map(|svc| svc.deallocate_variable(variable_name))
+                .unwrap_or(false);
+
+            Some(serde_json::json!({
+                "type": "Result",
+                "data": {
+                    "request_id": uuid::Uuid::new_v4().to_string(),
+                    "success": removed,
+                    "message": if removed {
+                        format!("Variable '{}' deallocated", variable_name)
+                    } else {
+                        format!("Variable '{}' not found", variable_name)
+                    }
+                }
+            }))
+        }
+
+        "Subscribe" => {
+            let service_id = data
+                .and_then(|d| d.get("service_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let variable_name = data
+                .and_then(|d| d.get("variable_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            if service_id.is_empty() || variable_name.is_empty() {
+                return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InvalidRequest", "message": "service_id and variable_name are required" }
+                }));
+            }
+
+            let key = format!("{}/{}", service_id, variable_name);
+            session.subscriptions.insert(key.clone());
+
+            println!("[Subscribe] session={} subscribed to {}", session.session_id, key);
+            Some(serde_json::json!({
+                "type": "Result",
+                "data": {
+                    "request_id": uuid::Uuid::new_v4().to_string(),
+                    "success": true,
+                    "message": format!("Subscribed to '{}'", key)
+                }
+            }))
+        }
+
+        "Unsubscribe" => {
+            let service_id = data
+                .and_then(|d| d.get("service_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let variable_name = data
+                .and_then(|d| d.get("variable_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let key = format!("{}/{}", service_id, variable_name);
+            let removed = session.subscriptions.remove(&key);
+
+            Some(serde_json::json!({
+                "type": "Result",
+                "data": {
+                    "request_id": uuid::Uuid::new_v4().to_string(),
+                    "success": removed,
+                    "message": if removed {
+                        format!("Unsubscribed from '{}'", key)
+                    } else {
+                        format!("Not subscribed to '{}'", key)
+                    }
+                }
+            }))
+        }
+
+        "GetServiceFilePath" => {
+            // Direct file access is only available to processes on the same machine
+            // via the memory-mapping path; not via WSS
+            Some(serde_json::json!({
+                "type": "Error",
+                "data": {
+                    "code": "InvalidRequest",
+                    "message": "Direct file access is only available to local clients via memory-mapping"
+                }
+            }))
+        }
+
+        "ReportVariableChanges" => {
+            let service_id = data
+                .and_then(|d| d.get("service_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let changed_variables: Vec<String> = data
+                .and_then(|d| d.get("changed_variables"))
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            let new_values: Vec<(String, Vec<u8>)> = data
+                .and_then(|d| d.get("new_values"))
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            let mut server_guard = server.write().await;
+            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
+                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
+                None => {
+                    // Service not found — still acknowledge so the client can proceed
+                    return Some(serde_json::json!({
+                        "type": "VariableChangesAcknowledged",
+                        "data": { "service_id": service_id, "changed_variables": changed_variables }
+                    }));
+                }
+            };
+
+            if let Some(svc) = server_guard.tenants.get_mut(&tenant_name)
+                .and_then(|t| t.get_service_mut_by_name(&svc_name))
+            {
+                for (var_name, var_data) in new_values {
+                    let existing_size = svc.get_variable(&var_name).map(|d| d.len());
+                    match existing_size {
+                        Some(size) if size == var_data.len() => {
+                            if let Some(slot) = svc.get_variable_mut(&var_name) {
+                                slot.copy_from_slice(&var_data);
+                            }
+                        }
+                        Some(_) => {
+                            svc.deallocate_variable(&var_name);
+                            if let Some(slot) = svc.allocate_variable(var_name, var_data.len()) {
+                                slot.copy_from_slice(&var_data);
+                            }
+                        }
+                        None => {
+                            if let Some(slot) = svc.allocate_variable(var_name, var_data.len()) {
+                                slot.copy_from_slice(&var_data);
+                            }
+                        }
+                    }
+                }
+            }
+
+            println!("[ReportVariableChanges] service={} changes={}", service_id, changed_variables.len());
+            Some(serde_json::json!({
+                "type": "VariableChangesAcknowledged",
+                "data": {
+                    "service_id": service_id,
+                    "changed_variables": changed_variables
+                }
+            }))
+        }
+
+        "Disconnect" => {
+            session.state = ClientState::Disconnected;
+            Some(serde_json::json!({
+                "type": "Result",
+                "data": {
+                    "request_id": uuid::Uuid::new_v4().to_string(),
+                    "success": true,
+                    "message": "Disconnected"
+                }
+            }))
+        }
+
         _ => {
-            // Other SDK messages not yet implemented
+            eprintln!("[SDK] Unhandled message type: {}", msg_type);
             Some(serde_json::json!({
                 "type": "Error",
                 "data": {
                     "code": "INVALID_REQUEST",
-                    "message": "Operation not implemented on server"
+                    "message": format!("Unknown message type: {}", msg_type)
                 }
             }))
         }

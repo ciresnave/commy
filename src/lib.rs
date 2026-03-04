@@ -45,6 +45,26 @@ impl Service {
         }
     }
 
+    /// Create or open a service backed by a memory-mapped file.
+    /// Creates the file with `initial_size` bytes if it does not exist yet.
+    pub fn open_or_create(file_path: &str, initial_size: usize) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(file_path)?;
+        if file.metadata()?.len() == 0 {
+            file.set_len(initial_size as u64)?;
+        }
+        let mmap = unsafe { memmap2::MmapMut::map_mut(&file) }?;
+        Ok(Service {
+            allocator: Box::new(FreeListAllocator::new(mmap, file_path)),
+            variables: std::collections::HashMap::new(),
+            shadow: vec![],
+            watcher_registry: ServiceWatcherRegistry::new(),
+        })
+    }
+
     pub fn allocate_variable(&mut self, variable_name: String, size: usize) -> Option<&mut [u8]> {
         use std::alloc::Layout;
         let layout = Layout::from_size_align(size, 1).ok()?;
@@ -198,6 +218,32 @@ impl Tenant {
             .entry(service_name.to_string())
             .or_insert_with(move || Service::new(service_name))
     }
+
+    /// Register a service backed by a given file on disk (creates the file if it doesn't exist).
+    pub fn register_service(&mut self, service_name: &str, file_path: &str) -> std::io::Result<()> {
+        let service = Service::open_or_create(file_path, 65536)?;
+        self.services.insert(service_name.to_string(), service);
+        Ok(())
+    }
+
+    /// Get an immutable reference to a registered service by its logical name.
+    pub fn get_service_by_name(&self, service_name: &str) -> Option<&Service> {
+        self.services.get(service_name)
+    }
+
+    /// Get a mutable reference to a registered service by its logical name.
+    pub fn get_service_mut_by_name(&mut self, service_name: &str) -> Option<&mut Service> {
+        self.services.get_mut(service_name)
+    }
+}
+
+/// Server-side record for a service.
+/// Only the Server knows the (tenant_name, service_name) → file mapping — clients only
+/// know the opaque service_id returned at creation time.
+pub struct ServiceRecord {
+    pub tenant_name: String,
+    pub service_name: String,
+    pub file_path: String,
 }
 
 pub struct Server {
@@ -206,6 +252,8 @@ pub struct Server {
     servers: Vec<Server>,
     #[allow(dead_code)]
     clients: Vec<Client>,
+    /// Maps service_id → ServiceRecord (only Server knows this mapping)
+    pub service_registry: std::collections::HashMap<String, ServiceRecord>,
 }
 
 impl Server {
@@ -214,6 +262,7 @@ impl Server {
             tenants: std::collections::HashMap::new(),
             servers: vec![],
             clients: vec![],
+            service_registry: std::collections::HashMap::new(),
         }
     }
 
