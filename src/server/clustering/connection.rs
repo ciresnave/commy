@@ -178,4 +178,28 @@ mod tests {
         assert!(!conn.is_active);
         assert_eq!(conn.attempt_count, 0);
     }
+
+    #[tokio::test]
+    async fn test_mark_active_not_found_returns_error() {
+        let pool = ConnectionPool::new();
+        // No connections registered; mark_active must return an error.
+        let result = pool.mark_active("ghost_server").await;
+        assert!(result.is_err(), "mark_active on unknown server_id should fail");
+        assert!(
+            result.unwrap_err().contains("not found"),
+            "Error message should mention 'not found'"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mark_inactive_not_found_returns_error() {
+        let pool = ConnectionPool::new();
+        // No connections registered; mark_inactive must return an error.
+        let result = pool.mark_inactive("ghost_server").await;
+        assert!(result.is_err(), "mark_inactive on unknown server_id should fail");
+        assert!(
+            result.unwrap_err().contains("not found"),
+            "Error message should mention 'not found'"
+        );
+    }
 }

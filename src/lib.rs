@@ -746,4 +746,35 @@ mod tests {
         }
         assert_eq!(server.tenants.len(), 2);
     }
+
+    /// `get_variable_mut` must return a mutable slice that lets the caller overwrite data
+    /// and the change must be visible through the immutable `get_variable` accessor.
+    #[test]
+    fn test_service_get_variable_mut_write_and_read_back() {
+        let (mut svc, _tmp) = make_service(65536);
+        svc.allocate_variable("mutable_var".to_string(), 8);
+
+        // Write through the mutable accessor.
+        {
+            let slot = svc.get_variable_mut("mutable_var").unwrap();
+            slot.copy_from_slice(&0xDEAD_BEEF_CAFE_BABEu64.to_le_bytes());
+        }
+
+        // Read back through the immutable accessor and verify the write took effect.
+        let data = svc.get_variable("mutable_var").unwrap();
+        let value = u64::from_le_bytes(data.try_into().unwrap());
+        assert_eq!(
+            value, 0xDEAD_BEEF_CAFE_BABEu64,
+            "get_variable_mut must return a mutable slice backed by shared memory"
+        );
+    }
+
+    #[test]
+    fn test_service_get_variable_mut_missing_returns_none() {
+        let (mut svc, _tmp) = make_service(65536);
+        assert!(
+            svc.get_variable_mut("does_not_exist").is_none(),
+            "get_variable_mut should return None for an unallocated variable"
+        );
+    }
 }

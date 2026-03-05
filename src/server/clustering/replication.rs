@@ -445,4 +445,71 @@ mod tests {
         assert_eq!(config.stall_threshold_ms, 30 * 1000);
         assert!(!config.enable_compression);
     }
+
+    #[tokio::test]
+    async fn test_complete_transfer_not_complete_returns_error() {
+        // Start a transfer but never mark any chunks received → is_complete stays false.
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+        let coordinator =
+            ReplicationCoordinator::new("server_1".to_string(), Arc::new(handler));
+
+        let data = b"some payload".to_vec();
+        let snapshot = ServiceSnapshot::new(
+            "tenant1".to_string(),
+            "service1".to_string(),
+            1,
+            data.clone(),
+            ServiceSnapshot::calculate_checksum(&data),
+        );
+
+        coordinator
+            .start_transfer("t_incomplete".to_string(), snapshot)
+            .await
+            .unwrap();
+
+        // Intentionally skip mark_chunk_received so transfer stays incomplete.
+        let result = coordinator.complete_transfer("t_incomplete").await;
+        assert!(result.is_err(), "Expected error for incomplete transfer");
+        assert!(
+            result.unwrap_err().contains("Transfer not complete"),
+            "Expected 'Transfer not complete' error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_complete_transfer_bad_checksum_returns_error() {
+        // Build a snapshot with a deliberately wrong checksum.
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+        let coordinator =
+            ReplicationCoordinator::new("server_1".to_string(), Arc::new(handler));
+
+        let data = b"real data payload".to_vec();
+        let snapshot = ServiceSnapshot::new(
+            "tenant1".to_string(),
+            "service1".to_string(),
+            1,
+            data.clone(),
+            "intentionally_wrong_checksum".to_string(),
+        );
+
+        coordinator
+            .start_transfer("t_badchk".to_string(), snapshot)
+            .await
+            .unwrap();
+
+        // Mark as complete so we get past the is_complete guard.
+        coordinator
+            .mark_chunk_received("t_badchk", 0, data.len() as u64)
+            .await
+            .unwrap();
+
+        let result = coordinator.complete_transfer("t_badchk").await;
+        assert!(result.is_err(), "Expected error for bad checksum");
+        assert!(
+            result.unwrap_err().contains("Checksum verification failed"),
+            "Expected 'Checksum verification failed' error"
+        );
+    }
 }

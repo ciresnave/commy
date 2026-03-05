@@ -386,4 +386,68 @@ mod tests {
         assert!(version_a.is_concurrent(&version_b));
         assert!(version_b.is_concurrent(&version_a));
     }
+
+    #[test]
+    fn test_lww_winner_remote_wins() {
+        // Remote has higher clock sum → remote version wins.
+        let mut local_clock = VectorClock::new(&["s1", "s2"]);
+        local_clock.increment("s1"); // sum = 1
+
+        let mut remote_clock = VectorClock::new(&["s1", "s2"]);
+        remote_clock.increment("s2");
+        remote_clock.increment("s2"); // sum = 2
+
+        let conflict = ConflictInfo {
+            variable_name: "var1".to_string(),
+            local_version: VariableVersion::new(
+                "var1".to_string(),
+                local_clock,
+                "s1".to_string(),
+                1,
+            ),
+            remote_version: VariableVersion::new(
+                "var1".to_string(),
+                remote_clock,
+                "s2".to_string(),
+                1,
+            ),
+        };
+
+        let winner = conflict.lww_winner();
+        assert_eq!(winner.last_modified_by, "s2", "Remote (higher sum) should win");
+    }
+
+    #[test]
+    fn test_lww_winner_tie_breaking_by_server_id() {
+        // Equal clock sums → alphabetically greater server ID wins.
+        // "s2" > "s1" lexicographically, so remote (s2) wins.
+        let mut local_clock = VectorClock::new(&["s1", "s2"]);
+        local_clock.increment("s1"); // sum = 1
+
+        let mut remote_clock = VectorClock::new(&["s1", "s2"]);
+        remote_clock.increment("s2"); // sum = 1 (equal)
+
+        let conflict = ConflictInfo {
+            variable_name: "var1".to_string(),
+            local_version: VariableVersion::new(
+                "var1".to_string(),
+                local_clock,
+                "s1".to_string(),
+                1,
+            ),
+            remote_version: VariableVersion::new(
+                "var1".to_string(),
+                remote_clock,
+                "s2".to_string(),
+                1,
+            ),
+        };
+
+        let winner = conflict.lww_winner();
+        // Implementation: if remote_sum >= local_sum (after equal check), remote wins
+        assert_eq!(
+            winner.last_modified_by, "s2",
+            "Tie should resolve to the lexicographically greater server ID (s2 > s1)"
+        );
+    }
 }
