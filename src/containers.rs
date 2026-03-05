@@ -3393,4 +3393,140 @@ mod tests {
         set.insert(2);
         assert_eq!(set.len(), 2);
     }
+
+    // ─── SharedVec::pop_front ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_shared_vec_pop_front() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        assert_eq!(v.pop_front(), None);
+        v.push(10);
+        v.push(20);
+        v.push(30);
+        assert_eq!(v.pop_front(), Some(10));
+        assert_eq!(v.pop_front(), Some(20));
+        assert_eq!(v.len(), 1);
+        assert_eq!(v.pop_front(), Some(30));
+        assert_eq!(v.pop_front(), None);
+    }
+
+    // ─── SharedHashSet::any / all / retain / for_each ─────────────────────────
+
+    #[test]
+    fn test_shared_hashset_any_all_retain_for_each() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut set: SharedHashSet<i32> = SharedHashSet::new_in(&alloc);
+        set.insert(2); set.insert(4); set.insert(6);
+
+        // any / all
+        assert!(set.any(|v| *v == 4));
+        assert!(!set.any(|v| *v == 5));
+        assert!(set.all(|v| *v % 2 == 0));
+        assert!(!set.all(|v| *v > 3));
+
+        // for_each: verify it runs over all elements (count via AtomicUsize)
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let counter = AtomicUsize::new(0);
+        set.for_each(|_v| { counter.fetch_add(1, Ordering::Relaxed); });
+        assert_eq!(counter.load(Ordering::Relaxed), 3);
+
+        // retain: keep only values > 3
+        set.retain(|v| *v > 3);
+        assert!(!set.contains(&2));
+        assert!(set.contains(&4));
+        assert!(set.contains(&6));
+        assert_eq!(set.len(), 2);
+    }
+
+    // ─── SharedBTreeMap additional coverage ────────────────────────────────────
+
+    #[test]
+    fn test_shared_btreemap_len_is_empty() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut map: SharedBTreeMap<i32, i32> = SharedBTreeMap::new_in(&alloc);
+        assert!(map.is_empty());
+        assert_eq!(map.len(), 0);
+        map.insert(1, 10);
+        assert!(!map.is_empty());
+        assert_eq!(map.len(), 1);
+        map.insert(2, 20);
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn test_shared_btreemap_get_mut() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut map: SharedBTreeMap<i32, i32> = SharedBTreeMap::new_in(&alloc);
+        map.insert(1, 10);
+        map.insert(2, 20);
+        *map.get_mut(&1).unwrap() = 99;
+        assert_eq!(map.get(&1), Some(&99));
+        assert!(map.get_mut(&99).is_none());
+    }
+
+    #[test]
+    fn test_shared_btreemap_iter_and_values() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut map: SharedBTreeMap<i32, i32> = SharedBTreeMap::new_in(&alloc);
+        map.insert(3, 30); map.insert(1, 10); map.insert(2, 20);
+
+        // iter returns (K, V) pairs in sorted key order
+        let pairs: Vec<(&i32, &i32)> = map.iter().collect();
+        assert_eq!(pairs, vec![(&1, &10), (&2, &20), (&3, &30)]);
+
+        // values returns only values in sorted key order
+        let vals: Vec<&i32> = map.values().collect();
+        assert_eq!(vals, vec![&10, &20, &30]);
+    }
+
+    #[test]
+    fn test_shared_btreemap_remove_returns_value() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut map: SharedBTreeMap<i32, i32> = SharedBTreeMap::new_in(&alloc);
+        map.insert(5, 50);
+        let removed = map.remove(&5);
+        assert_eq!(removed, Some(50));
+        let missing = map.remove(&99);
+        assert_eq!(missing, None);
+    }
+
+    // ─── SharedBTreeSet::remove / retain / len / is_empty ─────────────────────
+
+    #[test]
+    fn test_shared_btreeset_remove_retain_len_is_empty() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut set: SharedBTreeSet<i32> = SharedBTreeSet::new_in(&alloc);
+        assert!(set.is_empty());
+        assert_eq!(set.len(), 0);
+
+        set.insert(1); set.insert(2); set.insert(3); set.insert(4);
+        assert!(!set.is_empty());
+        assert_eq!(set.len(), 4);
+
+        // remove: present and missing
+        assert!(set.remove(&2));
+        assert!(!set.remove(&99));
+        assert_eq!(set.len(), 3);
+        assert!(!set.contains(&2));
+
+        // retain: keep only even numbers
+        set.retain(|v| *v % 2 == 0);
+        assert!(!set.contains(&1));
+        assert!(set.contains(&4));
+        assert_eq!(set.len(), 1);
+    }
+
+    // ─── SharedVecDeque::capacity ─────────────────────────────────────────────
+
+    #[test]
+    fn test_shared_vecdeque_capacity() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut dq: SharedVecDeque<i32> = SharedVecDeque::new_in(&alloc);
+        assert_eq!(dq.capacity(), 0);
+        dq.push_back(1);
+        dq.push_back(2);
+        // After insertions the internal SharedVec has been allocated
+        assert!(dq.capacity() >= 2);
+    }
 }

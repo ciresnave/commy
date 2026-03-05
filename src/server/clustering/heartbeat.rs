@@ -239,4 +239,31 @@ mod tests {
         assert_eq!(service.config.heartbeat_timeout, Duration::from_secs(10));
         assert_eq!(service.config.max_retries, 2);
     }
+
+    #[tokio::test]
+    async fn test_heartbeat_service_config_getter() {
+        let peer_config = crate::server::clustering::PeerConfig::default();
+        let registry = Arc::new(PeerRegistry::new(peer_config));
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+
+        let custom_config = HeartbeatConfig {
+            heartbeat_interval: Duration::from_secs(15),
+            heartbeat_timeout: Duration::from_secs(45),
+            max_retries: 7,
+        };
+
+        let service = HeartbeatService::with_config(
+            "server_1".to_string(),
+            registry,
+            Arc::new(handler),
+            custom_config,
+        );
+
+        // Access configuration via the public getter
+        let cfg = service.config();
+        assert_eq!(cfg.heartbeat_interval, Duration::from_secs(15));
+        assert_eq!(cfg.heartbeat_timeout, Duration::from_secs(45));
+        assert_eq!(cfg.max_retries, 7);
+    }
 }
