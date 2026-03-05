@@ -33,9 +33,16 @@ impl<T: Copy> SharedData for T {}
 
 impl Service {
     pub fn new(service_name: &str) -> Self {
-        let mmap =
-            unsafe { memmap2::MmapMut::map_mut(&std::fs::File::open(service_name).unwrap()) }
-                .unwrap();
+        let mmap = unsafe {
+            memmap2::MmapMut::map_mut(
+                &std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(service_name)
+                    .unwrap(),
+            )
+        }
+        .unwrap();
 
         Service {
             allocator: Box::new(FreeListAllocator::new(mmap, service_name)),
@@ -432,6 +439,22 @@ mod tests {
     }
 
     // ─── Service ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_service_new_opens_existing_file() {
+        // Service::new() must be able to open an existing writable file and
+        // memory-map it for read+write (not read-only).
+        let tmp = NamedTempFile::new().unwrap();
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tmp.path())
+            .unwrap();
+        file.set_len(65536).unwrap();
+        drop(file);
+        // Should not panic – requires write access for MmapMut
+        let _svc = Service::new(tmp.path().to_str().unwrap());
+    }
 
     #[test]
     fn test_service_allocate_and_get_variable() {
