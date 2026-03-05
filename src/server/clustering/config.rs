@@ -645,4 +645,45 @@ mod tests {
         assert_eq!(config.server_id, deserialized.server_id);
         assert_eq!(config.nodes.len(), deserialized.nodes.len());
     }
+
+    #[test]
+    fn test_with_replication() {
+        let replication = ReplicationConfig {
+            sync_interval_ms: 500,
+            gossip_enabled: false,
+            ..ReplicationConfig::default()
+        };
+        let config = ClusteringConfig::new("server-1".to_string())
+            .with_replication(replication);
+        assert_eq!(config.replication.sync_interval_ms, 500);
+        assert!(!config.replication.gossip_enabled);
+    }
+
+    #[test]
+    fn test_with_network() {
+        let network = NetworkConfig {
+            heartbeat_interval_ms: 2000,
+            max_heartbeat_failures: 5,
+            ..NetworkConfig::default()
+        };
+        let config = ClusteringConfig::new("server-1".to_string())
+            .with_network(network);
+        assert_eq!(config.network.heartbeat_interval_ms, 2000);
+        assert_eq!(config.network.max_heartbeat_failures, 5);
+    }
+
+    #[test]
+    fn test_with_storage() {
+        let storage = StorageConfig {
+            backend: StorageBackend::Memory,
+            persist_cluster_state: false,
+            enable_snapshots: false,
+            ..StorageConfig::default()
+        };
+        let config = ClusteringConfig::new("server-1".to_string())
+            .with_storage(storage);
+        assert!(!config.storage.persist_cluster_state);
+        assert!(!config.storage.enable_snapshots);
+        assert!(matches!(config.storage.backend, StorageBackend::Memory));
+    }
 }

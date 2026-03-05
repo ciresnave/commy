@@ -166,4 +166,40 @@ mod tests {
         let err = TlsError::InvalidPrivateKey("bad format".to_string());
         assert!(err.to_string().contains("Invalid private key"));
     }
+
+    #[test]
+    fn test_tls_error_display_remaining_variants() {
+        let err = TlsError::KeyNotFound("mykey.pem".to_string());
+        let s = err.to_string();
+        assert!(s.contains("Private key not found"), "got: {}", s);
+        assert!(s.contains("mykey.pem"), "got: {}", s);
+
+        let err = TlsError::PemParseError("bad header".to_string());
+        let s = err.to_string();
+        assert!(s.contains("PEM parse error"), "got: {}", s);
+
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+        let err = TlsError::IoError(io_err);
+        let s = err.to_string();
+        assert!(s.contains("IO error"), "got: {}", s);
+    }
+
+    #[test]
+    fn test_tls_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "not found");
+        let tls_err: TlsError = TlsError::from(io_err);
+        assert!(matches!(tls_err, TlsError::IoError(_)));
+    }
+
+    #[test]
+    fn test_for_development_returns_pem_parse_error() {
+        let result = TlsConfiguration::for_development();
+        assert!(result.is_err());
+        match result {
+            Err(TlsError::PemParseError(msg)) => {
+                assert!(msg.contains("Development certificates not available"), "got: {}", msg);
+            }
+            _ => panic!("Expected PemParseError from for_development()"),
+        }
+    }
 }

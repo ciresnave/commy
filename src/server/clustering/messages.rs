@@ -355,4 +355,131 @@ mod tests {
             let _: MigrationReason = serde_json::from_str(&json).unwrap();
         }
     }
+
+    #[test]
+    fn test_message_id_accessor() {
+        let msg = ServerMessage::HeartbeatPing {
+            server_id: "s1".to_string(),
+            timestamp: 0,
+            sequence: 0,
+        };
+        let envelope = PeerMessageEnvelope::new("s1".to_string(), "s2".to_string(), msg);
+        // message_id() must return the same value as the message_id field
+        assert_eq!(envelope.message_id(), envelope.message_id.as_str());
+        assert!(!envelope.message_id().is_empty());
+    }
+
+    #[test]
+    fn test_remaining_server_message_variants_serialization() {
+        // HeartbeatPong
+        let msg = ServerMessage::HeartbeatPong {
+            server_id: "s1".to_string(),
+            timestamp: 12345,
+            status: ServerStatus::Healthy,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::HeartbeatPong { .. }));
+
+        // SyncServiceRequest
+        let msg = ServerMessage::SyncServiceRequest {
+            request_id: "req1".to_string(),
+            tenant_name: "tenant_a".to_string(),
+            service_name: "svc_x".to_string(),
+            from_version: Some(10),
+            from_checksum: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::SyncServiceRequest { .. }));
+
+        // SyncServiceResponse
+        let msg = ServerMessage::SyncServiceResponse {
+            request_id: "req1".to_string(),
+            tenant_name: "tenant_a".to_string(),
+            service_name: "svc_x".to_string(),
+            version: 11,
+            checksum: "abc".to_string(),
+            data: vec![1, 2, 3],
+            is_incremental: false,
+            version_range: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::SyncServiceResponse { .. }));
+
+        // ClientMigration
+        let msg = ServerMessage::ClientMigration {
+            client_id: "c1".to_string(),
+            tenant_name: "t1".to_string(),
+            reason: MigrationReason::Manual,
+            permissions: Default::default(),
+            subscriptions: vec![("t1".to_string(), "svc1".to_string())],
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::ClientMigration { .. }));
+
+        // ClientMigrationAck
+        let msg = ServerMessage::ClientMigrationAck {
+            client_id: "c1".to_string(),
+            accepted: true,
+            reason: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::ClientMigrationAck { .. }));
+
+        // FileTransferRequest
+        let msg = ServerMessage::FileTransferRequest {
+            request_id: "r1".to_string(),
+            tenant_name: "t1".to_string(),
+            service_name: "s1".to_string(),
+            source_filename: "file.mem".to_string(),
+            offset: 0,
+            chunk_size: 1024 * 1024,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::FileTransferRequest { .. }));
+
+        // FileTransferChunk
+        let msg = ServerMessage::FileTransferChunk {
+            request_id: "r1".to_string(),
+            offset: 0,
+            data: vec![0u8; 16],
+            total_size: 16,
+            has_more: false,
+            checksum: "sha256".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::FileTransferChunk { .. }));
+
+        // MetadataExchange
+        let msg = ServerMessage::MetadataExchange {
+            server_id: "s1".to_string(),
+            tenants: vec![TenantMetadata {
+                name: "t1".to_string(),
+                service_count: 3,
+                last_updated: 100,
+                has_quorum: true,
+            }],
+            total_services: 3,
+            cluster_size: 2,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::MetadataExchange { .. }));
+
+        // MetadataExchangeAck
+        let msg = ServerMessage::MetadataExchangeAck {
+            server_id: "s2".to_string(),
+            acknowledged: true,
+            conflicts: vec![],
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::MetadataExchangeAck { .. }));
+    }
 }

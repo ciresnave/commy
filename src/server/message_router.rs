@@ -183,4 +183,45 @@ mod tests {
             _ => panic!("Expected SubscriptionManager"),
         }
     }
+
+    #[test]
+    fn test_routing_description_all_variants() {
+        let router = MessageRouter::new();
+
+        let desc = router.describe(&RoutingDecision::AuthenticationHandler);
+        assert!(desc.contains("Authentication handler"), "got: {}", desc);
+
+        let desc = router.describe(&RoutingDecision::SubscriptionManager);
+        assert!(desc.contains("Subscription manager"), "got: {}", desc);
+
+        let desc = router.describe(&RoutingDecision::HealthCheck);
+        assert!(desc.contains("Health check"), "got: {}", desc);
+
+        let desc = router.describe(&RoutingDecision::Terminal);
+        assert!(desc.contains("Terminal"), "got: {}", desc);
+
+        let desc = router.describe(&RoutingDecision::ServiceOperation("WriteVariables(cfg)".to_string()));
+        assert!(desc.contains("Service operation"), "got: {}", desc);
+        assert!(desc.contains("cfg"), "got: {}", desc);
+    }
+
+    #[test]
+    fn test_message_router_default() {
+        let router = MessageRouter::default();
+        // default() must produce the same routing behaviour as new()
+        let msg = WssMessage::Heartbeat { session_id: "s1".to_string() };
+        match router.route(&msg) {
+            RoutingDecision::HealthCheck => (),
+            _ => panic!("Expected HealthCheck from default router"),
+        }
+
+        let msg = WssMessage::Logout {
+            session_id: "s1".to_string(),
+            token: "tok".to_string(),
+        };
+        match router.route(&msg) {
+            RoutingDecision::AuthenticationHandler => (),
+            _ => panic!("Expected AuthenticationHandler for Logout"),
+        }
+    }
 }

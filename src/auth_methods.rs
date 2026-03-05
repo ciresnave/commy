@@ -449,4 +449,24 @@ mod tests {
         let result = registry.get_method("does_not_exist").await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_register_mtls() {
+        let registry = AuthMethodRegistry::new("tenant_mtls".to_string());
+        let config = MtlsConfig {
+            ca_cert_path: "/etc/certs/ca.pem".to_string(),
+            require_client_cert: true,
+            allowed_cns: Some(vec!["client.example.com".to_string()]),
+        };
+        registry.register_mtls("mtls".to_string(), config).await.unwrap();
+
+        let method = registry.get_method("mtls").await.unwrap();
+        assert_eq!(method.method_type, AuthMethodType::Mtls);
+        assert!(method.config.enabled);
+        assert_eq!(method.config.method_type, "mtls");
+
+        // Also verify it appears in get_all_methods
+        let all = registry.get_all_methods().await;
+        assert_eq!(all.len(), 1);
+    }
 }

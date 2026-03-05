@@ -827,4 +827,53 @@ mod tests {
         let res = manager.restore_sessions_for_service("svcR").await;
         assert!(res.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_get_active_migrations_only_in_progress() {
+        // get_active_migrations filters for MigrationStatus::InProgress.
+        // migrate_service() creates migrations with status Pending, so
+        // immediately after creation there should be zero active migrations.
+        let config = PeerConfig::default();
+        let mut registry = PeerRegistry::new(config);
+
+        let mut peer1 = PeerInfo::new("server1", "127.0.0.1:6001");
+        peer1.status = PeerStatus::Down;
+        registry.add_peer(peer1).await;
+
+        let peer2 = PeerInfo::new("server2", "127.0.0.1:6002");
+        registry.add_peer(peer2).await;
+
+        let registry = Arc::new(RwLock::new(registry));
+        let replication = create_mock_replication();
+
+        let manager = FailoverManager::new(
+            FailoverConfig::default(),
+            registry,
+            replication,
+        );
+
+        // Trigger a migration — status starts as Pending
+        let result = manager
+            .migrate_service(
+                "svc1".to_string(),
+                "server1".to_string(),
+                Some("server2".to_string()),
+            )
+            .await;
+        assert!(result.is_ok());
+
+        // Pending migrations must NOT appear in get_active_migrations
+        let active = manager.get_active_migrations().await;
+        assert!(
+            active.is_empty(),
+            "Expected no InProgress migrations, got {:?}",
+            active
+        );
+
+        // Verify the migration was recorded (status == Pending)
+        let status = manager
+            .get_migration_status("server1", "svc1")
+            .await;
+        assert_eq!(status, Some(MigrationStatus::Pending));
+    }
 }

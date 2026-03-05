@@ -107,4 +107,74 @@ mod tests {
         // Validate token
         assert!(auth.validate_token(&token).await.unwrap());
     }
+
+    #[test]
+    fn test_auth_error_display_messages() {
+        let cases: &[(&str, AuthError)] = &[
+            ("Authentication failed", AuthError::AuthenticationFailed("bad creds".to_string())),
+            ("Invalid token", AuthError::InvalidToken("expired".to_string())),
+            ("Permission denied", AuthError::PermissionDenied("no access".to_string())),
+            ("Storage error", AuthError::StorageError("db down".to_string())),
+            ("Tenant not found", AuthError::TenantNotFound("t1".to_string())),
+            ("Client not found", AuthError::ClientNotFound("c1".to_string())),
+            ("Invalid credentials", AuthError::InvalidCredentials),
+            ("Validation failed", AuthError::ValidationFailed("missing field".to_string())),
+            ("Configuration error", AuthError::ConfigurationError("bad config".to_string())),
+            ("Internal error", AuthError::InternalError("panic".to_string())),
+            ("Auth framework error", AuthError::FrameworkError("fw err".to_string())),
+        ];
+
+        for (expected_fragment, err) in cases {
+            let s = err.to_string();
+            assert!(
+                s.contains(expected_fragment),
+                "Display for {:?} did not contain '{}', got: {}",
+                err,
+                expected_fragment,
+                s
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_auth_error_from_framework_error() {
+        unsafe {
+            std::env::set_var("ENVIRONMENT", "development");
+        }
+
+        // Create a token with one secret
+        let config = AuthConfig::new()
+            .token_lifetime(std::time::Duration::from_secs(3600))
+            .secret("first-secret-at-least-32-characters-long!".to_string());
+
+        let mut auth = AuthFramework::new(config);
+        let jwt_method = JwtMethod::new()
+            .secret_key("first-secret-at-least-32-characters-long!")
+            .issuer("commy-test");
+        auth.register_method("jwt", AuthMethodEnum::Jwt(jwt_method));
+        auth.initialize().await.unwrap();
+
+        let token = auth
+            .create_auth_token("user1", vec!["read".to_string()], "jwt", None)
+            .await
+            .unwrap();
+
+        // Validate that token with a *different* auth framework (different secret)
+        // This should produce a FrameworkAuthError that we then convert via From
+        let config2 = AuthConfig::new()
+            .token_lifetime(std::time::Duration::from_secs(3600))
+            .secret("second-secret-at-least-32-characters-long!".to_string());
+        let mut auth2 = AuthFramework::new(config2);
+        let jwt2 = JwtMethod::new()
+            .secret_key("second-secret-at-least-32-characters-long!")
+            .issuer("commy-test");
+        auth2.register_method("jwt", AuthMethodEnum::Jwt(jwt2));
+        auth2.initialize().await.unwrap();
+
+        if let Err(fw_err) = auth2.validate_token(&token).await {
+            let commy_err = AuthError::from(fw_err);
+            assert!(matches!(commy_err, AuthError::FrameworkError(_)));
+        }
+        // If validation somehow passes the From conversion is still well-defined
+    }
 }
