@@ -1524,3 +1524,594 @@ async fn handle_sdk_message(
         }
     }
 }
+
+/// Tests for the JSON/SDK message path (`handle_sdk_message`).
+///
+/// These tests exist because the SDK sends JSON text frames, which go through
+/// `handle_sdk_message`, NOT through `handle_message` (the binary/MessagePack path
+/// tested in `mod tests`). Both paths must be tested independently — a test of one
+/// gives zero confidence in the other.
+#[cfg(test)]
+mod sdk_tests {
+    use super::*;
+
+    // ── helpers ────────────────────────────────────────────────────────────────
+
+    /// Build and authenticate a session against `tenant_id`, also ensuring the
+    /// tenant record exists in `server`.  Returns the authenticated session.
+    async fn make_authed_session(
+        server: Arc<RwLock<Server>>,
+        tenant_id: &str,
+    ) -> ClientSession {
+        let mut session = ClientSession::new();
+        let msg = serde_json::json!({
+            "type": "Authenticate",
+            "data": { "tenant_id": tenant_id, "method": "api_key", "api_key": "test" }
+        });
+        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
+            .await
+            .expect("Authenticate must return a response");
+        assert_eq!(resp["type"], "AuthenticationResult", "auth failed: {resp}");
+        assert_eq!(resp["data"]["success"], true);
+        session
+    }
+
+    /// Call CreateService and return the opaque service_id.
+    async fn create_service(
+        server: Arc<RwLock<Server>>,
+        session: &mut ClientSession,
+        tenant_id: &str,
+        service_name: &str,
+    ) -> String {
+        let msg = serde_json::json!({
+            "type": "CreateService",
+            "data": { "tenant_id": tenant_id, "service_name": service_name }
+        });
+        let resp = handle_sdk_message(msg, session, Arc::clone(&server))
+            .await
+            .expect("CreateService must return a response");
+        assert_eq!(resp["type"], "Service", "CreateService failed: {resp}");
+        resp["data"]["service_id"]
+            .as_str()
+            .expect("service_id must be a string")
+            .to_string()
+    }
+
+    /// Remove the tenant directory created during a test.
+    fn cleanup_tenant(tenant_id: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{}", tenant_id));
+    }
+
+    // ── authentication ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_authenticate_sets_session_state() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        assert_eq!(session.state, ClientState::Active);
+        assert_eq!(session.tenant_id.as_deref(), Some(tenant_id.as_str()));
+        assert!(session.token.is_some());
+        assert!(session.permissions.is_some());
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_authenticate_creates_tenant_in_server() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        assert!(
+            server.read().await.tenants.contains_key(&tenant_id),
+            "Authenticate must register the tenant in Server so CreateService can find it"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── service management ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_create_service_returns_service_id() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "cfg").await;
+        assert!(!service_id.is_empty());
+
+        // service_id must be registered in the server registry
+        assert!(
+            server.read().await.service_registry.contains_key(&service_id),
+            "Created service must appear in service_registry"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_get_service_not_found_returns_error() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        let msg = serde_json::json!({
+            "type": "GetService",
+            "data": { "tenant_id": &tenant_id, "service_name": "does_not_exist" }
+        });
+        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(resp["type"], "Error");
+        assert_eq!(resp["data"]["code"], "NotFound");
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_get_service_after_create_returns_same_id() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        let created_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+
+        let msg = serde_json::json!({
+            "type": "GetService",
+            "data": { "tenant_id": &tenant_id, "service_name": "svc" }
+        });
+        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(resp["type"], "Service");
+        assert_eq!(resp["data"]["service_id"], created_id);
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── variable round-trip (the test that would have caught the original bug) ─
+
+    #[tokio::test]
+    async fn test_sdk_write_then_read_variable_roundtrip() {
+        // This is the regression test for the bug reported by the external LLM:
+        // WriteVariable and ReadVariable returned "Operation not implemented on server".
+        // It also catches the *second* bug where the fix used an in-memory HashMap
+        // instead of the mmap-backed Service: a write followed by a read must return
+        // the EXACT bytes that were written.
+
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "store").await;
+
+        let payload: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x42];
+
+        // Write
+        let write_msg = serde_json::json!({
+            "type": "WriteVariable",
+            "data": {
+                "service_id": service_id,
+                "variable_name": "counter",
+                "data": payload
+            }
+        });
+        let write_resp = handle_sdk_message(write_msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(
+            write_resp["type"], "Result",
+            "WriteVariable must return Result, got: {write_resp}"
+        );
+        assert_eq!(write_resp["data"]["success"], true);
+
+        // Read back
+        let read_msg = serde_json::json!({
+            "type": "ReadVariable",
+            "data": { "service_id": service_id, "variable_name": "counter" }
+        });
+        let read_resp = handle_sdk_message(read_msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(
+            read_resp["type"], "VariableData",
+            "ReadVariable must return VariableData, got: {read_resp}"
+        );
+
+        // The bytes must round-trip exactly
+        let returned: Vec<u8> =
+            serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
+        assert_eq!(
+            returned, payload,
+            "Read must return the exact bytes that were written"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_write_variable_overwrites_previous_value() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "store").await;
+
+        for (i, val) in [vec![1u8, 2, 3], vec![9u8, 8, 7]].iter().enumerate() {
+            let write_msg = serde_json::json!({
+                "type": "WriteVariable",
+                "data": { "service_id": service_id, "variable_name": "x", "data": val }
+            });
+            handle_sdk_message(write_msg, &mut session, Arc::clone(&server))
+                .await
+                .unwrap();
+
+            let read_resp = handle_sdk_message(
+                serde_json::json!({
+                    "type": "ReadVariable",
+                    "data": { "service_id": service_id, "variable_name": "x" }
+                }),
+                &mut session,
+                Arc::clone(&server),
+            )
+            .await
+            .unwrap();
+            let returned: Vec<u8> =
+                serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
+            assert_eq!(&returned, val, "Write #{i} did not persist correctly");
+        }
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_write_variable_to_unknown_service_returns_not_found() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        let msg = serde_json::json!({
+            "type": "WriteVariable",
+            "data": {
+                "service_id": "00000000-0000-0000-0000-000000000000",
+                "variable_name": "x",
+                "data": [1u8, 2, 3]
+            }
+        });
+        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(resp["type"], "Error");
+        assert_eq!(resp["data"]["code"], "NotFound");
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_read_unallocated_variable_returns_not_found() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+
+        let msg = serde_json::json!({
+            "type": "ReadVariable",
+            "data": { "service_id": service_id, "variable_name": "ghost" }
+        });
+        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(resp["type"], "Error");
+        assert_eq!(resp["data"]["code"], "NotFound");
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── allocate / deallocate ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_allocate_then_read_initial_data() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+
+        let init: Vec<u8> = vec![10, 20, 30, 40];
+        let alloc_msg = serde_json::json!({
+            "type": "AllocateVariable",
+            "data": {
+                "service_id": service_id,
+                "variable_name": "init_var",
+                "initial_data": init
+            }
+        });
+        let alloc_resp = handle_sdk_message(alloc_msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(alloc_resp["type"], "Result");
+        assert_eq!(alloc_resp["data"]["success"], true);
+
+        let read_resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReadVariable",
+                "data": { "service_id": service_id, "variable_name": "init_var" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read_resp["type"], "VariableData");
+        let returned: Vec<u8> =
+            serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
+        assert_eq!(returned, init);
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_deallocate_variable_makes_it_unreadable() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+
+        // Write it first so the variable exists
+        handle_sdk_message(
+            serde_json::json!({
+                "type": "WriteVariable",
+                "data": { "service_id": service_id, "variable_name": "tmp", "data": [1u8] }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        // Deallocate
+        let dealloc_resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "DeallocateVariable",
+                "data": { "service_id": service_id, "variable_name": "tmp" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(dealloc_resp["data"]["success"], true);
+
+        // Now reading must return NotFound
+        let read_resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReadVariable",
+                "data": { "service_id": service_id, "variable_name": "tmp" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read_resp["type"], "Error");
+        assert_eq!(read_resp["data"]["code"], "NotFound");
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── subscribe / unsubscribe ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_subscribe_registers_in_session() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+
+        let msg = serde_json::json!({
+            "type": "Subscribe",
+            "data": { "service_id": service_id, "variable_name": "v1" }
+        });
+        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(resp["type"], "Result");
+        assert_eq!(resp["data"]["success"], true);
+
+        let key = format!("{}/v1", service_id);
+        assert!(
+            session.subscriptions.contains(&key),
+            "Subscribe must register the key in session.subscriptions"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_unsubscribe_removes_from_session() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+
+        // Subscribe first
+        handle_sdk_message(
+            serde_json::json!({
+                "type": "Subscribe",
+                "data": { "service_id": service_id, "variable_name": "v1" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        // Then unsubscribe
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "Unsubscribe",
+                "data": { "service_id": service_id, "variable_name": "v1" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp["data"]["success"], true);
+
+        let key = format!("{}/v1", service_id);
+        assert!(
+            !session.subscriptions.contains(&key),
+            "Unsubscribe must remove the key from session.subscriptions"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── regression guards ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_unknown_message_type_returns_error_not_not_implemented() {
+        // Regression: before the fix, unknown types returned "Operation not implemented
+        // on server" with code "INVALID_REQUEST", silently swallowing bugs where a known
+        // type was simply misspelled.  This test pins the error message.
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = ClientSession::new();
+
+        let msg = serde_json::json!({ "type": "TotallyMadeUp", "data": {} });
+        let resp = handle_sdk_message(msg, &mut session, server).await.unwrap();
+        assert_eq!(resp["type"], "Error");
+        // Must NOT say "Operation not implemented" — that was the misleading old message
+        let msg_str = resp["data"]["message"].as_str().unwrap_or("");
+        assert!(
+            !msg_str.contains("not implemented"),
+            "Error message must not say 'not implemented': {msg_str}"
+        );
+        // Must mention the offending type so the caller can diagnose it
+        assert!(
+            msg_str.contains("TotallyMadeUp"),
+            "Error message must echo the unknown type name: {msg_str}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sdk_create_service_without_auth_returns_error() {
+        // CreateService for a different tenant than the authenticated one must be rejected.
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        // Try to create a service under a DIFFERENT tenant without authenticating to it
+        let msg = serde_json::json!({
+            "type": "CreateService",
+            "data": { "tenant_id": "other_tenant", "service_name": "svc" }
+        });
+        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
+            .await
+            .unwrap();
+        assert_eq!(resp["type"], "Error");
+        assert_ne!(
+            resp["data"]["code"], "NotFound",
+            "Wrong tenant must be an auth error, not NotFound"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── full lifecycle ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_full_variable_lifecycle() {
+        // Complete flow that mirrors what the external LLM client does:
+        // Authenticate → CreateService → WriteVariable → ReadVariable → DeallocateVariable
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "app_state").await;
+
+        let data_v1 = b"hello world".to_vec();
+        let data_v2 = b"updated".to_vec();
+
+        // Write v1
+        let r = handle_sdk_message(
+            serde_json::json!({
+                "type": "WriteVariable",
+                "data": { "service_id": service_id, "variable_name": "msg", "data": data_v1 }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["data"]["success"], true, "Write v1 failed");
+
+        // Read v1
+        let r = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReadVariable",
+                "data": { "service_id": service_id, "variable_name": "msg" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_value::<Vec<u8>>(r["data"]["data"].clone()).unwrap(),
+            data_v1
+        );
+
+        // Overwrite with v2
+        handle_sdk_message(
+            serde_json::json!({
+                "type": "WriteVariable",
+                "data": { "service_id": service_id, "variable_name": "msg", "data": data_v2 }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        // Read v2
+        let r = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReadVariable",
+                "data": { "service_id": service_id, "variable_name": "msg" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_value::<Vec<u8>>(r["data"]["data"].clone()).unwrap(),
+            data_v2,
+            "Read after overwrite must return the new value"
+        );
+
+        // Deallocate
+        let r = handle_sdk_message(
+            serde_json::json!({
+                "type": "DeallocateVariable",
+                "data": { "service_id": service_id, "variable_name": "msg" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["data"]["success"], true);
+
+        // Must be gone
+        let r = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReadVariable",
+                "data": { "service_id": service_id, "variable_name": "msg" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["type"], "Error");
+        assert_eq!(r["data"]["code"], "NotFound");
+
+        cleanup_tenant(&tenant_id);
+    }
+}
