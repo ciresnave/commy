@@ -321,6 +321,15 @@ async fn handle_message(
                 variable_names.len()
             );
 
+            // Cross-tenant check: session must be authenticated to the requested tenant
+            if session.tenant_id.as_deref() != Some(&*tenant_id) {
+                return Some(Error {
+                    code: "PERMISSION_DENIED".to_string(),
+                    message: format!("Not authenticated to tenant '{}'", tenant_id),
+                    details: Some("Cross-tenant access denied".to_string()),
+                });
+            }
+
             // Check permissions: ServiceRead AND VariableRead
             if let Err(reason) = check_permission(session, crate::auth::Permission::ServiceRead) {
                 return Some(Error {
@@ -353,12 +362,21 @@ async fn handle_message(
         }
 
         SetVariables {
-            tenant_id: _,
+            tenant_id,
             service_name,
             variables,
             ..
         } => {
             println!("SetVariables request: {}/{}", service_name, variables.len());
+
+            // Cross-tenant check: session must be authenticated to the requested tenant
+            if session.tenant_id.as_deref() != Some(&*tenant_id) {
+                return Some(Error {
+                    code: "PERMISSION_DENIED".to_string(),
+                    message: format!("Not authenticated to tenant '{}'", tenant_id),
+                    details: Some("Cross-tenant access denied".to_string()),
+                });
+            }
 
             // Check permissions: ServiceWrite AND VariableWrite
             if let Err(reason) = check_permission(session, crate::auth::Permission::ServiceWrite) {
@@ -435,6 +453,11 @@ async fn handle_message(
             session.token = None;
             session.permissions = None;
             session.state = ClientState::Disconnected;
+            // Clear subscriptions so the client no longer receives variable
+            // change notifications after logout.
+            session.subscriptions.clear();
+            session.tenant_id = None;
+            session.client_id = None;
 
             println!("Client {} logged out successfully", session.session_id);
 
@@ -762,6 +785,194 @@ mod tests {
                 assert!(!success, "Token refresh should fail (not supported)");
             }
             _ => panic!("Expected TokenRefreshResponse"),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Security / auth boundary tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// #2: token == None is the un-authenticated path — should be rejected even
+    /// if the request carries a valid-looking tenant_id.
+    #[tokio::test]
+    async fn test_get_variables_unauthenticated_session_rejected() {
+        let server = Arc::new(RwLock::new(Server::new()));
+
+        let mut session = ClientSession::new();
+        // Default session has token == None
+        assert!(session.token.is_none());
+
+        let message = WssMessage::GetVariables {
+            session_id: session.session_id.clone(),
+            tenant_id: "any_tenant".to_string(),
+            service_name: "svc".to_string(),
+            variable_names: vec!["x".to_string()],
+        };
+
+        let response = handle_message(message, &mut session, server).await;
+
+        assert!(response.is_some());
+        match response.unwrap() {
+            WssMessage::Error { code, message, .. } => {
+                assert_eq!(code, "PERMISSION_DENIED");
+                assert!(
+                    message.to_lowercase().contains("not authenticated"),
+                    "Error should indicate 'Not authenticated', got: {}",
+                    message
+                );
+            }
+            other => panic!(
+                "Expected PERMISSION_DENIED error for unauthenticated session, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// #1: client authenticated to tenant_a requests GetVariables for tenant_b.
+    /// The cross-tenant guard added to handle_message must reject this.
+    #[tokio::test]
+    async fn test_get_variables_cross_tenant_rejected() {
+        let server = Arc::new(RwLock::new(Server::new()));
+
+        let mut session = ClientSession::new();
+        session.token = Some("token_abc".to_string());
+        session.tenant_id = Some("tenant_a".to_string());
+        let mut perms = crate::auth::PermissionSet::new();
+        perms.grant(crate::auth::Permission::ServiceRead);
+        perms.grant(crate::auth::Permission::VariableRead);
+        session.permissions = Some(perms);
+
+        // Request data from a DIFFERENT tenant
+        let message = WssMessage::GetVariables {
+            session_id: session.session_id.clone(),
+            tenant_id: "tenant_b".to_string(), // ← not the session's tenant
+            service_name: "svc".to_string(),
+            variable_names: vec!["x".to_string()],
+        };
+
+        let response = handle_message(message, &mut session, server).await;
+
+        assert!(response.is_some());
+        match response.unwrap() {
+            WssMessage::Error { code, .. } => {
+                assert_eq!(code, "PERMISSION_DENIED");
+            }
+            other => panic!(
+                "Expected PERMISSION_DENIED for cross-tenant GetVariables, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// #1: same cross-tenant guard must apply to SetVariables.
+    #[tokio::test]
+    async fn test_set_variables_cross_tenant_rejected() {
+        let server = Arc::new(RwLock::new(Server::new()));
+
+        let mut session = ClientSession::new();
+        session.token = Some("token_abc".to_string());
+        session.tenant_id = Some("tenant_a".to_string());
+        let mut perms = crate::auth::PermissionSet::admin();
+        session.permissions = Some(perms);
+
+        let message = WssMessage::SetVariables {
+            session_id: session.session_id.clone(),
+            tenant_id: "tenant_b".to_string(), // ← cross-tenant
+            service_name: "svc".to_string(),
+            variables: std::collections::HashMap::new(),
+        };
+
+        let response = handle_message(message, &mut session, server).await;
+
+        assert!(response.is_some());
+        match response.unwrap() {
+            WssMessage::Error { code, .. } => {
+                assert_eq!(code, "PERMISSION_DENIED");
+            }
+            other => panic!(
+                "Expected PERMISSION_DENIED for cross-tenant SetVariables, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// #8: Authenticate to a tenant that has not been registered in the Server.
+    #[tokio::test]
+    async fn test_authenticate_unknown_tenant_returns_failure() {
+        unsafe {
+            std::env::set_var("ENVIRONMENT", "development");
+        }
+        // Server with NO tenants registered
+        let server = Arc::new(RwLock::new(Server::new()));
+
+        let mut session = ClientSession::new();
+        let message = WssMessage::Authenticate {
+            tenant_id: "ghost_tenant".to_string(),
+            client_id: "client_001".to_string(),
+            client_version: "0.1.0".to_string(),
+            credentials: "any_token".to_string(),
+            auth_method: "jwt".to_string(),
+        };
+
+        let response = handle_message(message, &mut session, server).await;
+
+        assert!(response.is_some());
+        match response.unwrap() {
+            WssMessage::AuthenticationResponse { success, message, .. } => {
+                assert!(!success, "Auth to non-existent tenant must fail");
+                assert!(
+                    message.contains("ghost_tenant"),
+                    "Error should name the missing tenant: {}",
+                    message
+                );
+            }
+            other => panic!("Expected AuthenticationResponse, got {:?}", other),
+        }
+    }
+
+    /// #7: after Logout the session token is cleared; a subsequent GetVariables
+    /// must be rejected and subscriptions must be empty.
+    #[tokio::test]
+    async fn test_logout_then_get_variables_rejected_and_subscriptions_cleared() {
+        unsafe {
+            std::env::set_var("ENVIRONMENT", "development");
+        }
+        let mut server = Server::new();
+        let _t = server.get_tenant("tenant_x");
+        let server_arc = Arc::new(RwLock::new(server));
+
+        // Fully authenticated session
+        let mut session = ClientSession::new();
+        session.token = Some("tok_xyz".to_string());
+        session.tenant_id = Some("tenant_x".to_string());
+        session.state = ClientState::Active;
+        session.permissions = Some(PermissionSet::admin());
+        session.subscriptions.insert("svc/var1".to_string());
+
+        // Logout
+        let logout = WssMessage::Logout {
+            session_id: session.session_id.clone(),
+            token: "tok_xyz".to_string(),
+        };
+        let resp = handle_message(logout, &mut session, Arc::clone(&server_arc)).await;
+        assert!(matches!(resp, Some(WssMessage::LogoutResponse { success: true, .. })));
+
+        // Token cleared
+        assert!(session.token.is_none(), "token must be None after logout");
+        assert!(session.subscriptions.is_empty(), "subscriptions must be cleared on logout");
+
+        // GetVariables should now fail with PERMISSION_DENIED (not authenticated)
+        let gv = WssMessage::GetVariables {
+            session_id: session.session_id.clone(),
+            tenant_id: "tenant_x".to_string(),
+            service_name: "svc".to_string(),
+            variable_names: vec!["var1".to_string()],
+        };
+        let resp = handle_message(gv, &mut session, Arc::clone(&server_arc)).await;
+        assert!(resp.is_some(), "GetVariables after logout must return a response");
+        match resp.unwrap() {
+            WssMessage::Error { code, .. } => assert_eq!(code, "PERMISSION_DENIED"),
+            other => panic!("Expected PERMISSION_DENIED after logout, got {:?}", other),
         }
     }
 }
