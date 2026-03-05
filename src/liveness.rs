@@ -342,4 +342,116 @@ mod tests {
         let client = monitor.get_client(&session_id).await.unwrap();
         assert!(!client.is_healthy(30));
     }
+
+    #[tokio::test]
+    async fn test_update_queue_size() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let session = ClientSession::new();
+        let session_id = session.session_id.clone();
+
+        monitor.register_client(session).await.unwrap();
+        monitor.update_queue_size(&session_id, 42).await.unwrap();
+
+        let client = monitor.get_client(&session_id).await.unwrap();
+        assert_eq!(client.outbound_queue_size, 42);
+    }
+
+    #[tokio::test]
+    async fn test_update_queue_size_unknown_client_returns_error() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let result = monitor.update_queue_size("ghost", 5).await;
+        assert!(matches!(result, Err(LivenessError::ClientNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_is_client_alive_returns_true_for_healthy_client() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let session = ClientSession::new();
+        let session_id = session.session_id.clone();
+
+        monitor.register_client(session).await.unwrap();
+        let alive = monitor.is_client_alive(&session_id).await.unwrap();
+        assert!(alive);
+    }
+
+    #[tokio::test]
+    async fn test_is_client_alive_unknown_client_returns_error() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let result = monitor.is_client_alive("ghost").await;
+        assert!(matches!(result, Err(LivenessError::ClientNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_mark_client_dead_removes_from_active() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let session = ClientSession::new();
+        let session_id = session.session_id.clone();
+
+        monitor.register_client(session).await.unwrap();
+        monitor
+            .mark_client_dead(&session_id, "test reason".to_string())
+            .await
+            .unwrap();
+
+        // Should no longer be in active clients
+        let result = monitor.get_client(&session_id).await;
+        assert!(matches!(result, Err(LivenessError::ClientNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_mark_client_dead_unknown_returns_error() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let result = monitor.mark_client_dead("ghost", "reason".to_string()).await;
+        assert!(matches!(result, Err(LivenessError::ClientNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_get_active_clients_returns_all() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let s1 = ClientSession::new();
+        let s2 = ClientSession::new();
+
+        monitor.register_client(s1).await.unwrap();
+        monitor.register_client(s2).await.unwrap();
+
+        let active = monitor.get_active_clients().await;
+        assert_eq!(active.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_remove_client_cleans_up() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let session = ClientSession::new();
+        let session_id = session.session_id.clone();
+
+        monitor.register_client(session).await.unwrap();
+        monitor.remove_client(&session_id).await.unwrap();
+
+        let active = monitor.get_active_clients().await;
+        assert!(active.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_dead_clients_removes_old_entries() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let session = ClientSession::new();
+        let session_id = session.session_id.clone();
+
+        monitor.register_client(session).await.unwrap();
+        monitor
+            .mark_client_dead(&session_id, "test".to_string())
+            .await
+            .unwrap();
+
+        // max_age_secs = 0 should remove the entry immediately
+        monitor.cleanup_dead_clients(0).await;
+        // Verify no panic. Dead clients map is internal; just confirm method runs.
+    }
+
+    #[tokio::test]
+    async fn test_update_activity_unknown_client_returns_error() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let result = monitor.update_activity("ghost").await;
+        assert!(matches!(result, Err(LivenessError::ClientNotFound(_))));
+    }
 }

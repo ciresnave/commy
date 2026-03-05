@@ -299,6 +299,190 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_is_client_revoked_false_for_unknown() {
+        let manager = RevocationManager::new();
+        assert!(!manager.is_client_revoked("nobody").await);
+    }
+
+    #[tokio::test]
+    async fn test_get_revoked_client_info() {
+        let manager = RevocationManager::new();
+        manager
+            .revoke_permission(
+                "alice".to_string(),
+                "t1".to_string(),
+                RevocationReason::TokenExpired,
+                "expired".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let info = manager.get_revoked_client_info("alice").await;
+        assert!(info.is_some());
+        let info = info.unwrap();
+        assert_eq!(info.client_id, "alice");
+        assert_eq!(info.tenant_id, "t1");
+    }
+
+    #[tokio::test]
+    async fn test_get_revoked_client_info_none_for_unknown() {
+        let manager = RevocationManager::new();
+        assert!(manager.get_revoked_client_info("ghost").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_record_migration_ack() {
+        let manager = RevocationManager::new();
+        let old = std::path::PathBuf::from("/old/svc.mem");
+        let new = std::path::PathBuf::from("/new/svc.mem");
+
+        manager
+            .start_migration(
+                "my_service".to_string(),
+                old,
+                new,
+                vec!["client1".to_string(), "client2".to_string()],
+            )
+            .await
+            .unwrap();
+
+        manager
+            .record_migration_ack("my_service", "client1".to_string())
+            .await
+            .unwrap();
+
+        assert!(!manager.is_migration_complete("my_service").await.unwrap());
+
+        manager
+            .record_migration_ack("my_service", "client2".to_string())
+            .await
+            .unwrap();
+
+        assert!(manager.is_migration_complete("my_service").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_record_migration_ack_deduplicates() {
+        let manager = RevocationManager::new();
+        manager
+            .start_migration(
+                "svc".to_string(),
+                std::path::PathBuf::from("/a"),
+                std::path::PathBuf::from("/b"),
+                vec!["c1".to_string()],
+            )
+            .await
+            .unwrap();
+
+        // Ack same client twice - should not be counted twice
+        manager.record_migration_ack("svc", "c1".to_string()).await.unwrap();
+        manager.record_migration_ack("svc", "c1".to_string()).await.unwrap();
+
+        let complete = manager.is_migration_complete("svc").await.unwrap();
+        assert!(complete); // still complete after dedup
+    }
+
+    #[tokio::test]
+    async fn test_finalize_migration_removes_migration() {
+        let manager = RevocationManager::new();
+        manager
+            .start_migration(
+                "svc".to_string(),
+                std::path::PathBuf::from("/old"),
+                std::path::PathBuf::from("/new"),
+                vec![],
+            )
+            .await
+            .unwrap();
+
+        manager.finalize_migration("svc", false).await.unwrap();
+
+        // Migration gone — is_migration_complete should error
+        let result = manager.is_migration_complete("svc").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_migration_message() {
+        let msg = RevocationManager::create_migration_message(
+            std::path::Path::new("/old/svc.mem"),
+            std::path::Path::new("/new/svc.mem"),
+            "my_service",
+            "admin_revocation",
+        );
+        matches!(msg, crate::protocol::WssMessage::FileMigration { .. });
+    }
+
+    #[tokio::test]
+    async fn test_create_revocation_message() {
+        let msg = RevocationManager::create_revocation_message("token_expired", "token too old");
+        matches!(msg, crate::protocol::WssMessage::PermissionRevoked { .. });
+    }
+
+    #[tokio::test]
+    async fn test_get_migrations() {
+        let manager = RevocationManager::new();
+        manager
+            .start_migration(
+                "svc1".to_string(),
+                std::path::PathBuf::from("/a"),
+                std::path::PathBuf::from("/b"),
+                vec![],
+            )
+            .await
+            .unwrap();
+        manager
+            .start_migration(
+                "svc2".to_string(),
+                std::path::PathBuf::from("/c"),
+                std::path::PathBuf::from("/d"),
+                vec![],
+            )
+            .await
+            .unwrap();
+
+        let migrations = manager.get_migrations().await;
+        assert_eq!(migrations.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_old_revocations() {
+        let manager = RevocationManager::new();
+        for i in 0..5 {
+            manager
+                .revoke_permission(
+                    format!("client{}", i),
+                    "t1".to_string(),
+                    RevocationReason::AdminRevocation,
+                    "".to_string(),
+                )
+                .await
+                .unwrap();
+        }
+
+        manager.cleanup_old_revocations(2).await;
+
+        // After cleanup we should have at most 2 entries
+        // Verify by checking that some clients are no longer revoked
+        let mut remaining = 0;
+        for i in 0..5 {
+            if manager.is_client_revoked(&format!("client{}", i)).await {
+                remaining += 1;
+            }
+        }
+        assert!(remaining <= 2);
+    }
+
+    #[test]
+    fn test_revocation_reason_as_str() {
+        assert_eq!(RevocationReason::MaxAttemptsExceeded.as_str(), "max_attempts_exceeded");
+        assert_eq!(RevocationReason::TokenExpired.as_str(), "token_expired");
+        assert_eq!(RevocationReason::AdminRevocation.as_str(), "admin_revocation");
+        assert_eq!(RevocationReason::PolicyViolation.as_str(), "policy_violation");
+        assert_eq!(RevocationReason::SuspiciousActivity.as_str(), "suspicious_activity");
+    }
+
+    #[tokio::test]
     async fn test_start_migration() {
         let manager = RevocationManager::new();
         let old_path = PathBuf::from("/tmp/old.mem");

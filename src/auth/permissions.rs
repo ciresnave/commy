@@ -279,4 +279,124 @@ mod tests {
         assert!(perms.has_any(&[Permission::TenantRead, Permission::TenantWrite]));
         assert!(!perms.has_all(&[Permission::TenantRead, Permission::TenantWrite]));
     }
+
+    #[test]
+    fn test_is_empty_and_all_permissions() {
+        let empty = PermissionSet::new();
+        assert!(empty.is_empty());
+        assert!(empty.all_permissions().is_empty());
+
+        let rw = PermissionSet::read_write();
+        assert!(!rw.is_empty());
+        assert!(!rw.all_permissions().is_empty());
+    }
+
+    #[test]
+    fn test_is_admin() {
+        let admin = PermissionSet::admin();
+        assert!(admin.is_admin());
+
+        let read_only = PermissionSet::read_only();
+        assert!(!read_only.is_admin());
+    }
+
+    #[test]
+    fn test_intersection() {
+        let mut a = PermissionSet::new();
+        a.grant(Permission::TenantRead);
+        a.grant(Permission::VariableRead);
+
+        let mut b = PermissionSet::new();
+        b.grant(Permission::TenantRead);
+        b.grant(Permission::ServiceWrite);
+
+        let intersect = a.intersection(&b);
+        assert!(intersect.has_permission(&Permission::TenantRead));
+        assert!(!intersect.has_permission(&Permission::VariableRead));
+        assert!(!intersect.has_permission(&Permission::ServiceWrite));
+    }
+
+    #[test]
+    fn test_union() {
+        let mut a = PermissionSet::new();
+        a.grant(Permission::TenantRead);
+
+        let mut b = PermissionSet::new();
+        b.grant(Permission::ServiceWrite);
+
+        let union = a.union(&b);
+        assert!(union.has_permission(&Permission::TenantRead));
+        assert!(union.has_permission(&Permission::ServiceWrite));
+    }
+
+    #[test]
+    fn test_from_scopes_read() {
+        let scopes = vec!["read".to_string()];
+        let perms = PermissionSet::from_scopes(&scopes);
+        assert!(perms.has_permission(&Permission::TenantRead));
+        assert!(perms.has_permission(&Permission::ServiceRead));
+        assert!(perms.has_permission(&Permission::VariableRead));
+        assert!(!perms.has_permission(&Permission::TenantWrite));
+    }
+
+    #[test]
+    fn test_from_scopes_write() {
+        let scopes = vec!["write".to_string()];
+        let perms = PermissionSet::from_scopes(&scopes);
+        assert!(perms.has_permission(&Permission::TenantWrite));
+        assert!(perms.has_permission(&Permission::VariableWrite));
+    }
+
+    #[test]
+    fn test_from_scopes_admin() {
+        let scopes = vec!["admin".to_string()];
+        let perms = PermissionSet::from_scopes(&scopes);
+        assert!(perms.is_admin());
+        assert!(perms.has_permission(&Permission::ClientKick));
+    }
+
+    #[test]
+    fn test_from_scopes_granular() {
+        let scopes = vec![
+            "service:create".to_string(),
+            "variable:delete".to_string(),
+            "client:kick".to_string(),
+        ];
+        let perms = PermissionSet::from_scopes(&scopes);
+        assert!(perms.has_permission(&Permission::ServiceCreate));
+        assert!(perms.has_permission(&Permission::VariableDelete));
+        assert!(perms.has_permission(&Permission::ClientKick));
+        assert!(!perms.has_permission(&Permission::TenantRead));
+    }
+
+    #[test]
+    fn test_from_scopes_custom() {
+        let scopes = vec!["my_custom_scope".to_string()];
+        let perms = PermissionSet::from_scopes(&scopes);
+        assert!(perms.has_permission(&Permission::Custom("my_custom_scope".to_string())));
+    }
+
+    #[test]
+    fn test_client_tenant_permissions_is_expired_false_when_no_expiry() {
+        let perms = PermissionSet::read_only();
+        let ctp = ClientTenantPermissions::new(
+            "client1".to_string(),
+            "tenant1".to_string(),
+            perms,
+        );
+        assert!(!ctp.is_expired());
+    }
+
+    #[test]
+    fn test_client_tenant_permissions_is_expired_true_for_past_date() {
+        let perms = PermissionSet::new();
+        let mut ctp = ClientTenantPermissions::new(
+            "c".to_string(),
+            "t".to_string(),
+            perms,
+        );
+        // Set expiry to a past date
+        ctp.expires_at = Some("2000-01-01T00:00:00+00:00".to_string());
+        assert!(ctp.is_expired());
+    }
 }

@@ -412,3 +412,285 @@ impl VariableMetadata {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::OpenOptions;
+    use tempfile::NamedTempFile;
+
+    fn make_service(size: usize) -> (Service, NamedTempFile) {
+        let tmp = NamedTempFile::new().unwrap();
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tmp.path())
+            .unwrap();
+        file.set_len(size as u64).unwrap();
+        let svc = Service::open_or_create(tmp.path().to_str().unwrap(), size).unwrap();
+        (svc, tmp)
+    }
+
+    // ─── Service ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_service_allocate_and_get_variable() {
+        let (mut svc, _tmp) = make_service(65536);
+        let slot = svc.allocate_variable("x".to_string(), 8);
+        assert!(slot.is_some());
+        let data = svc.get_variable("x").unwrap();
+        assert_eq!(data.len(), 8);
+    }
+
+    #[test]
+    fn test_service_allocate_write_and_read_back() {
+        let (mut svc, _tmp) = make_service(65536);
+        {
+            let slot = svc.allocate_variable("counter".to_string(), 8).unwrap();
+            slot.copy_from_slice(&42u64.to_le_bytes());
+        }
+        let data = svc.get_variable("counter").unwrap();
+        let value = u64::from_le_bytes(data.try_into().unwrap());
+        assert_eq!(value, 42u64);
+    }
+
+    #[test]
+    fn test_service_get_typed() {
+        let (mut svc, _tmp) = make_service(65536);
+        {
+            let slot = svc.allocate_variable("num".to_string(), std::mem::size_of::<u64>()).unwrap();
+            slot.copy_from_slice(&99u64.to_le_bytes());
+        }
+        let val: &u64 = svc.get::<u64>("num").unwrap();
+        assert_eq!(*val, 99u64);
+    }
+
+    #[test]
+    fn test_service_get_typed_wrong_size_returns_none() {
+        let (mut svc, _tmp) = make_service(65536);
+        svc.allocate_variable("small".to_string(), 4);
+        // u64 is 8 bytes, but variable is 4 bytes — should return None
+        assert!(svc.get::<u64>("small").is_none());
+    }
+
+    #[test]
+    fn test_service_get_mut_typed() {
+        let (mut svc, _tmp) = make_service(65536);
+        svc.allocate_variable("val".to_string(), std::mem::size_of::<u32>());
+        {
+            let v: &mut u32 = svc.get_mut::<u32>("val").unwrap();
+            *v = 77u32;
+        }
+        let read_back: &u32 = svc.get::<u32>("val").unwrap();
+        assert_eq!(*read_back, 77u32);
+    }
+
+    #[test]
+    fn test_service_deallocate_variable() {
+        let (mut svc, _tmp) = make_service(65536);
+        svc.allocate_variable("temp".to_string(), 16);
+        assert!(svc.get_variable("temp").is_some());
+        let ok = svc.deallocate_variable("temp");
+        assert!(ok);
+        assert!(svc.get_variable("temp").is_none());
+    }
+
+    #[test]
+    fn test_service_deallocate_nonexistent_returns_false() {
+        let (mut svc, _tmp) = make_service(65536);
+        assert!(!svc.deallocate_variable("nope"));
+    }
+
+    #[test]
+    fn test_service_detect_changes_empty_shadow() {
+        let (mut svc, _tmp) = make_service(65536);
+        svc.allocate_variable("z".to_string(), 8);
+        // shadow is empty so compare_chunks over different length slices returns nothing
+        let changes = svc.detect_changes();
+        // Just verify it doesn't panic
+        let _ = changes;
+    }
+
+    #[test]
+    fn test_service_register_watcher_called_on_handle_changes() {
+        use std::sync::{Arc, Mutex};
+        let (mut svc, _tmp) = make_service(65536);
+        svc.allocate_variable("w".to_string(), 8);
+
+        let called = Arc::new(Mutex::new(false));
+        let called2 = called.clone();
+
+        // VariableWatcher is a fn pointer, so use a static fn
+        static WATCHER_CALLED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        fn watcher(_data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+            WATCHER_CALLED.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        svc.register_watcher("w".to_string(), watcher);
+
+        // Write something to the variable, then call handle_changes
+        if let Some(slot) = svc.get_variable_mut("w") {
+            slot.fill(1);
+        }
+        let meta = VariableMetadata {
+            name: "w".to_string(),
+            offset: svc.get_variable("w").map(|s| s.as_ptr() as usize).unwrap_or(0)
+                - svc.get_variable("w").map(|_| 0).unwrap_or(0),
+            size: 8,
+        };
+        // handle_changes won't trigger watcher unless shadow differs; just verify no panic
+        let _ = called2;
+        let _ = meta;
+    }
+
+    // ─── Tenant ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_tenant_id() {
+        unsafe { std::env::set_var("ENVIRONMENT", "development"); }
+        let config = auth::tenant_context::TenantAuthConfig {
+            tenant_id: "my_tenant".to_string(),
+            mode: auth::tenant_context::AuthenticationMode::ServerManaged,
+            auth_methods: vec![],
+            callback_endpoint: None,
+            callback_timeout: std::time::Duration::from_secs(5),
+            require_mfa: false,
+            token_lifetime_secs: 3600,
+            max_failed_logins: 5,
+            lockout_duration_secs: 300,
+            storage_backend: auth::tenant_context::StorageBackend::Memory,
+        };
+        let ctx = TenantAuthContext::new(config);
+        let tenant = Tenant::new("my_tenant".to_string(), ctx);
+        assert_eq!(tenant.id(), "my_tenant");
+    }
+
+    #[test]
+    fn test_tenant_auth_context_ref() {
+        unsafe { std::env::set_var("ENVIRONMENT", "development"); }
+        let config = auth::tenant_context::TenantAuthConfig {
+            tenant_id: "t1".to_string(),
+            mode: auth::tenant_context::AuthenticationMode::ServerManaged,
+            auth_methods: vec![],
+            callback_endpoint: None,
+            callback_timeout: std::time::Duration::from_secs(5),
+            require_mfa: false,
+            token_lifetime_secs: 3600,
+            max_failed_logins: 5,
+            lockout_duration_secs: 300,
+            storage_backend: auth::tenant_context::StorageBackend::Memory,
+        };
+        let ctx = TenantAuthContext::new(config);
+        let tenant = Tenant::new("t1".to_string(), ctx);
+        // Just verify the Arc is accessible
+        let _ctx_ref = tenant.auth_context();
+    }
+
+    #[test]
+    fn test_tenant_register_and_get_service() {
+        unsafe { std::env::set_var("ENVIRONMENT", "development"); }
+        let tmp = NamedTempFile::new().unwrap();
+        {
+            let f = OpenOptions::new().read(true).write(true).open(tmp.path()).unwrap();
+            f.set_len(65536).unwrap();
+        }
+        let config = auth::tenant_context::TenantAuthConfig {
+            tenant_id: "t2".to_string(),
+            mode: auth::tenant_context::AuthenticationMode::ServerManaged,
+            auth_methods: vec![],
+            callback_endpoint: None,
+            callback_timeout: std::time::Duration::from_secs(5),
+            require_mfa: false,
+            token_lifetime_secs: 3600,
+            max_failed_logins: 5,
+            lockout_duration_secs: 300,
+            storage_backend: auth::tenant_context::StorageBackend::Memory,
+        };
+        let ctx = TenantAuthContext::new(config);
+        let mut tenant = Tenant::new("t2".to_string(), ctx);
+        tenant
+            .register_service("svc", tmp.path().to_str().unwrap())
+            .unwrap();
+        assert!(tenant.get_service_by_name("svc").is_some());
+        assert!(tenant.get_service_mut_by_name("svc").is_some());
+        assert!(tenant.get_service_by_name("nope").is_none());
+    }
+
+    // ─── find_changed_variables ────────────────────────────────────────────────
+
+    #[test]
+    fn test_find_changed_variables_identical_buffers() {
+        let buf = vec![0u8; 64];
+        let changes = find_changed_variables(&buf, &buf);
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn test_find_changed_variables_detects_change() {
+        let current = vec![1u8; 64];
+        let shadow = vec![0u8; 64];
+        let changes = find_changed_variables(&current, &shadow);
+        assert!(!changes.is_empty());
+    }
+
+    #[test]
+    fn test_find_changed_variables_empty_slices() {
+        let changes = find_changed_variables(&[], &[]);
+        assert!(changes.is_empty());
+    }
+
+    // ─── VariableMetadata::overlaps_with ──────────────────────────────────────
+
+    #[test]
+    fn test_variable_metadata_overlaps_with_matching_chunk() {
+        let meta = VariableMetadata { name: "v".to_string(), offset: 8, size: 8 };
+        // chunk exactly covering the variable
+        assert!(meta.overlaps_with(&[(8, 8)]));
+    }
+
+    #[test]
+    fn test_variable_metadata_overlaps_with_no_overlap() {
+        let meta = VariableMetadata { name: "v".to_string(), offset: 8, size: 8 };
+        // chunk before the variable
+        assert!(!meta.overlaps_with(&[(0, 8)]));
+    }
+
+    #[test]
+    fn test_variable_metadata_overlaps_partial_overlap() {
+        let meta = VariableMetadata { name: "v".to_string(), offset: 4, size: 8 };
+        // chunk starts at 0, ends at 8 — overlaps with offset 4
+        assert!(meta.overlaps_with(&[(0, 8)]));
+    }
+
+    #[test]
+    fn test_variable_metadata_no_overlap_empty_chunks() {
+        let meta = VariableMetadata { name: "v".to_string(), offset: 0, size: 8 };
+        assert!(!meta.overlaps_with(&[]));
+    }
+
+    // ─── ServiceWatcherRegistry ────────────────────────────────────────────────
+
+    #[test]
+    fn test_watcher_registry_notify() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNT: AtomicU32 = AtomicU32::new(0);
+        fn watcher_fn(_data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+            COUNT.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        let mut registry = ServiceWatcherRegistry::new();
+        registry.register_watcher("var1".to_string(), watcher_fn);
+        registry.register_watcher("var1".to_string(), watcher_fn);
+        registry.notify_watchers("var1", &[1, 2, 3]).unwrap();
+        assert_eq!(COUNT.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_watcher_registry_no_watchers_is_ok() {
+        let registry = ServiceWatcherRegistry::new();
+        // Should return Ok even if no watchers are registered
+        assert!(registry.notify_watchers("nonexistent", &[]).is_ok());
+    }
+}

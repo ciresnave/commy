@@ -499,10 +499,10 @@ impl FreeListAllocator {
 
     /// Calculate the total used space by scanning the free list.
     pub fn calculate_used_space(&self) -> usize {
-        let current_size = self.size();
+        let offset = *self.offset.lock().unwrap();
         let free_list = self.free_list.lock().unwrap();
         let total_free: usize = free_list.iter().map(|(_, size)| size).sum();
-        current_size.saturating_sub(total_free)
+        offset.saturating_sub(total_free)
     }
 
     /// Resize the file and swap mmaps with cross-process coordination.
@@ -697,6 +697,234 @@ impl FreeListAllocator {
         self.allocation_limit.store(new_size, Ordering::Release);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::OpenOptions;
+    use tempfile::NamedTempFile;
+
+    /// Create a temp file backed allocator with the given size
+    fn make_allocator(size: usize) -> (FreeListAllocator, NamedTempFile) {
+        let tmp = NamedTempFile::new().unwrap();
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(tmp.path())
+            .unwrap();
+        file.set_len(size as u64).unwrap();
+        let mmap = unsafe { memmap2::MmapMut::map_mut(&file).unwrap() };
+        let allocator = FreeListAllocator::new(mmap, tmp.path());
+        (allocator, tmp)
+    }
+
+    #[test]
+    fn test_size_returns_initial_size() {
+        let (allocator, _tmp) = make_allocator(65536);
+        assert_eq!(allocator.size(), 65536);
+    }
+
+    #[test]
+    fn test_allocation_limit_equals_size_initially() {
+        let (allocator, _tmp) = make_allocator(65536);
+        assert_eq!(allocator.allocation_limit(), 65536);
+    }
+
+    #[test]
+    fn test_as_slice_returns_correct_length() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let slice = allocator.as_slice();
+        assert_eq!(slice.len(), 65536);
+    }
+
+    #[test]
+    fn test_read_and_write_header_roundtrip() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let mut header = allocator.read_header().unwrap();
+        header.version = 42;
+        header.allow_growth = true;
+        allocator.write_header(&header).unwrap();
+
+        let read_back = allocator.read_header().unwrap();
+        assert_eq!(read_back.version, 42);
+        assert!(read_back.allow_growth);
+    }
+
+    #[test]
+    fn test_allocate_and_offset_to_ptr() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let layout = Layout::from_size_align(64, 1).unwrap();
+        let ptr = allocator.allocate(layout).unwrap();
+        let raw_ptr = ptr.as_mut_ptr();
+
+        let slice = allocator.as_slice();
+        let base = slice.as_ptr() as usize;
+        let offset = raw_ptr as usize - base;
+
+        // offset_to_ptr should give back the same address
+        let recovered = allocator.offset_to_ptr(offset, 64);
+        assert_eq!(recovered, raw_ptr as *const u8);
+    }
+
+    #[test]
+    fn test_allocate_and_offset_to_mut_ptr() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let layout = Layout::from_size_align(64, 1).unwrap();
+        let ptr = allocator.allocate(layout).unwrap();
+        let raw_ptr = ptr.as_mut_ptr();
+
+        let slice = allocator.as_slice();
+        let base = slice.as_ptr() as usize;
+        let offset = raw_ptr as usize - base;
+
+        let recovered = allocator.offset_to_mut_ptr(offset, 64);
+        assert_eq!(recovered, raw_ptr);
+    }
+
+    #[test]
+    fn test_calculate_used_space_after_allocation() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let used_before = allocator.calculate_used_space();
+
+        let layout = Layout::from_size_align(1024, 1).unwrap();
+        let _ = allocator.allocate(layout).unwrap();
+
+        let used_after = allocator.calculate_used_space();
+        assert!(
+            used_after > used_before,
+            "used space should increase after allocation"
+        );
+    }
+
+    #[test]
+    fn test_deallocate_returns_space() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let layout = Layout::from_size_align(1024, 1).unwrap();
+        let ptr = allocator.allocate(layout).unwrap();
+        let used_after_alloc = allocator.calculate_used_space();
+
+        unsafe { allocator.deallocate(ptr.as_non_null_ptr(), layout) };
+
+        let used_after_dealloc = allocator.calculate_used_space();
+        assert!(
+            used_after_dealloc <= used_after_alloc,
+            "used space should not increase after dealloc"
+        );
+    }
+
+    #[test]
+    fn test_multiple_allocations() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let layout = Layout::from_size_align(128, 1).unwrap();
+
+        let mut ptrs = vec![];
+        for _ in 0..10 {
+            ptrs.push(allocator.allocate(layout).unwrap());
+        }
+
+        // All pointers should be distinct
+        let raw_ptrs: Vec<*mut u8> = ptrs.iter().map(|p| p.as_mut_ptr()).collect();
+        for i in 0..raw_ptrs.len() {
+            for j in (i + 1)..raw_ptrs.len() {
+                assert_ne!(raw_ptrs[i], raw_ptrs[j], "allocations should not overlap");
+            }
+        }
+    }
+
+    #[test]
+    fn test_allocate_and_write_data() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let layout = Layout::from_size_align(8, 1).unwrap();
+        let ptr = allocator.allocate(layout).unwrap();
+
+        // Write known bytes via mutable pointer
+        let raw_ptr = ptr.as_mut_ptr();
+        unsafe {
+            std::ptr::copy_nonoverlapping([1u8, 2, 3, 4, 5, 6, 7, 8].as_ptr(), raw_ptr, 8);
+        }
+
+        // Read back via offset_to_ptr
+        let slice = allocator.as_slice();
+        let base = slice.as_ptr() as usize;
+        let offset = raw_ptr as usize - base;
+        let read_ptr = allocator.offset_to_ptr(offset, 8);
+        let read_back = unsafe { std::slice::from_raw_parts(read_ptr, 8) };
+        assert_eq!(read_back, &[1u8, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn test_resize_file_increases_size() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let original_size = allocator.size();
+        allocator.resize_file(original_size * 2).unwrap();
+        assert_eq!(allocator.size(), original_size * 2);
+        assert_eq!(allocator.allocation_limit(), original_size * 2);
+    }
+
+    #[test]
+    fn test_resize_file_rejects_smaller_size() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let result = allocator.resize_file(32768);
+        assert!(result.is_err(), "resize to smaller size should fail");
+    }
+
+    #[test]
+    fn test_shrink_to_usage_lowers_allocation_limit() {
+        let (allocator, _tmp) = make_allocator(65536);
+        let layout = Layout::from_size_align(1024, 1).unwrap();
+        let _ = allocator.allocate(layout).unwrap();
+
+        let limit_before = allocator.allocation_limit();
+
+        // shrink_to_usage sets the allocation_limit before attempting file truncation.
+        // On Windows, truncating a memory-mapped file fails with os error 1224, which
+        // is expected — the allocation limit is still correctly lowered.
+        let result = allocator.shrink_to_usage(10.0);
+        match result {
+            Ok(()) => {}
+            Err(AllocatorError::FileTruncationFailed(_)) => {
+                // Expected on Windows when the file is still mapped; allocation_limit
+                // was already updated before the truncation attempt.
+            }
+            Err(e) => panic!("Unexpected shrink error: {}", e),
+        }
+
+        let limit_after = allocator.allocation_limit();
+        assert!(
+            limit_after < limit_before,
+            "shrink should lower allocation limit (before={}, after={})",
+            limit_before,
+            limit_after
+        );
+    }
+
+    #[test]
+    fn test_check_timeout_does_not_trigger_immediately() {
+        let (allocator, _tmp) = make_allocator(65536);
+        // try_acquire_resize_lock creates a ResizeLockGuard with check_timeout
+        // We can't call it directly since it's private, but we verify resize_file
+        // completes instantly (well under 60s timeout)
+        let result = allocator.resize_file(131072);
+        assert!(
+            result.is_ok(),
+            "immediate resize should not trigger timeout"
+        );
+    }
+
+    #[test]
+    fn test_allocate_entire_usable_space_triggers_growth() {
+        let (allocator, _tmp) = make_allocator(65536);
+        // Fill past initial usable space to trigger auto-growth
+        // usable space = 65536 - MMAP_HEADER_SIZE (4096) = 61440 bytes
+        let layout = Layout::from_size_align(60000, 1).unwrap();
+        // This should succeed either directly or via auto-growth
+        let result = allocator.allocate(layout);
+        assert!(
+            result.is_ok(),
+            "large allocation should succeed (may trigger growth)"
+        );
     }
 }
 

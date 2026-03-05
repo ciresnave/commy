@@ -406,4 +406,170 @@ mod tests {
         assert_eq!(stats.total_nodes, 2);
         assert_eq!(stats.healthy_nodes, 1); // Only local node is healthy initially
     }
+
+    #[tokio::test]
+    async fn test_register_replica_and_find() {
+        let manager = ClusterManager::new(
+            "node1".to_string(),
+            "S1".to_string(),
+            "https://s1:9000".to_string(),
+        );
+
+        manager
+            .register_replica("t1".to_string(), "svc".to_string(), "node1".to_string())
+            .await
+            .unwrap();
+
+        let replica = manager.find_replica("t1", "svc").await;
+        assert!(replica.is_some());
+        let r = replica.unwrap();
+        assert_eq!(r.tenant_id, "t1");
+        assert_eq!(r.service_name, "svc");
+        assert_eq!(r.node_id, "node1");
+    }
+
+    #[tokio::test]
+    async fn test_find_replica_not_found_returns_none() {
+        let manager = ClusterManager::new(
+            "node1".to_string(),
+            "S1".to_string(),
+            "https://s1:9000".to_string(),
+        );
+
+        let replica = manager.find_replica("missing_tenant", "missing_svc").await;
+        assert!(replica.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_healthy_nodes() {
+        let manager = ClusterManager::new(
+            "node1".to_string(),
+            "S1".to_string(),
+            "https://s1:9000".to_string(),
+        );
+
+        manager
+            .register_peer("node2".to_string(), "S2".to_string(), "https://s2:9000".to_string())
+            .await
+            .unwrap();
+
+        manager
+            .update_node_status("node2", NodeStatus::Down)
+            .await
+            .unwrap();
+
+        let healthy = manager.get_healthy_nodes().await;
+        // node1 (local) is Healthy, node2 is Down
+        assert_eq!(healthy.len(), 1);
+        assert_eq!(healthy[0].node_id, "node1");
+    }
+
+    #[tokio::test]
+    async fn test_get_node_returns_none_for_unknown() {
+        let manager = ClusterManager::new(
+            "node1".to_string(),
+            "S1".to_string(),
+            "https://s1:9000".to_string(),
+        );
+
+        let result = manager.get_node("nobody").await;
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_is_local_node() {
+        let manager = ClusterManager::new(
+            "node1".to_string(),
+            "S1".to_string(),
+            "https://s1:9000".to_string(),
+        );
+
+        assert!(manager.is_local_node("node1"));
+        assert!(!manager.is_local_node("node2"));
+    }
+
+    #[tokio::test]
+    async fn test_get_synced_token_none_for_unknown() {
+        let manager = ClusterManager::new(
+            "node1".to_string(),
+            "S1".to_string(),
+            "https://s1:9000".to_string(),
+        );
+
+        let result = manager.get_synced_token("nonexistent").await;
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_create_cluster_ping_message() {
+        let manager = ClusterManager::new(
+            "ping-node".to_string(),
+            "Ping Server".to_string(),
+            "https://ping:9000".to_string(),
+        );
+
+        let msg = manager.create_cluster_ping();
+        match msg {
+            WssMessage::ClusterPing { node_id, .. } => {
+                assert_eq!(node_id, "ping-node");
+            }
+            _ => panic!("Expected ClusterPing message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_token_sync_message() {
+        let token = SyncToken {
+            token: "tok".to_string(),
+            client_id: "clnt".to_string(),
+            tenant_id: "tnt".to_string(),
+            permissions: "read".to_string(),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+            issued_by: "node1".to_string(),
+        };
+
+        let msg = ClusterManager::create_token_sync(&token);
+        match msg {
+            WssMessage::TokenSync { client_id, token: tok, tenant_id, .. } => {
+                assert_eq!(client_id, "clnt");
+                assert_eq!(tok, "tok");
+                assert_eq!(tenant_id, "tnt");
+            }
+            _ => panic!("Expected TokenSync message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_expired_tokens_removes_expired() {
+        let manager = ClusterManager::new(
+            "node1".to_string(),
+            "S1".to_string(),
+            "https://s1:9000".to_string(),
+        );
+
+        let expired = SyncToken {
+            token: "expired_tok".to_string(),
+            client_id: "c1".to_string(),
+            tenant_id: "t1".to_string(),
+            permissions: "read".to_string(),
+            expires_at: Utc::now() - chrono::Duration::hours(1), // already expired
+            issued_by: "node1".to_string(),
+        };
+
+        let valid = SyncToken {
+            token: "valid_tok".to_string(),
+            client_id: "c2".to_string(),
+            tenant_id: "t1".to_string(),
+            permissions: "read".to_string(),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+            issued_by: "node1".to_string(),
+        };
+
+        manager.sync_token(expired).await.unwrap();
+        manager.sync_token(valid).await.unwrap();
+        manager.cleanup_expired_tokens().await;
+
+        assert!(manager.get_synced_token("expired_tok").await.is_none());
+        assert!(manager.get_synced_token("valid_tok").await.is_some());
+    }
 }
