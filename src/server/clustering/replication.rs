@@ -351,4 +351,98 @@ mod tests {
         let updated = coordinator.get_config().await;
         assert_eq!(updated.chunk_size, 2 * 1024 * 1024);
     }
+
+    #[tokio::test]
+    async fn test_get_transfer_for_chunk_not_found() {
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+        let coordinator = ReplicationCoordinator::new("server_1".to_string(), Arc::new(handler));
+
+        let result = coordinator.get_transfer_for_chunk("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_active_transfers_multiple() {
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+        let coordinator = ReplicationCoordinator::new("server_1".to_string(), Arc::new(handler));
+
+        let data = b"data".to_vec();
+        let snap1 = ServiceSnapshot::new(
+            "t".to_string(),
+            "s1".to_string(),
+            1,
+            data.clone(),
+            ServiceSnapshot::calculate_checksum(&data),
+        );
+        let snap2 = ServiceSnapshot::new(
+            "t".to_string(),
+            "s2".to_string(),
+            1,
+            data.clone(),
+            ServiceSnapshot::calculate_checksum(&data),
+        );
+        coordinator.start_transfer("t1".to_string(), snap1).await.unwrap();
+        coordinator.start_transfer("t2".to_string(), snap2).await.unwrap();
+
+        let transfers = coordinator.get_active_transfers().await;
+        assert_eq!(transfers.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_transfer_progress_not_found() {
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+        let coordinator = ReplicationCoordinator::new("server_1".to_string(), Arc::new(handler));
+
+        let result = coordinator.get_transfer_progress("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_stalled_transfers() {
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+        let coordinator = ReplicationCoordinator::new("server_1".to_string(), Arc::new(handler));
+
+        let data = b"data".to_vec();
+        let snap = ServiceSnapshot::new(
+            "t".to_string(),
+            "s".to_string(),
+            1,
+            data.clone(),
+            ServiceSnapshot::calculate_checksum(&data),
+        );
+        coordinator.start_transfer("stale".to_string(), snap).await.unwrap();
+
+        // Sleep so time passes, then use a short threshold so transfer is considered stalled
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let mut config = coordinator.get_config().await;
+        config.stall_threshold_ms = 5; // Transfer has been idle > 5ms (we slept 20ms)
+        coordinator.update_config(config).await;
+
+        let removed = coordinator.cleanup_stalled_transfers().await;
+        assert!(!removed.is_empty());
+        assert_eq!(coordinator.get_active_transfers().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_handle_sync_request_returns_error() {
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+        let coordinator = ReplicationCoordinator::new("server_1".to_string(), Arc::new(handler));
+
+        let result = coordinator
+            .handle_sync_request("req_1", "tenant1", "service1", None)
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_replication_config_stall_threshold() {
+        let config = ReplicationConfig::default();
+        assert_eq!(config.stall_threshold_ms, 30 * 1000);
+        assert!(!config.enable_compression);
+    }
 }

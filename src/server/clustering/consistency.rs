@@ -352,4 +352,38 @@ mod tests {
 
         assert_eq!(after.len(), 2); // Both variables happened after empty clock
     }
+
+    #[test]
+    fn test_variable_version_happens_before() {
+        let mut clock_a = VectorClock::new(&["s1", "s2"]);
+        clock_a.increment("s1");
+
+        let mut clock_b = VectorClock::new(&["s1", "s2"]);
+        clock_b.increment("s1");
+        clock_b.increment("s2");
+
+        let version_a = VariableVersion::new("var1".to_string(), clock_a, "s1".to_string(), 1);
+        let version_b = VariableVersion::new("var1".to_string(), clock_b, "s2".to_string(), 2);
+
+        // version_a happened before version_b
+        assert_eq!(version_a.happens_before(&version_b), Some(true));
+        // version_b did NOT happen before version_a
+        assert_eq!(version_b.happens_before(&version_a), Some(false));
+    }
+
+    #[test]
+    fn test_variable_version_is_concurrent() {
+        // Two clocks that updated different entries independently
+        let mut clock_a = VectorClock::new(&["s1", "s2"]);
+        clock_a.increment("s1");
+
+        let mut clock_b = VectorClock::new(&["s1", "s2"]);
+        clock_b.increment("s2");
+
+        let version_a = VariableVersion::new("var1".to_string(), clock_a, "s1".to_string(), 1);
+        let version_b = VariableVersion::new("var1".to_string(), clock_b, "s2".to_string(), 1);
+
+        assert!(version_a.is_concurrent(&version_b));
+        assert!(version_b.is_concurrent(&version_a));
+    }
 }

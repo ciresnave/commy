@@ -327,4 +327,68 @@ mod tests {
         assert_eq!(peer.bytes_received, 1024);
         assert_eq!(peer.bytes_sent, 512);
     }
+
+    #[tokio::test]
+    async fn test_add_peer_increases_count() {
+        let config = PeerConfig::default();
+        let mut registry = PeerRegistry::new(config);
+        registry.initialize().await.unwrap();
+
+        let peer = PeerInfo::new("new_peer".to_string(), "127.0.0.1:9099".to_string());
+        registry.add_peer(peer).await;
+
+        let all = registry.get_all_peers().await;
+        assert!(all.iter().any(|p| p.server_id == "new_peer"));
+    }
+
+    #[tokio::test]
+    async fn test_get_peer_unknown_returns_none() {
+        let config = PeerConfig::default();
+        let mut registry = PeerRegistry::new(config);
+        registry.initialize().await.unwrap();
+
+        let result = registry.get_peer("ghost").await;
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_config_getter() {
+        let config = PeerConfig {
+            server_id: "server_x".to_string(),
+            ..Default::default()
+        };
+        let registry = PeerRegistry::new(config);
+        assert_eq!(registry.config().server_id, "server_x");
+    }
+
+    #[test]
+    fn test_cluster_size_before_init() {
+        let config = PeerConfig::default();
+        let registry = PeerRegistry::new(config);
+        assert_eq!(registry.cluster_size(), 0);
+    }
+
+    #[test]
+    fn test_is_quorum_available_true() {
+        let status = ClusterStatus {
+            total_peers: 3,
+            healthy_peers: 2,
+            suspected_peers: 0,
+            down_peers: 1,
+            is_degraded: true,
+        };
+        assert!(status.is_quorum_available());
+    }
+
+    #[test]
+    fn test_is_quorum_available_false() {
+        let status = ClusterStatus {
+            total_peers: 3,
+            healthy_peers: 1,
+            suspected_peers: 0,
+            down_peers: 2,
+            is_degraded: true,
+        };
+        assert!(!status.is_quorum_available());
+    }
 }

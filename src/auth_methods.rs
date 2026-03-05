@@ -374,4 +374,79 @@ mod tests {
         let method = registry.get_method("custom").await.unwrap();
         assert!(matches!(method.method_type, AuthMethodType::Custom(_)));
     }
+
+    #[test]
+    fn test_auth_method_type_as_str() {
+        assert_eq!(AuthMethodType::ApiKey.as_str(), "api_key");
+        assert_eq!(AuthMethodType::Jwt.as_str(), "jwt");
+        assert_eq!(AuthMethodType::Mtls.as_str(), "mtls");
+        assert_eq!(AuthMethodType::Custom("my_auth".to_string()).as_str(), "my_auth");
+    }
+
+    #[test]
+    fn test_auth_method_type_from_str() {
+        assert_eq!(AuthMethodType::from_str("api_key"), AuthMethodType::ApiKey);
+        assert_eq!(AuthMethodType::from_str("jwt"), AuthMethodType::Jwt);
+        assert_eq!(AuthMethodType::from_str("mtls"), AuthMethodType::Mtls);
+        assert_eq!(
+            AuthMethodType::from_str("custom_name"),
+            AuthMethodType::Custom("custom_name".to_string())
+        );
+    }
+
+    #[test]
+    fn test_tenant_id() {
+        let registry = AuthMethodRegistry::new("tenant_xyz".to_string());
+        assert_eq!(registry.tenant_id(), "tenant_xyz");
+    }
+
+    #[tokio::test]
+    async fn test_get_all_methods_empty() {
+        let registry = AuthMethodRegistry::new("tenant1".to_string());
+        let methods = registry.get_all_methods().await;
+        assert!(methods.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_has_method_true_and_false() {
+        let registry = AuthMethodRegistry::new("tenant1".to_string());
+        assert!(!registry.has_method("api_key").await);
+
+        let config = ApiKeyConfig {
+            header_name: "X-API-Key".to_string(),
+            api_key: "secret".to_string(),
+        };
+        registry.register_api_key("api_key".to_string(), config).await.unwrap();
+
+        assert!(registry.has_method("api_key").await);
+        assert!(!registry.has_method("nonexistent").await);
+    }
+
+    #[tokio::test]
+    async fn test_unregister_method() {
+        let registry = AuthMethodRegistry::new("tenant1".to_string());
+        let config = ApiKeyConfig {
+            header_name: "X-API-Key".to_string(),
+            api_key: "secret".to_string(),
+        };
+        registry.register_api_key("api_key".to_string(), config).await.unwrap();
+        assert!(registry.has_method("api_key").await);
+
+        registry.unregister_method("api_key").await.unwrap();
+        assert!(!registry.has_method("api_key").await);
+    }
+
+    #[tokio::test]
+    async fn test_unregister_nonexistent_returns_error() {
+        let registry = AuthMethodRegistry::new("tenant1".to_string());
+        let result = registry.unregister_method("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_method_not_found_returns_error() {
+        let registry = AuthMethodRegistry::new("tenant1".to_string());
+        let result = registry.get_method("does_not_exist").await;
+        assert!(result.is_err());
+    }
 }

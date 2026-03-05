@@ -297,4 +297,76 @@ mod tests {
             .await
             .unwrap();
     }
+
+    #[test]
+    fn test_storage_backend_default_is_memory() {
+        let config = TenantAuthConfig::default();
+        assert!(matches!(config.storage_backend, StorageBackend::Memory));
+    }
+
+    #[test]
+    fn test_authentication_mode_default_is_server_managed() {
+        let config = TenantAuthConfig::default();
+        assert_eq!(config.mode, AuthenticationMode::ServerManaged);
+    }
+
+    #[test]
+    fn test_config_returns_config() {
+        let config = TenantAuthConfig {
+            tenant_id: "my_tenant".to_string(),
+            ..Default::default()
+        };
+        let context = TenantAuthContext::new(config);
+        assert_eq!(context.config().tenant_id, "my_tenant");
+    }
+
+    #[tokio::test]
+    async fn test_auth_returns_framework() {
+        let config = TenantAuthConfig {
+            tenant_id: "test_tenant".to_string(),
+            ..Default::default()
+        };
+        let context = TenantAuthContext::new(config);
+        // Should be able to acquire a read lock without panicking
+        let _guard = context.auth().read().await;
+    }
+
+    #[test]
+    fn test_update_config() {
+        let config = TenantAuthConfig {
+            tenant_id: "old_tenant".to_string(),
+            ..Default::default()
+        };
+        let mut context = TenantAuthContext::new(config);
+        assert_eq!(context.tenant_id(), "old_tenant");
+
+        let new_config = TenantAuthConfig {
+            tenant_id: "new_tenant".to_string(),
+            ..Default::default()
+        };
+        context.update_config(new_config);
+        assert_eq!(context.tenant_id(), "new_tenant");
+    }
+
+    #[tokio::test]
+    async fn test_client_exists_returns_false() {
+        let config = TenantAuthConfig {
+            tenant_id: "test_tenant".to_string(),
+            ..Default::default()
+        };
+        let context = TenantAuthContext::new(config);
+        let exists = context.client_exists("any_client").await.unwrap();
+        assert!(!exists);
+    }
+
+    #[tokio::test]
+    async fn test_revoke_permissions_noop() {
+        let config = TenantAuthConfig {
+            tenant_id: "test_tenant".to_string(),
+            ..Default::default()
+        };
+        let context = TenantAuthContext::new(config);
+        let result = context.revoke_permissions("client_1").await;
+        assert!(result.is_ok());
+    }
 }
