@@ -303,4 +303,24 @@ mod tests {
             let _: ServerMessage = serde_json::from_str(&json).unwrap();
         }
     }
+
+    /// Tests the connection-failure error path of `send_message` without a real peer.
+    #[tokio::test]
+    async fn test_send_message_returns_err_when_peer_unreachable() {
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+
+        let msg = ServerMessage::HeartbeatPing {
+            server_id: "server_1".to_string(),
+            timestamp: 0,
+            sequence: 0,
+        };
+
+        // Port 1 is virtually never open; connection should fail quickly
+        let result = handler
+            .send_message("server_2", "127.0.0.1:1", msg)
+            .await;
+
+        assert!(result.is_err(), "expected send to fail for an unreachable address");
+    }
 }

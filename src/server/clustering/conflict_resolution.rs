@@ -267,4 +267,10 @@ mod tests {
         let merge = MergeResolver;
         assert_eq!(merge.name(), "Merge");
     }
+
+    #[test]
+    fn test_conflict_resolution_config_default() {
+        let cfg = ConflictResolutionConfig::default();
+        assert!(matches!(cfg, ConflictResolutionConfig::LastWriteWins));
+    }
 }

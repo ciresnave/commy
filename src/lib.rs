@@ -693,4 +693,34 @@ mod tests {
         // Should return Ok even if no watchers are registered
         assert!(registry.notify_watchers("nonexistent", &[]).is_ok());
     }
+
+    // ─── Server::get_tenant ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_server_get_tenant_creates_and_caches() {
+        unsafe { std::env::set_var("ENVIRONMENT", "development"); }
+        let mut server = Server::new();
+
+        // First call creates the tenant
+        {
+            let t = server.get_tenant("org_a");
+            assert_eq!(t.id(), "org_a");
+        }
+
+        // Second call returns the cached tenant
+        {
+            let t = server.get_tenant("org_a");
+            assert_eq!(t.id(), "org_a");
+        }
+
+        // Only one tenant stored
+        assert_eq!(server.tenants.len(), 1);
+
+        // Different name creates a second tenant
+        {
+            let t2 = server.get_tenant("org_b");
+            assert_eq!(t2.id(), "org_b");
+        }
+        assert_eq!(server.tenants.len(), 2);
+    }
 }

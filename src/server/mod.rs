@@ -254,4 +254,139 @@ mod tests {
         let sessions = wss_server.active_sessions().await;
         assert_eq!(sessions, 0);
     }
+
+    // ─── WssServerConfig::validate_tls ────────────────────────────────────────
+
+    #[test]
+    fn test_validate_tls_no_paths_returns_err() {
+        let config = WssServerConfig::default(); // cert_path and key_path are None
+        let result = config.validate_tls();
+        assert!(result.is_err(), "expected error when no TLS paths are set");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("TLS"), "error should mention TLS: {}", msg);
+    }
+
+    #[test]
+    fn test_validate_tls_nonexistent_files_returns_err() {
+        let config = WssServerConfig {
+            cert_path: Some("/nonexistent/cert.pem".to_string()),
+            key_path: Some("/nonexistent/key.pem".to_string()),
+            ..WssServerConfig::default()
+        };
+        let result = config.validate_tls();
+        assert!(result.is_err(), "expected error when files do not exist");
+    }
+
+    // ─── WssServer::initialize_tls ────────────────────────────────────────────
+
+    #[test]
+    fn test_initialize_tls_no_paths_returns_err() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut wss = WssServer::new(WssServerConfig::default(), server);
+        let result = wss.initialize_tls();
+        assert!(result.is_err(), "expected error when cert/key paths are not configured");
+    }
+
+    #[test]
+    fn test_initialize_tls_nonexistent_files_returns_err() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let config = WssServerConfig {
+            cert_path: Some("/nonexistent/cert.pem".to_string()),
+            key_path: Some("/nonexistent/key.pem".to_string()),
+            ..WssServerConfig::default()
+        };
+        let mut wss = WssServer::new(config, server);
+        let result = wss.initialize_tls();
+        assert!(result.is_err(), "expected error for nonexistent cert files");
+    }
+
+    // ─── WssServer::get_session / remove_session / update_session_state ───────
+
+    #[tokio::test]
+    async fn test_get_session_returns_none_for_unknown() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let wss = WssServer::new(WssServerConfig::default(), server);
+        assert!(wss.get_session("unknown_id").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_and_remove_session() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let wss = WssServer::new(WssServerConfig::default(), server);
+
+        // Insert a session directly (tests sit in the same module so private fields are accessible)
+        let session = ClientSession::new();
+        let id = session.session_id.clone();
+        wss.sessions.write().await.insert(id.clone(), session);
+
+        // get_session returns Some
+        let found = wss.get_session(&id).await;
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().session_id, id);
+
+        // remove_session drops it
+        wss.remove_session(&id).await;
+        assert!(wss.get_session(&id).await.is_none());
+        assert_eq!(wss.active_sessions().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_update_session_state_existing() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let wss = WssServer::new(WssServerConfig::default(), server);
+
+        let session = ClientSession::new();
+        let id = session.session_id.clone();
+        wss.sessions.write().await.insert(id.clone(), session);
+
+        // Should not panic and session should still exist
+        wss.update_session_state(&id).await;
+        assert!(wss.get_session(&id).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_update_session_state_unknown_is_noop() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let wss = WssServer::new(WssServerConfig::default(), server);
+        // Should not panic for a session that does not exist
+        wss.update_session_state("ghost_id").await;
+        assert_eq!(wss.active_sessions().await, 0);
+    }
+
+    // ─── WssServer::broadcast_to_tenant ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_broadcast_to_tenant_completes_without_panic() {
+        use crate::protocol::ClientSession;
+        let server = Arc::new(RwLock::new(Server::new()));
+        let wss = WssServer::new(WssServerConfig::default(), server);
+
+        // Insert two sessions: one matching tenant, one not
+        let mut session_a = ClientSession::new();
+        session_a.tenant_id = Some("tenant_a".to_string());
+        let mut session_b = ClientSession::new();
+        session_b.tenant_id = Some("tenant_b".to_string());
+
+        {
+            let mut s = wss.sessions.write().await;
+            s.insert(session_a.session_id.clone(), session_a);
+            s.insert(session_b.session_id.clone(), session_b);
+        }
+
+        let msg = WssMessage::Heartbeat { session_id: "test".to_string() };
+        wss.broadcast_to_tenant("tenant_a", msg).await;
+        // No assertion needed — just verify it completes without panic
+        assert_eq!(wss.active_sessions().await, 2);
+    }
+
+    // ─── WssServer::start_token_cleanup_task ──────────────────────────────────
+
+    #[test]
+    fn test_start_token_cleanup_task_does_not_panic() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let wss = WssServer::new(WssServerConfig::default(), server);
+        // Should simply print a message and return
+        wss.start_token_cleanup_task(60);
+        wss.start_token_cleanup_task(0);
+    }
 }
