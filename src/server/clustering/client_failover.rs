@@ -418,4 +418,47 @@ mod tests {
         assert!(target.is_some());
         assert_eq!(target.unwrap().server_id, "server2"); // Lower latency
     }
+
+    #[tokio::test]
+    async fn test_reconnection_failed_sets_failed_state() {
+        let config = ClientFailoverConfig::default();
+        let detector = ClientFailoverDetector::new(config);
+
+        let server = ServerConnection {
+            server_id: "s1".to_string(),
+            address: "127.0.0.1".to_string(),
+            port: 9000,
+            is_connected: true,
+            last_heartbeat: 0,
+            consecutive_failures: 0,
+        };
+
+        // Exhaust reconnection attempts to trigger Failed state
+        for _ in 0..10 {
+            detector.attempt_reconnection(server.clone()).await;
+        }
+
+        detector.reconnection_failed().await;
+        assert_eq!(detector.get_state().await, ClientFailoverState::Failed);
+    }
+
+    #[tokio::test]
+    async fn test_get_reconnection_attempts() {
+        let config = ClientFailoverConfig::default();
+        let detector = ClientFailoverDetector::new(config);
+
+        assert_eq!(detector.get_reconnection_attempts().await, 0);
+
+        let server = ServerConnection {
+            server_id: "s1".to_string(),
+            address: "127.0.0.1".to_string(),
+            port: 9000,
+            is_connected: true,
+            last_heartbeat: 0,
+            consecutive_failures: 0,
+        };
+
+        detector.attempt_reconnection(server).await;
+        assert_eq!(detector.get_reconnection_attempts().await, 1);
+    }
 }

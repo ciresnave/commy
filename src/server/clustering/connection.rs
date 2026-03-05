@@ -169,4 +169,13 @@ mod tests {
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].server_id, "peer_1");
     }
+
+    #[test]
+    fn test_peer_connection_new() {
+        let conn = PeerConnection::new("peer_x".to_string(), "10.0.0.1:8080".to_string());
+        assert_eq!(conn.server_id, "peer_x");
+        assert_eq!(conn.remote_address, "10.0.0.1:8080");
+        assert!(!conn.is_active);
+        assert_eq!(conn.attempt_count, 0);
+    }
 }

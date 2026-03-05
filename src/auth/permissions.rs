@@ -399,4 +399,19 @@ mod tests {
         ctp.expires_at = Some("2000-01-01T00:00:00+00:00".to_string());
         assert!(ctp.is_expired());
     }
+
+    #[test]
+    fn test_client_tenant_permissions_new() {
+        let perms = PermissionSet::read_only();
+        let ctp = ClientTenantPermissions::new(
+            "client_a".to_string(),
+            "tenant_b".to_string(),
+            perms,
+        );
+        assert_eq!(ctp.client_id, "client_a");
+        assert_eq!(ctp.tenant_id, "tenant_b");
+        assert!(ctp.permissions.has_permission(&Permission::TenantRead));
+        assert!(ctp.expires_at.is_none());
+        assert!(!ctp.is_expired());
+    }
 }

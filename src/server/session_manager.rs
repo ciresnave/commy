@@ -313,4 +313,90 @@ mod tests {
         // Subscriptions are only removed if the client_id matches
         // So this test verifies that remove_session removes by client_id, not session_id
     }
+
+    #[tokio::test]
+    async fn test_update_session() {
+        let manager = SessionManager::new();
+        let mut session = ClientSession::new();
+        session.authenticate("cli_1".to_string(), "tenant_1".to_string());
+
+        // update_session inserts by the provided client_id key
+        manager.update_session("cli_1", session).await;
+
+        let retrieved = manager.get_session("cli_1").await;
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().client_id, Some("cli_1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_active_session_count() {
+        let manager = SessionManager::new();
+        assert_eq!(manager.active_session_count().await, 0);
+
+        manager.register_session(ClientSession::new()).await;
+        assert_eq!(manager.active_session_count().await, 1);
+
+        manager.register_session(ClientSession::new()).await;
+        assert_eq!(manager.active_session_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn test_all_client_ids() {
+        let manager = SessionManager::new();
+
+        let s1 = ClientSession::new();
+        let id1 = s1.session_id.clone();
+        let s2 = ClientSession::new();
+        let id2 = s2.session_id.clone();
+
+        manager.register_session(s1).await;
+        manager.register_session(s2).await;
+
+        let ids = manager.all_client_ids().await;
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&id1));
+        assert!(ids.contains(&id2));
+    }
+
+    #[tokio::test]
+    async fn test_get_tenant_subscribers() {
+        let manager = SessionManager::new();
+
+        let mut session_a = ClientSession::new();
+        session_a.authenticate("client_x".to_string(), "tenant_y".to_string());
+
+        let mut session_b = ClientSession::new();
+        session_b.authenticate("client_z".to_string(), "tenant_other".to_string());
+
+        manager.register_session(session_a).await;
+        manager.register_session(session_b).await;
+
+        let subs = manager.get_tenant_subscribers(Some("tenant_y")).await;
+        assert_eq!(subs.len(), 1);
+        assert!(subs.contains(&"client_x".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_total_subscription_count() {
+        let manager = SessionManager::new();
+        assert_eq!(manager.total_subscription_count().await, 0);
+
+        manager.subscribe(
+            "sub_a".to_string(),
+            "c1".to_string(),
+            "t1".to_string(),
+            "s1".to_string(),
+            "v1".to_string(),
+        ).await;
+        assert_eq!(manager.total_subscription_count().await, 1);
+
+        manager.subscribe(
+            "sub_b".to_string(),
+            "c2".to_string(),
+            "t1".to_string(),
+            "s1".to_string(),
+            "v1".to_string(),
+        ).await;
+        assert_eq!(manager.total_subscription_count().await, 2);
+    }
 }

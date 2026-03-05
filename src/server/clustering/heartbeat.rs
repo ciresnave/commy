@@ -213,4 +213,30 @@ mod tests {
         assert_eq!(service.config.heartbeat_interval, Duration::from_secs(10));
         assert_eq!(service.config.max_retries, 3);
     }
+
+    #[test]
+    fn test_update_config() {
+        let config = crate::server::clustering::PeerConfig::default();
+        let registry = Arc::new(PeerRegistry::new(config));
+        let pool = Arc::new(ConnectionPool::new());
+        let handler = ProtocolHandler::new("server_1".to_string(), pool);
+
+        let mut service = HeartbeatService::new(
+            "server_1".to_string(),
+            registry,
+            Arc::new(handler),
+        );
+
+        let new_config = HeartbeatConfig {
+            heartbeat_interval: Duration::from_secs(5),
+            heartbeat_timeout: Duration::from_secs(10),
+            max_retries: 2,
+        };
+
+        service.update_config(new_config);
+
+        assert_eq!(service.config.heartbeat_interval, Duration::from_secs(5));
+        assert_eq!(service.config.heartbeat_timeout, Duration::from_secs(10));
+        assert_eq!(service.config.max_retries, 2);
+    }
 }

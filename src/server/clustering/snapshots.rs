@@ -433,4 +433,42 @@ mod tests {
         assert_eq!(snapshot.metadata.variable_count, 10);
         assert_eq!(snapshot.metadata.source_server, "server1");
     }
+
+    #[test]
+    fn test_snapshot_with_source() {
+        let snapshot = ServiceSnapshot::new(
+            "tenant".to_string(),
+            "service".to_string(),
+            1,
+            vec![1, 2, 3],
+            "abc".to_string(),
+        ).with_source("server_42".to_string());
+
+        assert_eq!(snapshot.metadata.source_server, "server_42");
+    }
+
+    #[test]
+    fn test_snapshot_size() {
+        let data = vec![0u8; 256];
+        let snapshot = ServiceSnapshot::new(
+            "tenant".to_string(),
+            "service".to_string(),
+            1,
+            data,
+            "abc".to_string(),
+        );
+        assert_eq!(snapshot.size(), 256);
+    }
+
+    #[test]
+    fn test_snapshot_version() {
+        let snapshot = ServiceSnapshot::new(
+            "tenant".to_string(),
+            "service".to_string(),
+            42,
+            vec![],
+            "abc".to_string(),
+        );
+        assert_eq!(snapshot.version(), 42);
+    }
 }

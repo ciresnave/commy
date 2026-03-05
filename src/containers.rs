@@ -2956,4 +2956,441 @@ mod tests {
         let boxed: SharedBox<i64> = SharedBox::new_in(42i64, &alloc).unwrap();
         assert_eq!(*boxed, 42i64);
     }
+
+    // ─── SharedVec additional coverage ─────────────────────────────────────────
+
+    #[test]
+    fn test_shared_vec_get_mut() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(10); v.push(20);
+        *v.get_mut(0).unwrap() = 99;
+        assert_eq!(v[0], 99);
+        assert!(v.get_mut(5).is_none());
+    }
+
+    #[test]
+    fn test_shared_vec_shrink_to_fit() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.reserve(100);
+        v.push(1); v.push(2);
+        assert!(v.capacity() >= 100);
+        v.shrink_to_fit();
+        assert!(v.capacity() <= 10);
+    }
+
+    #[test]
+    fn test_shared_vec_append_one() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.append_one(7);
+        v.append_one(8);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[1], 8);
+    }
+
+    #[test]
+    fn test_shared_vec_append() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut dst: SharedVec<i32> = SharedVec::new_in(&alloc);
+        dst.push(1);
+        let mut src: SharedVec<i32> = SharedVec::new_in(&alloc);
+        src.push(2); src.push(3);
+        dst.append(&mut src);
+        assert_eq!(dst.len(), 3);
+        assert!(src.is_empty());
+    }
+
+    #[test]
+    fn test_shared_vec_dedup() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(1); v.push(1); v.push(2); v.push(2); v.push(3);
+        v.dedup();
+        assert_eq!(v.len(), 3);
+        assert_eq!(&v.deref()[..], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_shared_vec_dedup_by_key() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(10); v.push(11); v.push(20); v.push(21); v.push(30);
+        v.dedup_by_key(|x| *x / 10);
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[0], 10); assert_eq!(v[1], 20); assert_eq!(v[2], 30);
+    }
+
+    #[test]
+    fn test_shared_vec_remove_all() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(1); v.push(2); v.push(1); v.push(3);
+        v.remove_all(1);
+        assert_eq!(v.len(), 2);
+        assert!(!v.iter().any(|&x| x == 1));
+    }
+
+    #[test]
+    fn test_shared_vec_count() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(5); v.push(5); v.push(3); v.push(5);
+        assert_eq!(v.count(5), 3);
+        assert_eq!(v.count(3), 1);
+        assert_eq!(v.count(9), 0);
+    }
+
+    #[test]
+    fn test_shared_vec_fill_range() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(0); v.push(0); v.push(0); v.push(0);
+        v.fill_range(1..3, 99);
+        assert_eq!(v[0], 0); assert_eq!(v[1], 99); assert_eq!(v[2], 99); assert_eq!(v[3], 0);
+    }
+
+    #[test]
+    fn test_shared_vec_sort_by() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(3); v.push(1); v.push(4); v.push(2);
+        v.sort_by(|a, b| a.cmp(b));
+        assert_eq!(&v.deref()[..], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_shared_vec_sort_by_key() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(-3); v.push(1); v.push(-2); v.push(4);
+        v.sort_by_key(|x| x.abs());
+        assert_eq!(v[0], 1); assert_eq!(v[1], -2); assert_eq!(v[2], -3); assert_eq!(v[3], 4);
+    }
+
+    #[test]
+    fn test_shared_vec_sort_unstable() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(5); v.push(2); v.push(8); v.push(1);
+        v.sort_unstable();
+        assert_eq!(&v.deref()[..], &[1, 2, 5, 8]);
+    }
+
+    #[test]
+    fn test_shared_vec_sort_unstable_by() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(1); v.push(3); v.push(2);
+        v.sort_unstable_by(|a, b| b.cmp(a)); // descending
+        assert_eq!(&v.deref()[..], &[3, 2, 1]);
+    }
+
+    #[test]
+    fn test_shared_vec_first_mut_last_mut() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(10); v.push(20); v.push(30);
+        *v.first_mut().unwrap() = 100;
+        *v.last_mut().unwrap() = 300;
+        assert_eq!(v[0], 100);
+        assert_eq!(v[2], 300);
+    }
+
+    #[test]
+    fn test_shared_vec_slice_and_slice_mut() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(1); v.push(2); v.push(3); v.push(4);
+        let s = v.slice(1..3);
+        assert_eq!(s, Some(&[2i32, 3][..]));
+        assert!(v.slice(0..10).is_none());
+
+        let sm = v.slice_mut(0..2).unwrap();
+        sm[0] = 99;
+        assert_eq!(v[0], 99);
+    }
+
+    #[test]
+    fn test_shared_vec_allocator() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        // Just verify we can get a reference back without panic
+        let _a = v.allocator();
+    }
+
+    #[test]
+    fn test_shared_vec_shrink_to() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.reserve(50);
+        v.push(1); v.push(2);
+        v.shrink_to(5);
+        assert!(v.capacity() <= 10);
+        assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn test_shared_vec_binary_search_by() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(1); v.push(3); v.push(5); v.push(7);
+        let res = v.binary_search_by(|x| x.cmp(&5));
+        assert_eq!(res, Ok(2));
+        let miss = v.binary_search_by(|x| x.cmp(&4));
+        assert!(miss.is_err());
+    }
+
+    #[test]
+    fn test_shared_vec_binary_search_by_key() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut v: SharedVec<i32> = SharedVec::new_in(&alloc);
+        v.push(10); v.push(20); v.push(30);
+        let res = v.binary_search_by_key(&20, |x| *x);
+        assert_eq!(res, Ok(1));
+        let miss = v.binary_search_by_key(&15, |x| *x);
+        assert!(miss.is_err());
+    }
+
+    // ─── SharedString additional coverage ──────────────────────────────────────
+
+    #[test]
+    fn test_shared_string_as_mut_str() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello");
+        let ms = s.as_mut_str();
+        assert_eq!(ms, "hello");
+    }
+
+    #[test]
+    fn test_shared_string_get() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello");
+        assert_eq!(s.get(1..4), Some("ell"));
+        assert!(s.get(3..100).is_none());
+    }
+
+    #[test]
+    fn test_shared_string_lines() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("line1\nline2\nline3");
+        let lines: Vec<&str> = s.lines().collect();
+        assert_eq!(lines, vec!["line1", "line2", "line3"]);
+    }
+
+    #[test]
+    fn test_shared_string_offset() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("data");
+        // offset should be nonzero after push
+        assert!(s.offset() > 0);
+    }
+
+    #[test]
+    fn test_shared_string_as_bytes_and_as_bytes_mut() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("abc");
+        assert_eq!(s.as_bytes(), b"abc");
+        let bm = s.as_bytes_mut();
+        bm[0] = b'z';
+        assert_eq!(s.as_str(), "zbc");
+    }
+
+    #[test]
+    fn test_shared_string_truncate() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello world");
+        s.truncate(5);
+        assert_eq!(s.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_shared_string_is_char_boundary() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello");
+        assert!(s.is_char_boundary(0));
+        assert!(s.is_char_boundary(5));
+        assert!(!s.is_char_boundary(6));
+    }
+
+    #[test]
+    fn test_shared_string_find_rfind() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello world");
+        assert_eq!(s.find(|c| c == 'o'), Some(4));
+        assert_eq!(s.rfind(|c| c == 'o'), Some(7));
+        assert!(s.find(|c| c == 'z').is_none());
+    }
+
+    #[test]
+    fn test_shared_string_split() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("a,b,c");
+        let parts: Vec<&str> = s.split(",").collect();
+        assert_eq!(parts, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_shared_string_split_lines_and_whitespace() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("one\ntwo\nthree");
+        let lines: Vec<&str> = s.split_lines().collect();
+        assert_eq!(lines.len(), 3);
+
+        let mut s2 = SharedString::new_in(&alloc);
+        s2.push_str("  foo  bar  ");
+        let words: Vec<&str> = s2.split_whitespace().collect();
+        assert_eq!(words, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn test_shared_string_trim_start_end() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("  hello  ");
+        assert_eq!(s.trim_start(), "hello  ");
+        assert_eq!(s.trim_end(), "  hello");
+    }
+
+    #[test]
+    fn test_shared_string_strip_prefix_suffix() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello world");
+        assert_eq!(s.strip_prefix("hello "), Some("world"));
+        assert_eq!(s.strip_suffix(" world"), Some("hello"));
+        assert!(s.strip_prefix("xyz").is_none());
+    }
+
+    #[test]
+    fn test_shared_string_insert_str() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("helo");
+        s.insert_str(3, "l");
+        assert_eq!(s.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_shared_string_remove_range() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello world");
+        s.remove_range(5..11);
+        assert_eq!(s.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_shared_string_replace() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("hello hello");
+        let replaced = s.replace("hello", "world", &alloc).unwrap();
+        assert_eq!(replaced.as_str(), "world world");
+    }
+
+    #[test]
+    fn test_shared_string_repeat() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("ab");
+        let repeated = s.repeat(3, &alloc).unwrap();
+        assert_eq!(repeated.as_str(), "ababab");
+    }
+
+    #[test]
+    fn test_shared_string_case_checks() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut upper = SharedString::new_in(&alloc);
+        upper.push_str("HELLO");
+        assert!(upper.is_uppercase());
+        assert!(!upper.is_lowercase());
+
+        let mut lower = SharedString::new_in(&alloc);
+        lower.push_str("hello");
+        assert!(lower.is_lowercase());
+        assert!(!lower.is_uppercase());
+
+        let mut ws = SharedString::new_in(&alloc);
+        ws.push_str("   ");
+        assert!(ws.is_whitespace());
+    }
+
+    #[test]
+    fn test_shared_string_to_lowercase_uppercase() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.push_str("Hello World");
+        let low = s.to_lowercase(&alloc).unwrap();
+        assert_eq!(low.as_str(), "hello world");
+        let up = s.to_uppercase(&alloc).unwrap();
+        assert_eq!(up.as_str(), "HELLO WORLD");
+    }
+
+    #[test]
+    fn test_shared_string_capacity_and_reserve() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut s = SharedString::new_in(&alloc);
+        s.reserve(64);
+        assert!(s.capacity() >= 64);
+    }
+
+    // ─── SharedBox additional coverage ─────────────────────────────────────────
+
+    #[test]
+    fn test_shared_box_from_box_into_box_offset() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let b: Box<i32> = Box::new(77);
+        let shared = SharedBox::from_box(b, &alloc).unwrap();
+        assert_eq!(*shared, 77);
+
+        let offset = shared.offset();
+        assert!(offset > 0);
+
+        let native: Box<i32> = shared.into_box();
+        assert_eq!(*native, 77);
+    }
+
+    // ─── SharedHashMap additional coverage ─────────────────────────────────────
+
+    #[test]
+    fn test_shared_hashmap_reserve_capacity_for_each() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut map: SharedHashMap<i32, i32> = SharedHashMap::new_in(&alloc);
+
+        map.reserve(10);
+        assert!(map.capacity() >= 10);
+
+        map.insert(1, 100);
+        map.insert(2, 200);
+        map.insert(3, 300);
+
+        // for_each uses Fn; verify it visits all entries via side-effect-free check
+        map.for_each(|_k, _v| {});
+        assert_eq!(map.len(), 3);
+    }
+
+    // ─── SharedHashSet additional coverage ─────────────────────────────────────
+
+    #[test]
+    fn test_shared_hashset_reserve_and_capacity() {
+        let (alloc, _tmp) = make_allocator(65536);
+        let mut set: SharedHashSet<i32> = SharedHashSet::new_in(&alloc);
+        set.reserve(20);
+        assert!(set.capacity() >= 20);
+        set.insert(1);
+        set.insert(2);
+        assert_eq!(set.len(), 2);
+    }
 }

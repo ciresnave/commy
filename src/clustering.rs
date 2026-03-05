@@ -572,4 +572,37 @@ mod tests {
         assert!(manager.get_synced_token("expired_tok").await.is_none());
         assert!(manager.get_synced_token("valid_tok").await.is_some());
     }
+
+    #[tokio::test]
+    async fn test_get_all_nodes() {
+        let manager = ClusterManager::new(
+            "node_1".to_string(),
+            "Node One".to_string(),
+            "https://node1:9000".to_string(),
+        );
+
+        // Local node is registered automatically
+        let nodes = manager.get_all_nodes().await;
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].node_id, "node_1");
+
+        manager.register_peer(
+            "node_2".to_string(),
+            "Node Two".to_string(),
+            "https://node2:9000".to_string(),
+        ).await.unwrap();
+
+        let nodes = manager.get_all_nodes().await;
+        assert_eq!(nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_local_node_id() {
+        let manager = ClusterManager::new(
+            "my_node".to_string(),
+            "My Node".to_string(),
+            "https://localhost:9000".to_string(),
+        );
+        assert_eq!(manager.local_node_id(), "my_node");
+    }
 }

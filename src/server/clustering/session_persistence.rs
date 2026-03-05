@@ -211,4 +211,134 @@ mod tests {
         store.remove_session("s2").await.unwrap();
         assert!(store.get_session("s2").await.is_none());
     }
+
+    #[tokio::test]
+    async fn test_file_name() {
+        let session = SessionData {
+            session_id: "abc123".to_string(),
+            client_id: "c1".to_string(),
+            tenant: "t1".to_string(),
+            services: vec![],
+            metadata: HashMap::new(),
+            last_activity: 0,
+            version: 1,
+            state: vec![],
+        };
+        assert_eq!(session.file_name(), "session_abc123.json");
+    }
+
+    #[tokio::test]
+    async fn test_persist_session_writes_file() {
+        let dir = tempdir().unwrap();
+        let store = SessionStore::new(dir.path().to_path_buf()).await.unwrap();
+
+        let session = SessionData {
+            session_id: "persist_test".to_string(),
+            client_id: "c1".to_string(),
+            tenant: "t1".to_string(),
+            services: vec![],
+            metadata: HashMap::new(),
+            last_activity: 100,
+            version: 1,
+            state: vec![1, 2, 3],
+        };
+
+        store.persist_session(&session).await.unwrap();
+        let path = dir.path().join("session_persist_test.json");
+        assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_load_session_from_file() {
+        let dir = tempdir().unwrap();
+        let store = SessionStore::new(dir.path().to_path_buf()).await.unwrap();
+
+        let session = SessionData {
+            session_id: "load_test".to_string(),
+            client_id: "c2".to_string(),
+            tenant: "t2".to_string(),
+            services: vec!["svc1".to_string()],
+            metadata: HashMap::new(),
+            last_activity: 200,
+            version: 5,
+            state: vec![9, 8],
+        };
+
+        store.persist_session(&session).await.unwrap();
+        let path = dir.path().join("session_load_test.json");
+        let loaded = store.load_session_from_file(path).await.unwrap();
+        assert_eq!(loaded.session_id, "load_test");
+        assert_eq!(loaded.version, 5);
+        assert_eq!(loaded.state, vec![9, 8]);
+    }
+
+    #[tokio::test]
+    async fn test_list_all_sessions() {
+        let dir = tempdir().unwrap();
+        let store = SessionStore::new(dir.path().to_path_buf()).await.unwrap();
+
+        let s1 = SessionData {
+            session_id: "s_list1".to_string(),
+            client_id: "c1".to_string(),
+            tenant: "t1".to_string(),
+            services: vec![],
+            metadata: HashMap::new(),
+            last_activity: 0,
+            version: 1,
+            state: vec![],
+        };
+        let s2 = SessionData {
+            session_id: "s_list2".to_string(),
+            client_id: "c2".to_string(),
+            tenant: "t2".to_string(),
+            services: vec![],
+            metadata: HashMap::new(),
+            last_activity: 0,
+            version: 1,
+            state: vec![],
+        };
+
+        store.create_session(s1).await.unwrap();
+        store.create_session(s2).await.unwrap();
+
+        let all = store.list_all_sessions().await;
+        assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_by_service() {
+        let dir = tempdir().unwrap();
+        let store = SessionStore::new(dir.path().to_path_buf()).await.unwrap();
+
+        let s1 = SessionData {
+            session_id: "sbs_1".to_string(),
+            client_id: "c1".to_string(),
+            tenant: "t1".to_string(),
+            services: vec!["svc_a".to_string(), "svc_b".to_string()],
+            metadata: HashMap::new(),
+            last_activity: 0,
+            version: 1,
+            state: vec![],
+        };
+        let s2 = SessionData {
+            session_id: "sbs_2".to_string(),
+            client_id: "c2".to_string(),
+            tenant: "t1".to_string(),
+            services: vec!["svc_b".to_string()],
+            metadata: HashMap::new(),
+            last_activity: 0,
+            version: 1,
+            state: vec![],
+        };
+
+        store.create_session(s1).await.unwrap();
+        store.create_session(s2).await.unwrap();
+
+        let by_a = store.list_sessions_by_service("svc_a").await;
+        assert_eq!(by_a.len(), 1);
+        assert_eq!(by_a[0].session_id, "sbs_1");
+
+        let by_b = store.list_sessions_by_service("svc_b").await;
+        assert_eq!(by_b.len(), 2);
+    }
 }
