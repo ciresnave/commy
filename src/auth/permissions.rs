@@ -414,4 +414,50 @@ mod tests {
         assert!(ctp.expires_at.is_none());
         assert!(!ctp.is_expired());
     }
+
+    #[test]
+    fn test_from_scopes_write_does_not_grant_tenant_read() {
+        let scopes = vec!["write".to_string()];
+        let perms = PermissionSet::from_scopes(&scopes);
+        assert!(
+            !perms.has_permission(&Permission::TenantRead),
+            "write scope must NOT implicitly grant TenantRead"
+        );
+        assert!(
+            !perms.has_permission(&Permission::ServiceRead),
+            "write scope must NOT implicitly grant ServiceRead"
+        );
+        assert!(
+            !perms.has_permission(&Permission::VariableRead),
+            "write scope must NOT implicitly grant VariableRead"
+        );
+        // Write grants ARE present
+        assert!(perms.has_permission(&Permission::TenantWrite));
+        assert!(perms.has_permission(&Permission::VariableWrite));
+    }
+
+    #[test]
+    fn test_is_expired_with_unparseable_date_returns_false() {
+        let mut ctp = ClientTenantPermissions::new(
+            "c".to_string(),
+            "t".to_string(),
+            PermissionSet::new(),
+        );
+        ctp.expires_at = Some("not-a-valid-date".to_string());
+        assert!(
+            !ctp.is_expired(),
+            "Unparseable expiry date must NOT be treated as expired"
+        );
+    }
+
+    #[test]
+    fn test_revoke_never_granted_permission_no_panic() {
+        let mut perms = PermissionSet::new();
+        // Revoking a permission that was never granted must not panic
+        perms.revoke(&Permission::TenantAdmin);
+        perms.revoke(&Permission::ServiceCreate);
+        perms.revoke(&Permission::Custom("nonexistent_scope".to_string()));
+        // No panic = test passes; verify state is still empty
+        assert!(perms.is_empty());
+    }
 }

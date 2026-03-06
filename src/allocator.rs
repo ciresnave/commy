@@ -926,6 +926,32 @@ mod tests {
             "large allocation should succeed (may trigger growth)"
         );
     }
+
+    #[test]
+    fn test_deallocate_and_reallocate_reuses_freed_space() {
+        // Verify that the free-list returns freed slots instead of growing.
+        // After: allocate → deallocate → allocate-same-size,
+        // the used space must not exceed what it was after the first allocation.
+        let (allocator, _tmp) = make_allocator(65536);
+        let layout = Layout::from_size_align(1024, 1).unwrap();
+
+        // First allocation
+        let ptr1 = allocator.allocate(layout).unwrap();
+        let used_after_first = allocator.calculate_used_space();
+
+        // Deallocate — free-list now owns the slot
+        unsafe { allocator.deallocate(ptr1.as_non_null_ptr(), layout) };
+
+        // Second allocation of the same size — must reuse the freed slot
+        let _ptr2 = allocator.allocate(layout).unwrap();
+        let used_after_realloc = allocator.calculate_used_space();
+
+        assert!(
+            used_after_realloc <= used_after_first,
+            "re-allocation after dealloc must reuse freed space, not grow: \
+             used_after_first={used_after_first}, used_after_realloc={used_after_realloc}"
+        );
+    }
 }
 
 unsafe impl Allocator for FreeListAllocator {

@@ -1,5 +1,5 @@
 //! Client liveness detection system for COMMY
-//! 
+//!
 //! Monitors client connections for:
 //! - Connection drops (WSS disconnect)
 //! - Queue stalls (outbound message queue not draining)
@@ -453,5 +453,21 @@ mod tests {
         let monitor = LivenessMonitor::new(LivenessConfig::default());
         let result = monitor.update_activity("ghost").await;
         assert!(matches!(result, Err(LivenessError::ClientNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_is_client_alive_disconnected_session_returns_false() {
+        let monitor = LivenessMonitor::new(LivenessConfig::default());
+        let mut session = ClientSession::new();
+        let session_id = session.session_id.clone();
+        // Explicitly set state to Disconnected before registering
+        session.state = ClientState::Disconnected;
+        monitor.register_client(session).await.unwrap();
+
+        let result = monitor.is_client_alive(&session_id).await.unwrap();
+        assert!(
+            !result,
+            "A session with state=Disconnected must be reported as not alive"
+        );
     }
 }

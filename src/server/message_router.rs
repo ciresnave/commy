@@ -224,4 +224,163 @@ mod tests {
             _ => panic!("Expected AuthenticationHandler for Logout"),
         }
     }
+
+    #[test]
+    fn test_route_set_variables() {
+        let router = MessageRouter::new();
+        let msg = WssMessage::SetVariables {
+            session_id: "sess1".to_string(),
+            tenant_id: "tenant_a".to_string(),
+            service_name: "config_svc".to_string(),
+            variables: std::collections::HashMap::new(),
+        };
+        let decision = router.route(&msg);
+        match decision {
+            RoutingDecision::ServiceOperation(desc) => {
+                assert!(
+                    desc.contains("SetVariables"),
+                    "desc should contain SetVariables, got: {}",
+                    desc
+                );
+                assert!(
+                    desc.contains("config_svc"),
+                    "desc should contain service name, got: {}",
+                    desc
+                );
+            }
+            _ => panic!("Expected ServiceOperation for SetVariables"),
+        }
+    }
+
+    #[test]
+    fn test_route_refresh_token() {
+        let router = MessageRouter::new();
+        let msg = WssMessage::RefreshToken {
+            session_id: "sess1".to_string(),
+            current_token: "tok123".to_string(),
+        };
+        let decision = router.route(&msg);
+        match decision {
+            RoutingDecision::AuthenticationHandler => (),
+            _ => panic!("Expected AuthenticationHandler for RefreshToken"),
+        }
+    }
+
+    #[test]
+    fn test_route_cluster_ping() {
+        let router = MessageRouter::new();
+        let msg = WssMessage::ClusterPing {
+            node_id: "node_1".to_string(),
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+        };
+        let decision = router.route(&msg);
+        match decision {
+            RoutingDecision::HealthCheck => (),
+            _ => panic!("Expected HealthCheck for ClusterPing"),
+        }
+    }
+
+    #[test]
+    fn test_route_response_only_messages_are_terminal() {
+        let router = MessageRouter::new();
+        let terminal_msgs: Vec<WssMessage> = vec![
+            WssMessage::VariablesUpdated {
+                success: true,
+                message: "ok".to_string(),
+                service_name: "svc".to_string(),
+            },
+            WssMessage::HeartbeatAck {
+                timestamp: "2025-01-01T00:00:00Z".to_string(),
+            },
+            WssMessage::Error {
+                code: "ERR_001".to_string(),
+                message: "some error".to_string(),
+                details: None,
+            },
+            WssMessage::PermissionRevoked {
+                reason: "revoked".to_string(),
+                detail: "details here".to_string(),
+            },
+        ];
+        for msg in &terminal_msgs {
+            match router.route(msg) {
+                RoutingDecision::Terminal => (),
+                other => panic!("Message should route to Terminal, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_route_remaining_terminal_variants() {
+        let router = MessageRouter::new();
+        let terminal_msgs: Vec<WssMessage> = vec![
+            WssMessage::VariablesData {
+                tenant_id: "t".to_string(),
+                service_name: "s".to_string(),
+                variables: std::collections::HashMap::new(),
+                timestamp: "2025-01-01T00:00:00Z".to_string(),
+            },
+            WssMessage::SubscriptionAck {
+                success: true,
+                message: "ok".to_string(),
+                service_name: "s".to_string(),
+            },
+            WssMessage::VariableChanged {
+                tenant_id: "t".to_string(),
+                service_name: "s".to_string(),
+                variable_name: "v".to_string(),
+                new_value: vec![],
+                changed_by_client: None,
+                timestamp: "2025-01-01T00:00:00Z".to_string(),
+            },
+            WssMessage::FileMigration {
+                old_service_path: "old".to_string(),
+                new_service_path: "new".to_string(),
+                service_name: "s".to_string(),
+                reason: "revocation".to_string(),
+            },
+            WssMessage::MigrationAck {
+                success: true,
+                service_name: "s".to_string(),
+            },
+            WssMessage::CheckPermission {
+                session_id: "sess1".to_string(),
+                tenant_id: "t".to_string(),
+                permission: "ServiceRead".to_string(),
+            },
+            WssMessage::PermissionResponse { has_permission: true },
+            WssMessage::TokenSync {
+                client_id: "c".to_string(),
+                token: "tok".to_string(),
+                tenant_id: "t".to_string(),
+                permissions: "[]".to_string(),
+                expires_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            WssMessage::ClusterPingResponse {
+                node_id: "n1".to_string(),
+                timestamp: "2025-01-01T00:00:00Z".to_string(),
+            },
+            WssMessage::Ack { message_id: "msg_1".to_string() },
+            WssMessage::LogoutResponse {
+                success: true,
+                message: "logged out".to_string(),
+            },
+            WssMessage::TokenRefreshResponse {
+                success: false,
+                message: "expired".to_string(),
+                token: None,
+                expires_in_seconds: None,
+            },
+        ];
+        for msg in &terminal_msgs {
+            match router.route(msg) {
+                RoutingDecision::Terminal => (),
+                other => panic!(
+                    "Expected Terminal for {:?}, got {:?}",
+                    msg.message_type(),
+                    other
+                ),
+            }
+        }
+    }
 }

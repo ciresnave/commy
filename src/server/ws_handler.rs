@@ -404,7 +404,7 @@ async fn handle_message(
         }
 
         Subscribe {
-            tenant_id: _,
+            tenant_id,
             service_name,
             variable_names,
             ..
@@ -414,6 +414,15 @@ async fn handle_message(
                 service_name,
                 variable_names.len()
             );
+
+            // Cross-tenant check: session must be authenticated to the requested tenant
+            if session.tenant_id.as_deref() != Some(&*tenant_id) {
+                return Some(Error {
+                    code: "PERMISSION_DENIED".to_string(),
+                    message: format!("Not authenticated to tenant '{}'", tenant_id),
+                    details: Some("Cross-tenant subscription denied".to_string()),
+                });
+            }
 
             // Check permissions: ServiceRead required for subscriptions
             if let Err(reason) = check_permission(session, crate::auth::Permission::ServiceRead) {
@@ -918,7 +927,9 @@ mod tests {
 
         assert!(response.is_some());
         match response.unwrap() {
-            WssMessage::AuthenticationResponse { success, message, .. } => {
+            WssMessage::AuthenticationResponse {
+                success, message, ..
+            } => {
                 assert!(!success, "Auth to non-existent tenant must fail");
                 assert!(
                     message.contains("ghost_tenant"),
@@ -955,11 +966,17 @@ mod tests {
             token: "tok_xyz".to_string(),
         };
         let resp = handle_message(logout, &mut session, Arc::clone(&server_arc)).await;
-        assert!(matches!(resp, Some(WssMessage::LogoutResponse { success: true, .. })));
+        assert!(matches!(
+            resp,
+            Some(WssMessage::LogoutResponse { success: true, .. })
+        ));
 
         // Token cleared
         assert!(session.token.is_none(), "token must be None after logout");
-        assert!(session.subscriptions.is_empty(), "subscriptions must be cleared on logout");
+        assert!(
+            session.subscriptions.is_empty(),
+            "subscriptions must be cleared on logout"
+        );
 
         // GetVariables should now fail with PERMISSION_DENIED (not authenticated)
         let gv = WssMessage::GetVariables {
@@ -969,15 +986,231 @@ mod tests {
             variable_names: vec!["var1".to_string()],
         };
         let resp = handle_message(gv, &mut session, Arc::clone(&server_arc)).await;
-        assert!(resp.is_some(), "GetVariables after logout must return a response");
+        assert!(
+            resp.is_some(),
+            "GetVariables after logout must return a response"
+        );
         match resp.unwrap() {
             WssMessage::Error { code, .. } => assert_eq!(code, "PERMISSION_DENIED"),
             other => panic!("Expected PERMISSION_DENIED after logout, got {:?}", other),
         }
     }
-}
 
-/// Handle SDK protocol messages (JSON format from commy-client SDK)
+    #[tokio::test]
+    async fn test_subscribe_cross_tenant_rejected() {
+        // A session authenticated to tenant_a MUST NOT subscribe to tenant_b
+        let mut session = ClientSession::new();
+        session.authenticate("client_1".to_string(), "tenant_a".to_string());
+        session.token = Some("tok".to_string());
+        session.permissions = Some(PermissionSet::admin());
+
+        let server = Arc::new(RwLock::new(Server::new()));
+        let msg = WssMessage::Subscribe {
+            session_id: session.session_id.clone(),
+            tenant_id: "tenant_b".to_string(), // different tenant!
+            service_name: "svc".to_string(),
+            variable_names: vec!["var1".to_string()],
+        };
+        let resp = handle_message(msg, &mut session, server).await;
+        assert!(
+            resp.is_some(),
+            "Subscribe to wrong tenant must return a response"
+        );
+        match resp.unwrap() {
+            WssMessage::Error { code, .. } => {
+                assert_eq!(
+                    code, "PERMISSION_DENIED",
+                    "Cross-tenant Subscribe must be rejected with PERMISSION_DENIED"
+                );
+            }
+            other => panic!("Expected Error PERMISSION_DENIED, got {:?}", other),
+        }
+        // Subscription must NOT have been registered
+        assert!(
+            session.subscriptions.is_empty(),
+            "Cross-tenant subscribe must not populate session.subscriptions"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_server_only_message_sent_by_client_returns_none() {
+        // VariablesData is a server-only message; clients sending it must get None (no response)
+        let mut session = ClientSession::new();
+        let server = Arc::new(RwLock::new(Server::new()));
+        let msg = WssMessage::VariablesData {
+            tenant_id: "t".to_string(),
+            service_name: "svc".to_string(),
+            variables: Default::default(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        let resp = handle_message(msg, &mut session, server).await;
+        assert!(
+            resp.is_none(),
+            "Server-only message sent by client must return None (no response)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_token_exists_but_no_permissions_returns_permission_denied() {
+        // token is Some but permissions is None → check_permission must return
+        // PERMISSION_DENIED (not a panic or wrong error)
+        let mut session = ClientSession::new();
+        session.token = Some("valid-token".to_string()); // has token
+        session.permissions = None; // but no permissions
+        session.tenant_id = Some("tenant_a".to_string());
+
+        let server = Arc::new(RwLock::new(Server::new()));
+        let msg = WssMessage::GetVariables {
+            session_id: session.session_id.clone(),
+            tenant_id: "tenant_a".to_string(),
+            service_name: "svc".to_string(),
+            variable_names: vec!["v1".to_string()],
+        };
+        let resp = handle_message(msg, &mut session, server).await;
+        assert!(resp.is_some());
+        match resp.unwrap() {
+            WssMessage::Error { code, .. } => {
+                assert_eq!(
+                    code, "PERMISSION_DENIED",
+                    "token=Some, permissions=None must yield PERMISSION_DENIED"
+                );
+            }
+            other => panic!("Expected PERMISSION_DENIED, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_variables_with_permission_returns_variables_updated() {
+        let message = WssMessage::SetVariables {
+            session_id: "test_session".to_string(),
+            tenant_id: "test_tenant".to_string(),
+            service_name: "test_service".to_string(),
+            variables: std::collections::HashMap::new(),
+        };
+
+        let mut session = ClientSession::new();
+        session.token = Some("fake_token".to_string());
+        session.tenant_id = Some("test_tenant".to_string());
+        let mut permissions = crate::auth::PermissionSet::new();
+        permissions.grant(crate::auth::Permission::ServiceWrite);
+        permissions.grant(crate::auth::Permission::VariableWrite);
+        session.permissions = Some(permissions);
+
+        let server = Arc::new(RwLock::new(Server::new()));
+        let response = handle_message(message, &mut session, server).await;
+
+        assert!(response.is_some(), "SetVariables must return a response");
+        match response.unwrap() {
+            WssMessage::VariablesUpdated { success, .. } => {
+                assert!(success, "SetVariables with write permission must succeed");
+            }
+            other => panic!("Expected VariablesUpdated, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_with_permission_returns_subscription_ack() {
+        let message = WssMessage::Subscribe {
+            session_id: "test_session".to_string(),
+            tenant_id: "test_tenant".to_string(),
+            service_name: "test_service".to_string(),
+            variable_names: vec!["var1".to_string(), "var2".to_string()],
+        };
+
+        let mut session = ClientSession::new();
+        session.token = Some("fake_token".to_string());
+        session.tenant_id = Some("test_tenant".to_string());
+        let mut permissions = crate::auth::PermissionSet::new();
+        permissions.grant(crate::auth::Permission::ServiceRead);
+        session.permissions = Some(permissions);
+
+        let server = Arc::new(RwLock::new(Server::new()));
+        let response = handle_message(message, &mut session, server).await;
+
+        assert!(response.is_some(), "Subscribe must return a response");
+        match response.unwrap() {
+            WssMessage::SubscriptionAck {
+                success,
+                service_name,
+                ..
+            } => {
+                assert!(success, "Subscribe with ServiceRead must succeed");
+                assert_eq!(service_name, "test_service");
+            }
+            other => panic!("Expected SubscriptionAck, got {:?}", other),
+        }
+        // Session must have registered the subscriptions
+        assert!(
+            session.subscriptions.contains("test_service/var1"),
+            "var1 must be in session subscriptions"
+        );
+        assert!(
+            session.subscriptions.contains("test_service/var2"),
+            "var2 must be in session subscriptions"
+        );
+    }
+
+    /// Authenticate to a tenant that EXISTS in the server must succeed and must
+    /// fully populate the session (tenant_id, token, state, admin permissions).
+    #[tokio::test]
+    async fn test_authenticate_known_tenant_succeeds_and_sets_session() {
+        unsafe {
+            std::env::set_var("ENVIRONMENT", "development");
+        }
+        let tenant_id = "known_org";
+        let server = Arc::new(RwLock::new(Server::new()));
+        // Pre-create the tenant so the handler can find it
+        server.write().await.get_tenant(tenant_id);
+
+        let mut session = ClientSession::new();
+        let message = WssMessage::Authenticate {
+            tenant_id: tenant_id.to_string(),
+            client_id: "client_42".to_string(),
+            client_version: "0.1.0".to_string(),
+            credentials: "some-api-key".to_string(),
+            auth_method: "api_key".to_string(),
+        };
+
+        let response = handle_message(message, &mut session, Arc::clone(&server)).await;
+
+        assert!(response.is_some());
+        match response.unwrap() {
+            WssMessage::AuthenticationResponse {
+                success,
+                token,
+                expires_in_seconds,
+                ..
+            } => {
+                assert!(success, "Auth to existing tenant must succeed");
+                assert!(token.is_some(), "Successful auth must provide a token");
+                assert!(
+                    expires_in_seconds.is_some(),
+                    "Successful auth must provide an expiry"
+                );
+            }
+            other => panic!("Expected AuthenticationResponse, got {:?}", other),
+        }
+        // Session state must be fully populated
+        assert_eq!(
+            session.tenant_id.as_deref(),
+            Some(tenant_id),
+            "Session tenant_id must be set after successful auth"
+        );
+        assert_eq!(
+            session.state,
+            ClientState::Active,
+            "Session state must be Active after successful auth"
+        );
+        assert!(
+            session.token.is_some(),
+            "Session token must be set after successful auth"
+        );
+        assert!(
+            session.permissions.is_some(),
+            "Session permissions must be set after successful auth"
+        );
+    }
+}
 ///
 /// Processes new CRUD operations: CreateService, GetService, DeleteService
 /// Returns ServerMessage response (as JSON) to send back to client
@@ -1107,10 +1340,12 @@ async fn handle_sdk_message(
             let mut server_guard = server.write().await;
             let tenant = match server_guard.tenants.get_mut(tenant_id) {
                 Some(t) => t,
-                None => return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "NotFound", "message": format!("Tenant '{}' not found", tenant_id) }
-                })),
+                None => {
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "NotFound", "message": format!("Tenant '{}' not found", tenant_id) }
+                    }))
+                }
             };
 
             if let Err(e) = tenant.register_service(service_name, &file_path) {
@@ -1120,13 +1355,19 @@ async fn handle_sdk_message(
                 }));
             }
 
-            server_guard.service_registry.insert(service_id.clone(), crate::ServiceRecord {
-                tenant_name: tenant_id.to_string(),
-                service_name: service_name.to_string(),
-                file_path,
-            });
+            server_guard.service_registry.insert(
+                service_id.clone(),
+                crate::ServiceRecord {
+                    tenant_name: tenant_id.to_string(),
+                    service_name: service_name.to_string(),
+                    file_path,
+                },
+            );
 
-            println!("[CreateService] Created service '{}' in tenant '{}' with ID {}", service_name, tenant_id, service_id);
+            println!(
+                "[CreateService] Created service '{}' in tenant '{}' with ID {}",
+                service_name, tenant_id, service_id
+            );
 
             Some(serde_json::json!({
                 "type": "Service",
@@ -1183,13 +1424,18 @@ async fn handle_sdk_message(
 
             // Look up service in registry — only Server knows the (tenant, service) → file mapping
             let server_guard = server.read().await;
-            let found = server_guard.service_registry.iter()
+            let found = server_guard
+                .service_registry
+                .iter()
                 .find(|(_, r)| r.tenant_name == tenant_id && r.service_name == service_name)
                 .map(|(id, _)| id.clone());
 
             match found {
                 Some(service_id) => {
-                    println!("[GetService] Found service '{}' in tenant '{}' → id={}", service_name, tenant_id, service_id);
+                    println!(
+                        "[GetService] Found service '{}' in tenant '{}' → id={}",
+                        service_name, tenant_id, service_id
+                    );
                     Some(serde_json::json!({
                         "type": "Service",
                         "data": {
@@ -1200,7 +1446,10 @@ async fn handle_sdk_message(
                     }))
                 }
                 None => {
-                    println!("[GetService] Service '{}' not found in tenant '{}'", service_name, tenant_id);
+                    println!(
+                        "[GetService] Service '{}' not found in tenant '{}'",
+                        service_name, tenant_id
+                    );
                     Some(serde_json::json!({
                         "type": "Error",
                         "data": {
@@ -1376,29 +1625,43 @@ async fn handle_sdk_message(
             let mut server_guard = server.write().await;
             let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
                 Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                })),
+                None => {
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                    }))
+                }
             };
 
-            let svc = match server_guard.tenants.get_mut(&tenant_name)
-                .and_then(|t| t.get_service_mut_by_name(&svc_name)) {
+            let svc = match server_guard
+                .tenants
+                .get_mut(&tenant_name)
+                .and_then(|t| t.get_service_mut_by_name(&svc_name))
+            {
                 Some(s) => s,
-                None => return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "NotFound", "message": "Service not found in tenant" }
-                })),
+                None => {
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "NotFound", "message": "Service not found in tenant" }
+                    }))
+                }
             };
 
-            let size = if initial_data.is_empty() { 8 } else { initial_data.len() };
+            let size = if initial_data.is_empty() {
+                8
+            } else {
+                initial_data.len()
+            };
             match svc.allocate_variable(variable_name.to_string(), size) {
                 Some(slot) => {
                     let copy_len = slot.len().min(initial_data.len());
                     if copy_len > 0 {
                         slot[..copy_len].copy_from_slice(&initial_data[..copy_len]);
                     }
-                    println!("[AllocateVariable] service={} var={} size={}", service_id, variable_name, size);
+                    println!(
+                        "[AllocateVariable] service={} var={} size={}",
+                        service_id, variable_name, size
+                    );
                     Some(serde_json::json!({
                         "type": "Result",
                         "data": {
@@ -1428,13 +1691,16 @@ async fn handle_sdk_message(
             let server_guard = server.read().await;
             let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
                 Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                })),
+                None => {
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                    }))
+                }
             };
 
-            let data_copy = server_guard.tenants
+            let data_copy = server_guard
+                .tenants
                 .get(&tenant_name)
                 .and_then(|t| t.get_service_by_name(&svc_name))
                 .and_then(|svc| svc.get_variable(variable_name))
@@ -1484,19 +1750,26 @@ async fn handle_sdk_message(
             let mut server_guard = server.write().await;
             let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
                 Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                })),
+                None => {
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                    }))
+                }
             };
 
-            let svc = match server_guard.tenants.get_mut(&tenant_name)
-                .and_then(|t| t.get_service_mut_by_name(&svc_name)) {
+            let svc = match server_guard
+                .tenants
+                .get_mut(&tenant_name)
+                .and_then(|t| t.get_service_mut_by_name(&svc_name))
+            {
                 Some(s) => s,
-                None => return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "NotFound", "message": "Service not found in tenant" }
-                })),
+                None => {
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "NotFound", "message": "Service not found in tenant" }
+                    }))
+                }
             };
 
             // Existing size determines whether we write in-place, resize, or auto-allocate
@@ -1524,7 +1797,12 @@ async fn handle_sdk_message(
             };
 
             if ok {
-                println!("[WriteVariable] service={} var={} bytes={}", service_id, variable_name, new_data.len());
+                println!(
+                    "[WriteVariable] service={} var={} bytes={}",
+                    service_id,
+                    variable_name,
+                    new_data.len()
+                );
                 Some(serde_json::json!({
                     "type": "Result",
                     "data": {
@@ -1554,13 +1832,17 @@ async fn handle_sdk_message(
             let mut server_guard = server.write().await;
             let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
                 Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                })),
+                None => {
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
+                    }))
+                }
             };
 
-            let removed = server_guard.tenants.get_mut(&tenant_name)
+            let removed = server_guard
+                .tenants
+                .get_mut(&tenant_name)
                 .and_then(|t| t.get_service_mut_by_name(&svc_name))
                 .map(|svc| svc.deallocate_variable(variable_name))
                 .unwrap_or(false);
@@ -1599,7 +1881,10 @@ async fn handle_sdk_message(
             let key = format!("{}/{}", service_id, variable_name);
             session.subscriptions.insert(key.clone());
 
-            println!("[Subscribe] session={} subscribed to {}", session.session_id, key);
+            println!(
+                "[Subscribe] session={} subscribed to {}",
+                session.session_id, key
+            );
             Some(serde_json::json!({
                 "type": "Result",
                 "data": {
@@ -1675,7 +1960,9 @@ async fn handle_sdk_message(
                 }
             };
 
-            if let Some(svc) = server_guard.tenants.get_mut(&tenant_name)
+            if let Some(svc) = server_guard
+                .tenants
+                .get_mut(&tenant_name)
                 .and_then(|t| t.get_service_mut_by_name(&svc_name))
             {
                 for (var_name, var_data) in new_values {
@@ -1701,7 +1988,11 @@ async fn handle_sdk_message(
                 }
             }
 
-            println!("[ReportVariableChanges] service={} changes={}", service_id, changed_variables.len());
+            println!(
+                "[ReportVariableChanges] service={} changes={}",
+                service_id,
+                changed_variables.len()
+            );
             Some(serde_json::json!({
                 "type": "VariableChangesAcknowledged",
                 "data": {
@@ -1750,10 +2041,7 @@ mod sdk_tests {
 
     /// Build and authenticate a session against `tenant_id`, also ensuring the
     /// tenant record exists in `server`.  Returns the authenticated session.
-    async fn make_authed_session(
-        server: Arc<RwLock<Server>>,
-        tenant_id: &str,
-    ) -> ClientSession {
+    async fn make_authed_session(server: Arc<RwLock<Server>>, tenant_id: &str) -> ClientSession {
         let mut session = ClientSession::new();
         let msg = serde_json::json!({
             "type": "Authenticate",
@@ -1834,7 +2122,11 @@ mod sdk_tests {
 
         // service_id must be registered in the server registry
         assert!(
-            server.read().await.service_registry.contains_key(&service_id),
+            server
+                .read()
+                .await
+                .service_registry
+                .contains_key(&service_id),
             "Created service must appear in service_registry"
         );
         cleanup_tenant(&tenant_id);
@@ -1864,8 +2156,7 @@ mod sdk_tests {
         let server = Arc::new(RwLock::new(Server::new()));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
-        let created_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+        let created_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
         let msg = serde_json::json!({
             "type": "GetService",
@@ -1929,8 +2220,7 @@ mod sdk_tests {
         );
 
         // The bytes must round-trip exactly
-        let returned: Vec<u8> =
-            serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
+        let returned: Vec<u8> = serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
         assert_eq!(
             returned, payload,
             "Read must return the exact bytes that were written"
@@ -1999,8 +2289,7 @@ mod sdk_tests {
         let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
         let server = Arc::new(RwLock::new(Server::new()));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
         let msg = serde_json::json!({
             "type": "ReadVariable",
@@ -2021,8 +2310,7 @@ mod sdk_tests {
         let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
         let server = Arc::new(RwLock::new(Server::new()));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
         let init: Vec<u8> = vec![10, 20, 30, 40];
         let alloc_msg = serde_json::json!({
@@ -2050,8 +2338,7 @@ mod sdk_tests {
         .await
         .unwrap();
         assert_eq!(read_resp["type"], "VariableData");
-        let returned: Vec<u8> =
-            serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
+        let returned: Vec<u8> = serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
         assert_eq!(returned, init);
         cleanup_tenant(&tenant_id);
     }
@@ -2061,8 +2348,7 @@ mod sdk_tests {
         let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
         let server = Arc::new(RwLock::new(Server::new()));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
         // Write it first so the variable exists
         handle_sdk_message(
@@ -2112,8 +2398,7 @@ mod sdk_tests {
         let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
         let server = Arc::new(RwLock::new(Server::new()));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
         let msg = serde_json::json!({
             "type": "Subscribe",
@@ -2138,8 +2423,7 @@ mod sdk_tests {
         let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
         let server = Arc::new(RwLock::new(Server::new()));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
+        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
         // Subscribe first
         handle_sdk_message(
@@ -2323,6 +2607,426 @@ mod sdk_tests {
         assert_eq!(r["type"], "Error");
         assert_eq!(r["data"]["code"], "NotFound");
 
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── CreateTenant validation ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_create_tenant_empty_fields_returns_error() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = ClientSession::new();
+
+        // Empty tenant_id
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "CreateTenant",
+                "data": { "tenant_id": "", "tenant_name": "some_name" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resp["type"], "Error",
+            "empty tenant_id must be rejected: {resp}"
+        );
+
+        // Empty tenant_name
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "CreateTenant",
+                "data": { "tenant_id": "valid_id", "tenant_name": "" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resp["type"], "Error",
+            "empty tenant_name must be rejected: {resp}"
+        );
+    }
+
+    // ── AllocateVariable to non-existent service ───────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_allocate_to_unknown_service_returns_not_found() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "AllocateVariable",
+                "data": {
+                    "service_id": "service-that-does-not-exist",
+                    "variable_name": "v"
+                }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resp["type"], "Error",
+            "unknown service_id must return Error: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["code"], "NotFound",
+            "unknown service must yield NotFound, got: {}",
+            resp["data"]["code"]
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── DeleteService cross-tenant ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_delete_service_cross_tenant_returns_unauthorized() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        // Attempt to delete a service from a different tenant
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "DeleteService",
+                "data": { "tenant_id": "other_tenant_xyz", "service_name": "svc" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resp["type"], "Error",
+            "cross-tenant DeleteService must return Error: {resp}"
+        );
+        let code = resp["data"]["code"].as_str().unwrap_or("");
+        assert!(
+            code == "Unauthorized" || code == "PERMISSION_DENIED" || code == "Unauthorized",
+            "wrong tenant must yield Unauthorized, got: {}",
+            code
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── GetServiceFilePath ─────────────────────────────────────────────────────
+
+    /// The WSS path must always reject GetServiceFilePath with InvalidRequest.
+    /// Direct file access is only possible for local clients that memory-map the
+    /// service file themselves — it cannot be served over a remote WSS connection.
+    #[tokio::test]
+    async fn test_sdk_get_service_file_path_always_returns_invalid_request() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "GetServiceFilePath",
+                "data": { "service_id": "any-service-id" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "Error",
+            "GetServiceFilePath via WSS must always return Error: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["code"], "InvalidRequest",
+            "GetServiceFilePath must return InvalidRequest (not available over WSS): {resp}"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── ReportVariableChanges ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_report_variable_changes_unknown_service_returns_ack() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReportVariableChanges",
+                "data": {
+                    "service_id": "non-existent-service",
+                    "changed_variables": ["x"],
+                    "new_values": []
+                }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "VariableChangesAcknowledged",
+            "unknown service must still return VariableChangesAcknowledged: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["service_id"], "non-existent-service",
+            "ack must echo back the service_id: {resp}"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_report_variable_changes_known_service_writes_data() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "my_svc").await;
+
+        let payload: Vec<u8> = vec![10, 20, 30];
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReportVariableChanges",
+                "data": {
+                    "service_id": service_id,
+                    "changed_variables": ["sensor"],
+                    "new_values": [["sensor", payload]]
+                }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "VariableChangesAcknowledged",
+            "known service must return VariableChangesAcknowledged: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["service_id"], service_id,
+            "ack must echo back the service_id: {resp}"
+        );
+
+        // The data must have been written — a subsequent ReadVariable must return it
+        let read_resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "ReadVariable",
+                "data": { "service_id": service_id, "variable_name": "sensor" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            read_resp["type"], "VariableData",
+            "ReadVariable after ReportVariableChanges must succeed: {read_resp}"
+        );
+        let returned: Vec<u8> = serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
+        assert_eq!(
+            returned, payload,
+            "ReportVariableChanges must persist the variable data"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── CreateTenant success ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_create_tenant_success() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        // CreateTenant has no auth gate — any connected client can call it
+        let mut session = ClientSession::new();
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "CreateTenant",
+                "data": {
+                    "tenant_id": tenant_id,
+                    "tenant_name": "Test Organisation"
+                }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "TenantResult",
+            "CreateTenant with valid fields must return TenantResult: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["success"], true,
+            "CreateTenant must report success: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["tenant_id"], tenant_id,
+            "CreateTenant must echo back the tenant_id: {resp}"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── DeleteService success ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_delete_service_success() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let _service_id =
+            create_service(Arc::clone(&server), &mut session, &tenant_id, "doomed").await;
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "DeleteService",
+                "data": {
+                    "tenant_id": tenant_id,
+                    "service_name": "doomed"
+                }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "Result",
+            "DeleteService must return Result: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["success"], true,
+            "DeleteService must report success: {resp}"
+        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    // ── DeleteTenant ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_delete_tenant_empty_id_returns_error() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = ClientSession::new();
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "DeleteTenant",
+                "data": { "tenant_id": "" }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "Error",
+            "DeleteTenant with empty tenant_id must return Error: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["code"], "InvalidRequest",
+            "empty tenant_id must yield InvalidRequest: {resp}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sdk_delete_tenant_success() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = ClientSession::new();
+
+        let resp = handle_sdk_message(
+            serde_json::json!({
+                "type": "DeleteTenant",
+                "data": { "tenant_id": tenant_id }
+            }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "Result",
+            "DeleteTenant must return Result: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["success"], true,
+            "DeleteTenant must report success: {resp}"
+        );
+    }
+
+    // ── Heartbeat (SDK JSON path) ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_heartbeat_returns_timestamp() {
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = ClientSession::new();
+
+        let resp = handle_sdk_message(
+            serde_json::json!({ "type": "Heartbeat", "data": {} }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "Heartbeat",
+            "SDK Heartbeat must return Heartbeat response: {resp}"
+        );
+        assert!(
+            resp["data"]["timestamp"].is_string(),
+            "Heartbeat response must include a timestamp string: {resp}"
+        );
+    }
+
+    // ── Disconnect (SDK JSON path) ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sdk_disconnect_sets_disconnected_state() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::new()));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+
+        assert_eq!(
+            session.state,
+            ClientState::Active,
+            "Session must be Active before Disconnect"
+        );
+
+        let resp = handle_sdk_message(
+            serde_json::json!({ "type": "Disconnect", "data": {} }),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp["type"], "Result",
+            "Disconnect must return Result: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["success"], true,
+            "Disconnect must report success: {resp}"
+        );
+        assert_eq!(
+            session.state,
+            ClientState::Disconnected,
+            "Session state must be Disconnected after Disconnect message"
+        );
         cleanup_tenant(&tenant_id);
     }
 }

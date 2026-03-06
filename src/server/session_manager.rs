@@ -399,4 +399,54 @@ mod tests {
         ).await;
         assert_eq!(manager.total_subscription_count().await, 2);
     }
+
+    #[tokio::test]
+    async fn test_get_tenant_subscribers_none_returns_only_clients_with_no_tenant() {
+        let manager = SessionManager::new();
+
+        // Unauthenticated session (no tenant, no client_id)
+        let unauthed = ClientSession::new();
+        let unauthed_id = unauthed.session_id.clone();
+        manager.register_session(unauthed).await;
+
+        // Authenticated session
+        let mut authed = ClientSession::new();
+        authed.authenticate("client_a".to_string(), "tenant_x".to_string());
+        manager.register_session(authed).await;
+
+        // get_tenant_subscribers(None) only matches sessions with tenant_id == None.
+        // Unauthenticated sessions have no client_id set, so filter_map removes them.
+        let subscribers = manager.get_tenant_subscribers(None).await;
+        // The unauthenticated session has no client_id, so the result is empty.
+        assert!(
+            subscribers.is_empty(),
+            "unauthenticated sessions have no client_id so subscribers must be empty; got {:?}",
+            subscribers
+        );
+
+        // Verify the authenticated session is NOT returned when None is passed
+        assert!(!subscribers.contains(&"client_a".to_string()));
+
+        let _ = unauthed_id; // silence unused warning
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe_nonexistent_subscription_id_no_panic() {
+        let manager = SessionManager::new();
+        // Unsubscribing a key that was never registered must not panic
+        manager.unsubscribe("does-not-exist").await;
+        manager.unsubscribe("").await;
+        assert_eq!(manager.total_subscription_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_returns_none_for_unknown_client() {
+        let manager = SessionManager::new();
+        // No sessions registered — every lookup must return None
+        let result = manager.get_session("nonexistent_client").await;
+        assert!(
+            result.is_none(),
+            "get_session must return None for an unknown client ID"
+        );
+    }
 }

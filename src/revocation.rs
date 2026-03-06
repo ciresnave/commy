@@ -1,5 +1,5 @@
 //! Permission revocation protocol for COMMY
-//! 
+//!
 //! Handles revoking client permissions and migrating them to new service files
 //! with optional honeypot detection.
 
@@ -533,5 +533,44 @@ mod tests {
             .unwrap();
 
         assert!(manager.is_migration_complete("service1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_revoke_then_is_client_revoked_true() {
+        let manager = RevocationManager::new();
+
+        // Before revocation the client is unknown → false
+        assert!(!manager.is_client_revoked("alice").await);
+
+        manager
+            .revoke_permission(
+                "alice".to_string(),
+                "tenant_a".to_string(),
+                RevocationReason::AdminRevocation,
+                "test revoke".to_string(),
+            )
+            .await
+            .unwrap();
+
+        // After revocation is_client_revoked must return true
+        assert!(
+            manager.is_client_revoked("alice").await,
+            "is_client_revoked must return true after revoke_permission was called"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_migration_complete_unknown_service_returns_err() {
+        let manager = RevocationManager::new();
+        // No migration was ever started for this service
+        let result = manager.is_migration_complete("no_such_service").await;
+        assert!(
+            result.is_err(),
+            "is_migration_complete on a service with no migration must return Err"
+        );
+        match result.unwrap_err() {
+            RevocationError::MigrationFailed(_) => {}
+            e => panic!("Expected MigrationFailed, got {:?}", e),
+        }
     }
 }

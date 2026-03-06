@@ -462,4 +462,86 @@ mod tests {
             assert_eq!(msg.message_type(), *expected, "Wrong type name for {}", expected);
         }
     }
+
+    #[test]
+    fn test_is_healthy_queue_with_recent_heartbeat_ack_true() {
+        let mut session = ClientSession::new();
+        session.outbound_queue_size = 10;
+        // Recent ack (now) — well within the 30-second threshold
+        session.last_heartbeat_ack = Some(chrono::Utc::now());
+        assert!(
+            session.is_healthy(30),
+            "is_healthy must return true when queue > 0 and heartbeat ack is recent"
+        );
+    }
+
+    #[test]
+    fn test_is_healthy_queue_with_stale_heartbeat_ack_false() {
+        let mut session = ClientSession::new();
+        session.outbound_queue_size = 5;
+        // Stale ack: 60 seconds ago, threshold 30 s → stale
+        session.last_heartbeat_ack = Some(chrono::Utc::now() - chrono::Duration::seconds(60));
+        assert!(
+            !session.is_healthy(30),
+            "is_healthy must return false when queue > 0 and heartbeat ack is stale"
+        );
+    }
+
+    #[test]
+    fn test_json_roundtrip_authenticate_and_heartbeat() {
+        // WssMessage uses #[serde(tag = "type", content = "data")] (adjacently tagged),
+        // which is supported by serde_json but not rmp_serde for struct variants.
+        // JSON is the correct serialisation format to test here.
+
+        // Authenticate
+        let msg = WssMessage::Authenticate {
+            tenant_id: "tenant_1".to_string(),
+            client_id: "client_1".to_string(),
+            client_version: "0.1.0".to_string(),
+            credentials: "secret".to_string(),
+            auth_method: "api_key".to_string(),
+        };
+        let encoded = serde_json::to_string(&msg).expect("json encode failed");
+        let decoded: WssMessage = serde_json::from_str(&encoded).expect("json decode failed");
+        assert_eq!(decoded.message_type(), "Authenticate");
+
+        // Heartbeat
+        let hb = WssMessage::Heartbeat {
+            session_id: "sess-42".to_string(),
+        };
+        let encoded = serde_json::to_string(&hb).expect("json encode heartbeat failed");
+        let decoded: WssMessage =
+            serde_json::from_str(&encoded).expect("json decode heartbeat failed");
+        assert_eq!(decoded.message_type(), "Heartbeat");
+
+        // Error
+        let err = WssMessage::Error {
+            code: "TEST".to_string(),
+            message: "test error".to_string(),
+            details: Some("details".to_string()),
+        };
+        let encoded = serde_json::to_string(&err).expect("encode error failed");
+        let decoded: WssMessage = serde_json::from_str(&encoded).expect("decode error failed");
+        assert_eq!(decoded.message_type(), "Error");
+    }
+
+    #[test]
+    fn test_authenticate_updates_last_activity() {
+        let mut session = ClientSession::new();
+        // Rewind last_activity to a known past moment
+        let before = chrono::Utc::now() - chrono::Duration::seconds(5);
+        session.last_activity = before;
+
+        session.authenticate("cli_42".to_string(), "tenant_x".to_string());
+
+        assert!(
+            session.last_activity > before,
+            "authenticate() must update last_activity: got {:?}, expected > {:?}",
+            session.last_activity,
+            before
+        );
+        assert_eq!(session.client_id, Some("cli_42".to_string()));
+        assert_eq!(session.tenant_id, Some("tenant_x".to_string()));
+        assert_eq!(session.state, ClientState::Active);
+    }
 }
