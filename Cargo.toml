@@ -4,8 +4,8 @@
     edition      = "2021"
     license      = "MIT"
     name         = "commy"
-    repository   = "https://github.com/CireSnave/commy"
-    version      = "0.3.0"
+    repository   = "https://github.com/ciresnave/commy"
+    version      = "0.3.1"
 
 [lib]
 
@@ -14,23 +14,21 @@
     path = "src/main.rs"
 
 [dependencies]
-    async-trait       = "0.1"
     auth-framework    = "0.4"
     chrono            = { version = "0.4", features = ["serde"] }
     futures           = "0.3"
     libc              = { version = "0.2", optional = true }
     memmap2           = "0.9"
-    reqwest           = { version = "0.11", features = ["json"] }
     rmp-serde         = "1.1"
-    rustls            = "0.21"
-    rustls-pemfile    = "1.0"
+    rustls            = "0.23"
+    rustls-pemfile    = "2.0"
     serde             = { version = "1.0", features = ["derive"] }
     serde_json        = "1.0"
     sha2              = "0.10"
-    thiserror         = "1.0"
+    thiserror         = "2.0"
     tokio             = { version = "1", features = ["full"] }
-    tokio-rustls      = "0.24"
-    tokio-tungstenite = "0.23"
+    tokio-rustls      = "0.26"
+    tokio-tungstenite = "0.28"
     uuid              = { version = "1.0", features = ["serde", "v4"] }
 
 [dev-dependencies]

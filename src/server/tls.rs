@@ -2,7 +2,8 @@
 //!
 //! Handles loading and validation of TLS certificates and keys for WSS support.
 
-use rustls::{Certificate, PrivateKey, ServerConfig};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::fs::File;
 use std::io::{self, BufReader};
@@ -83,24 +84,27 @@ impl TlsConfiguration {
         // Load certificate
         let cert_file = File::open(cert_path)?;
         let mut cert_reader = BufReader::new(cert_file);
-        let certs = certs(&mut cert_reader).map_err(|_| {
-            TlsError::InvalidCertificate("Failed to parse PEM certificates".to_string())
-        })?;
+        let certificates: Vec<CertificateDer<'static>> = certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                TlsError::InvalidCertificate("Failed to parse PEM certificates".to_string())
+            })?;
 
-        if certs.is_empty() {
+        if certificates.is_empty() {
             return Err(TlsError::InvalidCertificate(
                 "No certificates found in file".to_string(),
             ));
         }
 
-        let certificates: Vec<Certificate> = certs.into_iter().map(Certificate).collect();
-
         // Load private key
         let key_file = File::open(key_path)?;
         let mut key_reader = BufReader::new(key_file);
-        let mut keys = pkcs8_private_keys(&mut key_reader).map_err(|_| {
-            TlsError::InvalidPrivateKey("Failed to parse PEM private keys".to_string())
-        })?;
+        let mut keys: Vec<PrivateKeyDer<'static>> = pkcs8_private_keys(&mut key_reader)
+            .map(|r| r.map(PrivateKeyDer::from))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                TlsError::InvalidPrivateKey("Failed to parse PEM private keys".to_string())
+            })?;
 
         if keys.is_empty() {
             return Err(TlsError::InvalidPrivateKey(
@@ -108,11 +112,10 @@ impl TlsConfiguration {
             ));
         }
 
-        let private_key = PrivateKey(keys.remove(0));
+        let private_key = keys.remove(0);
 
         // Create ServerConfig
         let config = ServerConfig::builder()
-            .with_safe_defaults()
             .with_no_client_auth()
             .with_single_cert(certificates, private_key)
             .map_err(|e| {

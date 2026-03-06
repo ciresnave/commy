@@ -76,7 +76,7 @@ pub async fn handle_connection(
                                     // Send response back as WebSocket binary frame
                                     if let Ok(serialized) = rmp_serde::to_vec(&response) {
                                         if let Err(e) =
-                                            write.send(Message::Binary(serialized)).await
+                                            write.send(Message::Binary(serialized.into())).await
                                         {
                                             eprintln!("Failed to send WebSocket frame: {}", e);
                                             break;
@@ -103,7 +103,7 @@ pub async fn handle_connection(
                                     details: None,
                                 };
                                 if let Ok(serialized) = rmp_serde::to_vec(&error_response) {
-                                    let _ = write.send(Message::Binary(serialized)).await;
+                                    let _ = write.send(Message::Binary(serialized.into())).await;
                                 }
                             }
                         }
@@ -133,7 +133,7 @@ pub async fn handle_connection(
                                             "[SDK Response] Sending: {}",
                                             &serialized[..std::cmp::min(100, serialized.len())]
                                         );
-                                        if let Err(e) = write.send(Message::Text(serialized)).await
+                                        if let Err(e) = write.send(Message::Text(serialized.into())).await
                                         {
                                             eprintln!("Failed to send response: {}", e);
                                             break;
@@ -164,7 +164,7 @@ pub async fn handle_connection(
                                     details: None,
                                 };
                                 if let Ok(serialized) = rmp_serde::to_vec(&error) {
-                                    let _ = write.send(Message::Binary(serialized)).await;
+                                    let _ = write.send(Message::Binary(serialized.into())).await;
                                 }
                             }
                         }
