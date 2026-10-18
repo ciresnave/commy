@@ -11,6 +11,7 @@ pub mod liveness;
 pub mod protocol;
 pub mod revocation;
 pub mod server;
+pub mod tenant_id;
 
 pub use allocator::FreeListAllocator;
 pub use auth::{AuthError, AuthResult, Permission, PermissionSet, TenantAuthContext};
@@ -261,15 +262,35 @@ pub struct Server {
     clients: Vec<Client>,
     /// Maps service_id → ServiceRecord (only Server knows this mapping)
     pub service_registry: std::collections::HashMap<String, ServiceRecord>,
+    /// Development authentication: accepts any credential and grants admin. Off unless the
+    /// operator sets `COMMY_ALLOW_DEV_AUTH=1`. Never enable it on a reachable server.
+    pub dev_auth: bool,
 }
 
+/// The environment variable that turns development authentication on.
+pub const DEV_AUTH_ENV: &str = "COMMY_ALLOW_DEV_AUTH";
+
 impl Server {
+    /// A server with development authentication on only if `COMMY_ALLOW_DEV_AUTH=1`.
     pub fn new() -> Self {
+        let dev_auth = std::env::var(DEV_AUTH_ENV).is_ok_and(|v| v == "1");
+        if dev_auth {
+            eprintln!(
+                "!!! {DEV_AUTH_ENV}=1: DEVELOPMENT AUTHENTICATION IS ON. Any client can \
+                 authenticate to any tenant as admin. Do not use this on a reachable server. !!!"
+            );
+        }
+        Self::with_dev_auth(dev_auth)
+    }
+
+    /// A server with development authentication set explicitly (used by tests).
+    pub fn with_dev_auth(dev_auth: bool) -> Self {
         Server {
             tenants: std::collections::HashMap::new(),
             servers: vec![],
             clients: vec![],
             service_registry: std::collections::HashMap::new(),
+            dev_auth,
         }
     }
 
