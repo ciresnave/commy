@@ -1414,6 +1414,13 @@ async fn handle_sdk_message(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
+            // The creating SDK sets the file size: required, at least one byte, page-rounded,
+            // and capped by the server maximum.
+            let requested_size = match data.and_then(|d| d.get("size")).and_then(|v| v.as_u64()) {
+                Some(n) => n,
+                None => return Some(invalid_request("size is required (bytes, a positive integer)")),
+            };
+
             println!(
                 "[CreateService] Session tenant_id: {:?}, Request tenant_id: {}, Session state: {:?}",
                 session.tenant_id, tenant_id, session.state
@@ -1447,6 +1454,21 @@ async fn handle_sdk_message(
                 }
             }
 
+            let file_size = {
+                let max = server.read().await.max_service_size;
+                match crate::service_file_size(requested_size, max) {
+                    Ok(n) => n,
+                    Err(crate::ServiceSizeError::Zero) => {
+                        return Some(invalid_request("size must be at least 1 byte"))
+                    }
+                    Err(crate::ServiceSizeError::TooLarge) => {
+                        return Some(invalid_request(&format!(
+                            "size exceeds the server maximum of {max} bytes"
+                        )))
+                    }
+                }
+            };
+
             // Generate cryptographically random service ID; only Server records the file mapping
             let service_id = uuid::Uuid::new_v4().to_string();
             // The guard has already parsed every tenant id on the wire; parse again here so the
@@ -1475,7 +1497,7 @@ async fn handle_sdk_message(
                 }
             };
 
-            if let Err(e) = tenant.register_service(service_name, &file_path) {
+            if let Err(e) = tenant.register_service(service_name, &file_path, file_size as usize) {
                 return Some(serde_json::json!({
                     "type": "Error",
                     "data": { "code": "InternalError", "message": format!("Failed to create service file: {}", e) }
@@ -1501,7 +1523,8 @@ async fn handle_sdk_message(
                 "data": {
                     "service_id": service_id,
                     "service_name": service_name,
-                    "tenant_id": tenant_id
+                    "tenant_id": tenant_id,
+                    "size": file_size
                 }
             }))
         }
@@ -2215,7 +2238,7 @@ mod sdk_tests {
     ) -> String {
         let msg = serde_json::json!({
             "type": "CreateService",
-            "data": { "tenant_id": tenant_id, "service_name": service_name }
+            "data": { "tenant_id": tenant_id, "service_name": service_name, "size": 65536 }
         });
         let resp = handle_sdk_message(msg, session, Arc::clone(&server))
             .await
@@ -2647,7 +2670,7 @@ mod sdk_tests {
         // Try to create a service under a DIFFERENT tenant without authenticating to it
         let msg = serde_json::json!({
             "type": "CreateService",
-            "data": { "tenant_id": "other_tenant", "service_name": "svc" }
+            "data": { "tenant_id": "other_tenant", "service_name": "svc", "size": 65536 }
         });
         let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
             .await
@@ -3208,7 +3231,7 @@ mod audit_tests {
     }
 
     async fn make_service(server: &Arc<RwLock<Server>>, s: &mut ClientSession, tenant: &str) -> String {
-        let r = send(server, s, serde_json::json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc"}})).await;
+        let r = send(server, s, serde_json::json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":65536}})).await;
         assert_eq!(r["type"], "Service", "{r}");
         r["data"]["service_id"].as_str().unwrap().to_string()
     }
@@ -3299,7 +3322,7 @@ mod audit_tests {
         s.token = Some("t".into());
         s.permissions = Some(crate::auth::PermissionSet::admin());
         s.state = ClientState::Active;
-        let r = send(&server, &mut s, serde_json::json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc"}})).await;
+        let r = send(&server, &mut s, serde_json::json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":65536}})).await;
         assert_eq!(r["type"], "Error", "{r}");
         let outside = std::env::current_dir().unwrap().parent().unwrap().join(&marker);
         let escaped = outside.exists();
@@ -3363,5 +3386,152 @@ mod dev_auth_off_tests {
             assert_eq!(r["type"], "Error", "{bad:?}: {r}");
             assert!(s.tenant_id.is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod service_size_tests {
+    use super::*;
+
+    async fn send(
+        server: &Arc<RwLock<Server>>,
+        session: &mut ClientSession,
+        v: serde_json::Value,
+    ) -> serde_json::Value {
+        handle_sdk_message(v, session, Arc::clone(server)).await.unwrap()
+    }
+
+    async fn authed(server: &Arc<RwLock<Server>>, tenant: &str) -> ClientSession {
+        let mut s = ClientSession::new();
+        let r = send(
+            server,
+            &mut s,
+            serde_json::json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x"}}),
+        )
+        .await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s
+    }
+
+    fn create(tenant: &str, size: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":size}})
+    }
+
+    fn file_len(tenant: &str, service_id: &str) -> u64 {
+        std::fs::metadata(format!("tenant_{tenant}/service_{service_id}.mem"))
+            .unwrap()
+            .len()
+    }
+
+    fn cleanup(tenant: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{tenant}"));
+    }
+
+    fn tenant() -> String {
+        format!("sz_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    #[test]
+    fn service_file_size_rounds_up_to_whole_pages() {
+        let max = 10 * 1024 * 1024;
+        assert_eq!(crate::service_file_size(1, max), Ok(4096));
+        assert_eq!(crate::service_file_size(4096, max), Ok(4096));
+        assert_eq!(crate::service_file_size(4097, max), Ok(8192));
+        assert_eq!(crate::service_file_size(5000, max), Ok(8192));
+    }
+
+    #[test]
+    fn service_file_size_refuses_zero_and_too_large() {
+        let max = 10 * 1024 * 1024;
+        assert_eq!(crate::service_file_size(0, max), Err(crate::ServiceSizeError::Zero));
+        assert_eq!(crate::service_file_size(max, max), Ok(max));
+        assert_eq!(crate::service_file_size(max + 1, max), Err(crate::ServiceSizeError::TooLarge));
+        assert_eq!(crate::service_file_size(u64::MAX, max), Err(crate::ServiceSizeError::TooLarge));
+    }
+
+    #[test]
+    fn default_maximum_is_ten_mebibytes() {
+        assert_eq!(crate::DEFAULT_MAX_SERVICE_SIZE, 10 * 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn create_service_requires_a_size() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let r = send(
+            &server,
+            &mut s,
+            serde_json::json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc"}}),
+        )
+        .await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "InvalidRequest", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn create_service_refuses_zero_negative_and_non_integer_sizes() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        for bad in [
+            serde_json::json!(0),
+            serde_json::json!(-5),
+            serde_json::json!(1.5),
+            serde_json::json!("4096"),
+            serde_json::json!(null),
+        ] {
+            let r = send(&server, &mut s, create(&t, bad.clone())).await;
+            assert_eq!(r["type"], "Error", "size {bad} must be refused: {r}");
+            assert_eq!(r["data"]["code"], "InvalidRequest", "{r}");
+        }
+        assert!(server.read().await.service_registry.is_empty());
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn create_service_sets_the_file_size_rounded_to_pages() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        for (asked, got) in [(1u64, 4096u64), (4096, 4096), (5000, 8192), (65536, 65536)] {
+            let r = send(&server, &mut s, create(&t, serde_json::json!(asked))).await;
+            assert_eq!(r["type"], "Service", "{r}");
+            assert_eq!(r["data"]["size"], got, "reply size for {asked}");
+            let id = r["data"]["service_id"].as_str().unwrap();
+            assert_eq!(file_len(&t, id), got, "file size for {asked}");
+        }
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn create_service_refuses_sizes_above_the_maximum_and_accepts_the_maximum() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(
+            Server::with_dev_auth(true).with_max_service_size(8192),
+        ));
+        let mut s = authed(&server, &t).await;
+        let r = send(&server, &mut s, create(&t, serde_json::json!(8193))).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "InvalidRequest", "{r}");
+        let r = send(&server, &mut s, create(&t, serde_json::json!(8192))).await;
+        assert_eq!(r["type"], "Service", "{r}");
+        assert_eq!(server.read().await.service_registry.len(), 1);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_refused_size_leaves_no_file_behind() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let r = send(&server, &mut s, create(&t, serde_json::json!(u64::MAX))).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        let files = std::fs::read_dir(format!("tenant_{t}"))
+            .map(|d| d.count())
+            .unwrap_or(0);
+        assert_eq!(files, 0, "no service file may exist after a refusal");
+        cleanup(&t);
     }
 }
