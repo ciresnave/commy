@@ -1,1 +1,0 @@
-C:\Users\cires\OneDrive\Documents\projects\commy\examples\financial_ticker\target\release\dashboard.exe: C:\Users\cires\OneDrive\Documents\projects\commy\examples\financial_ticker\src\bin\dashboard.rs C:\Users\cires\OneDrive\Documents\projects\commy\examples\financial_ticker\src\lib.rs
