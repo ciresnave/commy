@@ -1331,6 +1331,131 @@ async fn guard_sdk_message(
     }
 }
 
+/// A reply or error built from the wire crate's own types, so spelling cannot drift.
+fn wire_json(msg: &commy_wire::ControlMessage) -> serde_json::Value {
+    serde_json::to_value(msg).unwrap_or_else(|_| error_json("INTERNAL_ERROR", "reply failed"))
+}
+
+fn wire_error(
+    code: commy_wire::ErrorCode,
+    message: &str,
+    request_id: Option<&str>,
+) -> serde_json::Value {
+    wire_json(&commy_wire::ControlMessage::Error(commy_wire::ErrorReply {
+        code,
+        message: message.to_string(),
+        request_id: request_id.map(str::to_string),
+    }))
+}
+
+/// GetServiceFilePath and ConfirmLocal (plan C1). The session is already authenticated and, for a
+/// known `service_id`, belongs to the service's tenant (see `guard_sdk_message`).
+async fn handle_local_mapping(
+    message: serde_json::Value,
+    session: &mut ClientSession,
+    server: &Arc<RwLock<Server>>,
+) -> Option<serde_json::Value> {
+    use commy_wire::{ControlMessage, ErrorCode};
+
+    let request: ControlMessage = match serde_json::from_value(message) {
+        Ok(m) => m,
+        Err(e) => return Some(wire_error(ErrorCode::InvalidRequest, &e.to_string(), None)),
+    };
+    match request {
+        ControlMessage::GetServiceFilePath(req) => {
+            let rid = Some(req.request_id.as_str());
+            let guard = server.read().await;
+            let Some(record) = guard.service_registry.get(&req.service_id) else {
+                return Some(wire_error(ErrorCode::NotFound, "Unknown service", rid));
+            };
+            if session.tenant_id.as_deref() != Some(record.tenant_name.as_str()) {
+                return Some(wire_error(
+                    ErrorCode::PermissionDenied,
+                    "Service belongs to another tenant",
+                    rid,
+                ));
+            }
+            let can_write = session.permissions.as_ref().is_some_and(|p| {
+                p.has_any(&[
+                    crate::auth::Permission::ServiceWrite,
+                    crate::auth::Permission::ServiceAdmin,
+                    crate::auth::Permission::TenantAdmin,
+                ])
+            });
+            let mut reply = commy_wire::ServiceFilePath {
+                request_id: req.request_id.clone(),
+                service_id: req.service_id.clone(),
+                file_id: record.file_id,
+                path: None,
+                nonce_path: None,
+            };
+            if record.trusted_local && can_write {
+                use crate::server::local_mapping as lm;
+                let file_path = std::path::Path::new(&record.file_path);
+                let tenant_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+                lm::sweep_stale(tenant_dir, lm::NONCE_TTL);
+                if session.pending_nonces.len() >= lm::MAX_PENDING_NONCES
+                    && !session.pending_nonces.contains_key(&record.file_id)
+                {
+                    return Some(wire_error(
+                        ErrorCode::RateLimited,
+                        "Too many unconfirmed local-mapping requests",
+                        rid,
+                    ));
+                }
+                let offered = lm::absolute(file_path).and_then(|path| {
+                    let pending = lm::create_nonce_file(tenant_dir)?;
+                    let nonce_path = lm::absolute(&pending.path)?;
+                    Ok((path, nonce_path, pending))
+                });
+                match offered {
+                    Ok((path, nonce_path, pending)) => {
+                        if let Some(old) = session.pending_nonces.insert(record.file_id, pending) {
+                            let _ = std::fs::remove_file(old.path);
+                        }
+                        reply.path = Some(path.to_string_lossy().into_owned());
+                        reply.nonce_path = Some(nonce_path.to_string_lossy().into_owned());
+                    }
+                    // Not being able to offer a local mapping is not an error: stay on WSS.
+                    Err(e) => eprintln!("[local-mapping] not offered: {e}"),
+                }
+            }
+            Some(wire_json(&ControlMessage::ServiceFilePath(reply)))
+        }
+        ControlMessage::ConfirmLocal(req) => {
+            let rid = Some(req.request_id.as_str());
+            let Some(pending) = session.pending_nonces.remove(&req.file_id) else {
+                return Some(wire_error(
+                    ErrorCode::InvalidRequest,
+                    "No local mapping is pending for this file",
+                    rid,
+                ));
+            };
+            // One attempt per nonce, match or not: the file is gone either way.
+            let _ = std::fs::remove_file(&pending.path);
+            if !crate::server::local_mapping::secrets_match(&pending.nonce, &req.nonce) {
+                return Some(wire_error(
+                    ErrorCode::PermissionDenied,
+                    "Nonce mismatch",
+                    rid,
+                ));
+            }
+            session.local_files.insert(req.file_id);
+            Some(wire_json(&ControlMessage::ConfirmLocalAck(
+                commy_wire::ConfirmLocalAck {
+                    request_id: req.request_id,
+                    file_id: req.file_id,
+                },
+            )))
+        }
+        _ => Some(wire_error(
+            ErrorCode::InvalidRequest,
+            "Not a local-mapping request",
+            None,
+        )),
+    }
+}
+
 async fn handle_sdk_message(
     message: serde_json::Value,
     session: &mut ClientSession,
@@ -1487,6 +1612,8 @@ async fn handle_sdk_message(
             }
 
             let mut server_guard = server.write().await;
+            let file_id = server_guard.next_file_id;
+            server_guard.next_file_id = file_id.wrapping_add(1).max(1);
             let tenant = match server_guard.tenants.get_mut(tenant_id) {
                 Some(t) => t,
                 None => {
@@ -1510,6 +1637,8 @@ async fn handle_sdk_message(
                     tenant_name: tenant_id.to_string(),
                     service_name: service_name.to_string(),
                     file_path,
+                    file_id,
+                    trusted_local: false,
                 },
             );
 
@@ -2096,16 +2225,8 @@ async fn handle_sdk_message(
             }))
         }
 
-        "GetServiceFilePath" => {
-            // Direct file access is only available to processes on the same machine
-            // via the memory-mapping path; not via WSS
-            Some(serde_json::json!({
-                "type": "Error",
-                "data": {
-                    "code": "InvalidRequest",
-                    "message": "Direct file access is only available to local clients via memory-mapping"
-                }
-            }))
+        "GetServiceFilePath" | "ConfirmLocal" => {
+            handle_local_mapping(message, session, &server).await
         }
 
         "ReportVariableChanges" => {
@@ -2177,6 +2298,7 @@ async fn handle_sdk_message(
         }
 
         "Disconnect" => {
+            session.drop_pending_nonces();
             session.state = ClientState::Disconnected;
             Some(serde_json::json!({
                 "type": "Result",
@@ -2891,39 +3013,6 @@ mod sdk_tests {
         cleanup_tenant(&tenant_id);
     }
 
-    // ── GetServiceFilePath ─────────────────────────────────────────────────────
-
-    /// The WSS path must always reject GetServiceFilePath with InvalidRequest.
-    /// Direct file access is only possible for local clients that memory-map the
-    /// service file themselves — it cannot be served over a remote WSS connection.
-    #[tokio::test]
-    async fn test_sdk_get_service_file_path_always_returns_invalid_request() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-
-        let resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "GetServiceFilePath",
-                "data": { "service_id": "any-service-id" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            resp["type"], "Error",
-            "GetServiceFilePath via WSS must always return Error: {resp}"
-        );
-        assert_eq!(
-            resp["data"]["code"], "InvalidRequest",
-            "GetServiceFilePath must return InvalidRequest (not available over WSS): {resp}"
-        );
-        cleanup_tenant(&tenant_id);
-    }
-
     // ── ReportVariableChanges ──────────────────────────────────────────────────
 
     #[tokio::test]
@@ -3533,5 +3622,307 @@ mod service_size_tests {
             .unwrap_or(0);
         assert_eq!(files, 0, "no service file may exist after a refusal");
         cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod local_mapping_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn send(
+        server: &Arc<RwLock<Server>>,
+        session: &mut ClientSession,
+        v: serde_json::Value,
+    ) -> serde_json::Value {
+        handle_sdk_message(v, session, Arc::clone(server)).await.unwrap()
+    }
+
+    async fn authed(server: &Arc<RwLock<Server>>, tenant: &str) -> ClientSession {
+        let mut s = ClientSession::new();
+        let r = send(
+            server,
+            &mut s,
+            json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x"}}),
+        )
+        .await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s
+    }
+
+    async fn make_service(server: &Arc<RwLock<Server>>, s: &mut ClientSession, tenant: &str) -> String {
+        let r = send(
+            server,
+            s,
+            json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":65536}}),
+        )
+        .await;
+        assert_eq!(r["type"], "Service", "{r}");
+        r["data"]["service_id"].as_str().unwrap().to_string()
+    }
+
+    fn get_path(service_id: &str) -> serde_json::Value {
+        json!({"type":"GetServiceFilePath","data":{"request_id":"r1","service_id":service_id}})
+    }
+
+    fn confirm(file_id: u64, nonce: &str) -> serde_json::Value {
+        json!({"type":"ConfirmLocal","data":{"request_id":"r2","file_id":file_id,"nonce":nonce}})
+    }
+
+    fn tenant() -> String {
+        format!("lm_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(tenant: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{tenant}"));
+    }
+
+    fn nonce_files(tenant: &str) -> usize {
+        std::fs::read_dir(format!("tenant_{tenant}"))
+            .map(|d| {
+                d.flatten()
+                    .filter(|e| e.file_name().to_string_lossy().starts_with(".nonce-"))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    /// A server with one trusted-local service and a read-write session on it.
+    async fn setup() -> (Arc<RwLock<Server>>, ClientSession, String, String) {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let id = make_service(&server, &mut s, &t).await;
+        assert!(server.write().await.set_trusted_local(&id, true));
+        (server, s, t, id)
+    }
+
+    #[tokio::test]
+    async fn service_that_is_not_trusted_local_gets_a_file_id_and_no_path() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let id = make_service(&server, &mut s, &t).await;
+        let r = send(&server, &mut s, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert_eq!(r["data"]["request_id"], "r1");
+        assert!(r["data"]["file_id"].as_u64().unwrap() >= 1);
+        assert!(r["data"].get("path").is_none(), "{r}");
+        assert!(r["data"].get("nonce_path").is_none(), "{r}");
+        assert_eq!(nonce_files(&t), 0);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn trusted_local_service_with_a_write_grant_is_offered_path_and_nonce() {
+        let (server, mut s, t, id) = setup().await;
+        let r = send(&server, &mut s, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        let path = std::path::PathBuf::from(r["data"]["path"].as_str().unwrap());
+        let nonce_path = std::path::PathBuf::from(r["data"]["nonce_path"].as_str().unwrap());
+        assert!(path.is_absolute() && nonce_path.is_absolute());
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 65536);
+        let nonce = std::fs::read_to_string(&nonce_path).unwrap();
+        assert_eq!(nonce.len(), 64);
+        assert!(nonce.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(nonce_path.parent(), path.parent(), "nonce lives in the tenant directory");
+        assert!(!nonce_path.to_string_lossy().contains(&id), "nonce path is not the service file");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_read_only_session_is_never_offered_a_path() {
+        let (server, mut s, t, id) = setup().await;
+        s.permissions = Some(crate::auth::PermissionSet::read_only());
+        let r = send(&server, &mut s, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert!(r["data"].get("path").is_none(), "{r}");
+        assert_eq!(nonce_files(&t), 0, "no nonce file may be written for a read-only caller");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn file_ids_are_stable_per_service_and_distinct_between_services() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let a = make_service(&server, &mut s, &t).await;
+        let b = make_service(&server, &mut s, &t).await;
+        let ra = send(&server, &mut s, get_path(&a)).await;
+        let ra2 = send(&server, &mut s, get_path(&a)).await;
+        let rb = send(&server, &mut s, get_path(&b)).await;
+        assert_eq!(ra["data"]["file_id"], ra2["data"]["file_id"]);
+        assert_ne!(ra["data"]["file_id"], rb["data"]["file_id"]);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn unknown_service_is_not_found_and_uses_the_wire_spelling() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let r = send(&server, &mut s, get_path("no-such-service")).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
+        assert_eq!(r["data"]["request_id"], "r1");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn another_tenants_service_is_refused_and_writes_no_nonce() {
+        let (server, _owner, t, id) = setup().await;
+        let other = tenant();
+        let mut s2 = authed(&server, &other).await;
+        let r = send(&server, &mut s2, get_path(&id)).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert!(r["data"].get("path").is_none(), "{r}");
+        assert_eq!(nonce_files(&t), 0);
+        cleanup(&t);
+        cleanup(&other);
+    }
+
+    #[tokio::test]
+    async fn a_request_without_request_id_is_invalid() {
+        let (server, mut s, t, id) = setup().await;
+        let r = send(
+            &server,
+            &mut s,
+            json!({"type":"GetServiceFilePath","data":{"service_id":id}}),
+        )
+        .await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn correct_nonce_is_acknowledged_and_the_nonce_file_is_deleted() {
+        let (server, mut s, t, id) = setup().await;
+        let r = send(&server, &mut s, get_path(&id)).await;
+        let file_id = r["data"]["file_id"].as_u64().unwrap();
+        let nonce_path = r["data"]["nonce_path"].as_str().unwrap().to_string();
+        let nonce = std::fs::read_to_string(&nonce_path).unwrap();
+        let ack = send(&server, &mut s, confirm(file_id, &nonce)).await;
+        assert_eq!(ack["type"], "ConfirmLocalAck", "{ack}");
+        assert_eq!(ack["data"]["file_id"], file_id);
+        assert!(!std::path::Path::new(&nonce_path).exists(), "nonce file must be deleted");
+        assert!(s.local_files.contains(&(file_id as u32)));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn wrong_nonce_is_denied_and_cannot_be_retried() {
+        let (server, mut s, t, id) = setup().await;
+        let r = send(&server, &mut s, get_path(&id)).await;
+        let file_id = r["data"]["file_id"].as_u64().unwrap();
+        let nonce_path = r["data"]["nonce_path"].as_str().unwrap().to_string();
+        let nonce = std::fs::read_to_string(&nonce_path).unwrap();
+        let bad = send(&server, &mut s, confirm(file_id, "0".repeat(64).as_str())).await;
+        assert_eq!(bad["type"], "Error", "{bad}");
+        assert_eq!(bad["data"]["code"], "PERMISSION_DENIED", "{bad}");
+        assert!(!std::path::Path::new(&nonce_path).exists());
+        // The right nonce no longer works: one attempt per nonce.
+        let again = send(&server, &mut s, confirm(file_id, &nonce)).await;
+        assert_eq!(again["type"], "Error", "{again}");
+        assert!(!s.local_files.contains(&(file_id as u32)));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn confirm_with_nothing_pending_is_invalid() {
+        let (server, mut s, t, _id) = setup().await;
+        let r = send(&server, &mut s, confirm(1, "abc")).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_nonce_for_one_file_cannot_confirm_another_file() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let a = make_service(&server, &mut s, &t).await;
+        let b = make_service(&server, &mut s, &t).await;
+        {
+            let mut g = server.write().await;
+            g.set_trusted_local(&a, true);
+            g.set_trusted_local(&b, true);
+        }
+        let ra = send(&server, &mut s, get_path(&a)).await;
+        let rb = send(&server, &mut s, get_path(&b)).await;
+        let nonce_a = std::fs::read_to_string(ra["data"]["nonce_path"].as_str().unwrap()).unwrap();
+        let fid_b = rb["data"]["file_id"].as_u64().unwrap();
+        let r = send(&server, &mut s, confirm(fid_b, &nonce_a)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_session_cannot_pile_up_unconfirmed_nonces() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let mut ids = vec![];
+        for _ in 0..(crate::server::local_mapping::MAX_PENDING_NONCES + 1) {
+            let id = make_service(&server, &mut s, &t).await;
+            server.write().await.set_trusted_local(&id, true);
+            ids.push(id);
+        }
+        let mut limited = false;
+        for id in &ids {
+            let r = send(&server, &mut s, get_path(id)).await;
+            if r["type"] == "Error" {
+                assert_eq!(r["data"]["code"], "RATE_LIMITED", "{r}");
+                limited = true;
+            }
+        }
+        assert!(limited, "the {}th request must be rate limited", ids.len());
+        assert!(nonce_files(&t) <= crate::server::local_mapping::MAX_PENDING_NONCES);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn disconnect_deletes_unconfirmed_nonce_files() {
+        let (server, mut s, t, id) = setup().await;
+        let r = send(&server, &mut s, get_path(&id)).await;
+        assert!(r["data"]["nonce_path"].is_string());
+        assert_eq!(nonce_files(&t), 1);
+        send(&server, &mut s, json!({"type":"Disconnect","data":{}})).await;
+        assert_eq!(nonce_files(&t), 0);
+        cleanup(&t);
+    }
+
+    #[test]
+    fn sweep_removes_only_nonce_files() {
+        let d = tempfile::tempdir().unwrap();
+        let keep = d.path().join("service_x.mem");
+        std::fs::write(&keep, b"data").unwrap();
+        let p = crate::server::local_mapping::create_nonce_file(d.path()).unwrap();
+        crate::server::local_mapping::sweep_stale(d.path(), std::time::Duration::from_secs(3600));
+        assert!(p.path.exists(), "a fresh nonce is not stale");
+        crate::server::local_mapping::sweep_stale(d.path(), std::time::Duration::ZERO);
+        assert!(!p.path.exists());
+        assert!(keep.exists(), "non-nonce files are never touched");
+    }
+
+    #[test]
+    fn secrets_match_compares_whole_values() {
+        use crate::server::local_mapping::secrets_match;
+        assert!(secrets_match("abc", "abc"));
+        assert!(!secrets_match("abc", "abd"));
+        assert!(!secrets_match("abc", "ab"));
+        assert!(!secrets_match("", "a"));
+        assert!(secrets_match("", ""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nonce_file_is_private_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let p = crate::server::local_mapping::create_nonce_file(d.path()).unwrap();
+        let mode = std::fs::metadata(&p.path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }

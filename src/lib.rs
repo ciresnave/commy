@@ -258,6 +258,11 @@ pub struct ServiceRecord {
     pub tenant_name: String,
     pub service_name: String,
     pub file_path: String,
+    /// The id range frames use for this service's file; assigned by the server at creation.
+    pub file_id: u32,
+    /// Whether an admin has opened this service to local mapping. Off by default: the server
+    /// cannot see stores into a mapping, so only OS file permissions guard it.
+    pub trusted_local: bool,
 }
 
 pub struct Server {
@@ -273,6 +278,8 @@ pub struct Server {
     pub dev_auth: bool,
     /// Largest service file (bytes) a client may ask for.
     pub max_service_size: u64,
+    /// The next `file_id` to hand out.
+    pub next_file_id: u32,
 }
 
 /// Page size service files are rounded up to.
@@ -332,10 +339,23 @@ impl Server {
             clients: vec![],
             service_registry: std::collections::HashMap::new(),
             dev_auth,
+            next_file_id: 1,
             max_service_size: std::env::var(MAX_SERVICE_SIZE_ENV)
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_MAX_SERVICE_SIZE),
+        }
+    }
+
+    /// Open (or close) a service to local mapping. Returns false for an unknown service.
+    /// (An admin message for this arrives with the service-scoped permissions, C10.)
+    pub fn set_trusted_local(&mut self, service_id: &str, trusted: bool) -> bool {
+        match self.service_registry.get_mut(service_id) {
+            Some(record) => {
+                record.trusted_local = trusted;
+                true
+            }
+            None => false,
         }
     }
 

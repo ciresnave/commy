@@ -246,6 +246,10 @@ pub struct ClientSession {
     pub outbound_queue_size: usize,
     /// Subscribed services
     pub subscriptions: std::collections::HashSet<String>,
+    /// Local-mapping nonces handed out and not yet confirmed, by `file_id`.
+    pub pending_nonces: std::collections::HashMap<u32, crate::server::local_mapping::PendingNonce>,
+    /// Files this session proved it can map locally (`file_id`s).
+    pub local_files: std::collections::HashSet<u32>,
 }
 
 impl ClientSession {
@@ -262,6 +266,15 @@ impl ClientSession {
             last_heartbeat_ack: None,
             outbound_queue_size: 0,
             subscriptions: std::collections::HashSet::new(),
+            pending_nonces: std::collections::HashMap::new(),
+            local_files: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Delete the side files of every unconfirmed nonce (on disconnect).
+    pub fn drop_pending_nonces(&mut self) {
+        for (_, pending) in self.pending_nonces.drain() {
+            let _ = std::fs::remove_file(&pending.path);
         }
     }
 
