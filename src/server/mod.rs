@@ -18,6 +18,7 @@
 //! - **WsHandler**: Per-connection task managing individual client communication
 
 pub mod clustering;
+pub mod local_mapping;
 pub mod message_router;
 pub mod session_manager;
 pub mod tls;
