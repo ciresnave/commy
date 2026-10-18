@@ -227,9 +227,15 @@ impl Tenant {
             .or_insert_with(move || Service::new(service_name))
     }
 
-    /// Register a service backed by a given file on disk (creates the file if it doesn't exist).
-    pub fn register_service(&mut self, service_name: &str, file_path: &str) -> std::io::Result<()> {
-        let service = Service::open_or_create(file_path, 65536)?;
+    /// Register a service backed by a given file on disk (creates the file, `size` bytes, if it
+    /// doesn't exist). The caller has already validated and page-rounded `size`.
+    pub fn register_service(
+        &mut self,
+        service_name: &str,
+        file_path: &str,
+        size: usize,
+    ) -> std::io::Result<()> {
+        let service = Service::open_or_create(file_path, size)?;
         self.services.insert(service_name.to_string(), service);
         Ok(())
     }
@@ -265,6 +271,41 @@ pub struct Server {
     /// Development authentication: accepts any credential and grants admin. Off unless the
     /// operator sets `COMMY_ALLOW_DEV_AUTH=1`. Never enable it on a reachable server.
     pub dev_auth: bool,
+    /// Largest service file (bytes) a client may ask for.
+    pub max_service_size: u64,
+}
+
+/// Page size service files are rounded up to.
+pub const PAGE_SIZE: u64 = 4096;
+
+/// Default largest service file a client may ask for: 10 MiB.
+pub const DEFAULT_MAX_SERVICE_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Interim way to set the maximum service size (bytes) until config-file support exists.
+pub const MAX_SERVICE_SIZE_ENV: &str = "COMMY_MAX_SERVICE_SIZE";
+
+/// Why a requested service size was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceSizeError {
+    /// A zero-length file cannot be mapped.
+    Zero,
+    /// The (page-rounded) size is above the server maximum.
+    TooLarge,
+}
+
+/// The file size to create for a requested size: at least one byte, rounded up to whole pages,
+/// and no more than `max` (itself rounded up to whole pages).
+pub fn service_file_size(requested: u64, max: u64) -> Result<u64, ServiceSizeError> {
+    if requested == 0 {
+        return Err(ServiceSizeError::Zero);
+    }
+    let round = |n: u64| n.checked_add(PAGE_SIZE - 1).map(|v| v / PAGE_SIZE * PAGE_SIZE);
+    let rounded = round(requested).ok_or(ServiceSizeError::TooLarge)?;
+    let max = round(max).unwrap_or(u64::MAX);
+    if rounded > max {
+        return Err(ServiceSizeError::TooLarge);
+    }
+    Ok(rounded)
 }
 
 /// The environment variable that turns development authentication on.
@@ -291,7 +332,17 @@ impl Server {
             clients: vec![],
             service_registry: std::collections::HashMap::new(),
             dev_auth,
+            max_service_size: std::env::var(MAX_SERVICE_SIZE_ENV)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(DEFAULT_MAX_SERVICE_SIZE),
         }
+    }
+
+    /// Set the largest service file a client may ask for (bytes).
+    pub fn with_max_service_size(mut self, max: u64) -> Self {
+        self.max_service_size = max;
+        self
     }
 
     pub fn get_tenant(&mut self, tenant_name: &str) -> &mut Tenant {
@@ -654,7 +705,7 @@ mod tests {
         let ctx = TenantAuthContext::new(config);
         let mut tenant = Tenant::new("t2".to_string(), ctx);
         tenant
-            .register_service("svc", tmp.path().to_str().unwrap())
+            .register_service("svc", tmp.path().to_str().unwrap(), 65536)
             .unwrap();
         assert!(tenant.get_service_by_name("svc").is_some());
         assert!(tenant.get_service_mut_by_name("svc").is_some());
