@@ -53,11 +53,45 @@ pub async fn handle_connection(
     // Split the WebSocket stream into sender and receiver
     let (mut write, mut read) = ws_stream.split();
 
+    // Other connections forward ranges to this one through this queue.
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<
+        crate::server::forwarding::Outbound,
+    >();
+    session.outbound = Some(out_tx);
+
     loop {
+        // Wait for the next frame from the client, sending anything forwarded to us meanwhile.
+        let next = loop {
+            tokio::select! {
+                Some(out) = out_rx.recv() => {
+                    let sent = match out {
+                        crate::server::forwarding::Outbound::Text(v) => {
+                            write.send(Message::Text(v.to_string().into())).await
+                        }
+                        crate::server::forwarding::Outbound::Binary(b) => {
+                            write.send(Message::Binary(b.into())).await
+                        }
+                    };
+                    if sent.is_err() {
+                        break None;
+                    }
+                }
+                incoming = read.next() => break incoming,
+            }
+        };
         // Read WebSocket frame (RFC 6455 frame format)
-        match read.next().await {
+        match next {
             Some(Ok(msg)) => {
                 match msg {
+                    Message::Binary(data) if data.first() == Some(&commy_wire::KIND_RANGE) => {
+                        // A commy-wire range frame (a remote sender's changed bytes). MessagePack
+                        // messages are maps, which never start with byte 1.
+                        if let Some(err) = handle_range_frame(&data, &mut session, &_server).await {
+                            if let Ok(text) = serde_json::to_string(&err) {
+                                let _ = write.send(Message::Text(text.into())).await;
+                            }
+                        }
+                    }
                     Message::Binary(data) => {
                         // Parse incoming MessagePack message from binary frame
                         match rmp_serde::from_slice::<WssMessage>(&data) {
@@ -224,7 +258,9 @@ pub async fn handle_connection(
     // Send close frame to gracefully close connection
     let _ = write.send(Message::Close(None)).await;
 
-    // Cleanup: remove session on disconnect
+    // Cleanup: leave every file, drop unconfirmed nonces, remove session on disconnect
+    _server.read().await.forwarder.leave_session(&session.session_id);
+    session.drop_pending_nonces();
     sessions.write().await.remove(&session.session_id);
     println!("Client {} session cleaned up", session.session_id);
 
@@ -1456,6 +1492,14 @@ async fn handle_local_mapping(
                 ));
             }
             session.local_files.insert(req.file_id);
+            if let Some(tx) = &session.outbound {
+                server.read().await.forwarder.join(
+                    req.file_id,
+                    &session.session_id,
+                    crate::server::forwarding::Mode::Local,
+                    tx.clone(),
+                );
+            }
             Some(wire_json(&ControlMessage::ConfirmLocalAck(
                 commy_wire::ConfirmLocalAck {
                     request_id: req.request_id,
@@ -1504,6 +1548,15 @@ async fn handle_local_mapping(
             for frame in commy_wire::RangeFrame::split(record.file_id, seq, 0, &bytes) {
                 session.outbound_frames.push(frame.encode());
             }
+            // From now on this session is a remote mirror of the file and is sent every flush.
+            if let Some(tx) = &session.outbound {
+                guard.forwarder.join(
+                    record.file_id,
+                    &session.session_id,
+                    crate::server::forwarding::Mode::Remote,
+                    tx.clone(),
+                );
+            }
             Some(wire_json(&ControlMessage::ResyncDone(
                 commy_wire::ResyncDone {
                     request_id: req.request_id,
@@ -1513,12 +1566,253 @@ async fn handle_local_mapping(
                 },
             )))
         }
+        ControlMessage::RangesChanged(req) => {
+            let rid = Some(req.request_id.as_str());
+            if let Err(why) = commy_wire::validate_ranges(&req.ranges) {
+                return Some(wire_error(ErrorCode::InvalidRequest, why, rid));
+            }
+            let file = match writable_file(session, server, req.file_id, rid).await {
+                Ok(f) => f,
+                Err(e) => return Some(e),
+            };
+            if !session.local_files.contains(&req.file_id) {
+                return Some(wire_error(
+                    ErrorCode::InvalidRequest,
+                    "Not a local mapper of this file; remote senders send range frames, then FlushEnd",
+                    rid,
+                ));
+            }
+            if !ranges_in_bounds(&req.ranges, file.size) {
+                return Some(wire_error(
+                    ErrorCode::InvalidRequest,
+                    "A range is outside the file",
+                    rid,
+                ));
+            }
+            let seq = commit_flush(session, server, req.file_id, &file.path, &req.ranges).await;
+            Some(wire_json(&ControlMessage::FlushAck(commy_wire::FlushAck {
+                request_id: req.request_id,
+                file_id: req.file_id,
+                seq,
+            })))
+        }
+        ControlMessage::FlushEnd(req) => {
+            let rid = Some(req.request_id.as_str());
+            let file = match writable_file(session, server, req.file_id, rid).await {
+                Ok(f) => f,
+                Err(e) => return Some(e),
+            };
+            let pending = session.pending_flush.remove(&req.file_id).unwrap_or_default();
+            if pending.is_empty() {
+                return Some(wire_error(
+                    ErrorCode::InvalidRequest,
+                    "No range frames were sent for this flush",
+                    rid,
+                ));
+            }
+            let ranges = crate::server::forwarding::merge_ranges(pending);
+            let seq = commit_flush(session, server, req.file_id, &file.path, &ranges).await;
+            Some(wire_json(&ControlMessage::FlushAck(commy_wire::FlushAck {
+                request_id: req.request_id,
+                file_id: req.file_id,
+                seq,
+            })))
+        }
         _ => Some(wire_error(
             ErrorCode::InvalidRequest,
-            "Not a local-mapping or resync request",
+            "Not a local-mapping, resync or flush request",
             None,
         )),
     }
+}
+
+/// Most merged ranges one remote flush may accumulate before `FlushEnd`; keeps a fragmented writer
+/// from growing the pending list without bound.
+const MAX_PENDING_RANGES: usize = 65_536;
+
+/// A file the session may write, as the flush handlers need it.
+struct WritableFile {
+    path: String,
+    size: u64,
+}
+
+/// Find the file, check it is in the session's tenant (another tenant's file is reported as unknown)
+/// and that the session holds a write grant.
+async fn writable_file(
+    session: &ClientSession,
+    server: &Arc<RwLock<Server>>,
+    file_id: u32,
+    rid: Option<&str>,
+) -> Result<WritableFile, serde_json::Value> {
+    use commy_wire::ErrorCode;
+    let guard = server.read().await;
+    let record = guard
+        .service_registry
+        .values()
+        .find(|r| r.file_id == file_id)
+        .filter(|r| session.tenant_id.as_deref() == Some(r.tenant_name.as_str()))
+        .ok_or_else(|| wire_error(ErrorCode::NotFound, "Unknown file", rid))?;
+    let can_write = session.permissions.as_ref().is_some_and(|p| {
+        p.has_any(&[
+            crate::auth::Permission::ServiceWrite,
+            crate::auth::Permission::ServiceAdmin,
+            crate::auth::Permission::TenantAdmin,
+        ])
+    });
+    if !can_write {
+        return Err(wire_error(
+            ErrorCode::PermissionDenied,
+            "No write access to this file",
+            rid,
+        ));
+    }
+    let size = std::fs::metadata(&record.file_path)
+        .map(|m| m.len())
+        .map_err(|_| wire_error(ErrorCode::InternalError, "Cannot read the service file", rid))?;
+    Ok(WritableFile {
+        path: record.file_path.clone(),
+        size,
+    })
+}
+
+fn ranges_in_bounds(ranges: &[commy_wire::ByteRange], size: u64) -> bool {
+    ranges
+        .iter()
+        .all(|r| r.offset.checked_add(r.len).is_some_and(|end| end <= size))
+}
+
+/// Give a flush its sequence number and forward it to every other member of the file: local members
+/// get the ranges, remote members get the ranges plus the bytes read now. Returns the new `seq`.
+async fn commit_flush(
+    session: &ClientSession,
+    server: &Arc<RwLock<Server>>,
+    file_id: u32,
+    path: &str,
+    ranges: &[commy_wire::ByteRange],
+) -> u64 {
+    use crate::server::forwarding::{read_frames, Mode, Outbound};
+    let (seq, receivers) = {
+        let mut guard = server.write().await;
+        let seq = match guard
+            .service_registry
+            .values_mut()
+            .find(|r| r.file_id == file_id)
+        {
+            Some(record) => {
+                record.seq += 1;
+                record.seq
+            }
+            None => 0,
+        };
+        (seq, guard.forwarder.receivers(file_id, &session.session_id))
+    };
+    if receivers.is_empty() {
+        return seq;
+    }
+    let frames = if receivers.iter().any(|(m, _)| *m == Mode::Remote) {
+        match read_frames(path, file_id, seq, ranges) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                eprintln!("[forward] cannot read {path}: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    for (mode, tx) in receivers {
+        match mode {
+            Mode::Local => {
+                for chunk in ranges.chunks(commy_wire::MAX_RANGES_PER_MESSAGE) {
+                    let msg = commy_wire::ControlMessage::RangesUpdated(commy_wire::RangesUpdated {
+                        file_id,
+                        seq,
+                        ranges: chunk.to_vec(),
+                    });
+                    let _ = tx.send(Outbound::Text(wire_json(&msg)));
+                }
+            }
+            Mode::Remote => {
+                if let Some(frames) = &frames {
+                    for f in frames {
+                        let _ = tx.send(Outbound::Binary(f.clone()));
+                    }
+                }
+            }
+        }
+    }
+    seq
+}
+
+/// One binary range frame from a remote sender: write its bytes into the file now and remember the
+/// range. The flush is forwarded, and acknowledged, at `FlushEnd`. Returns an error reply, or
+/// `None` when the frame was accepted.
+pub(crate) async fn handle_range_frame(
+    bytes: &[u8],
+    session: &mut ClientSession,
+    server: &Arc<RwLock<Server>>,
+) -> Option<serde_json::Value> {
+    use commy_wire::ErrorCode;
+    if !session_is_authenticated(session) {
+        return Some(wire_error(ErrorCode::Unauthenticated, "Not authenticated", None));
+    }
+    let frame = match commy_wire::RangeFrame::decode(bytes) {
+        Ok(f) => f,
+        Err(e) => {
+            return Some(wire_error(
+                ErrorCode::InvalidRequest,
+                &format!("bad range frame: {e:?}"),
+                None,
+            ))
+        }
+    };
+    let file = match writable_file(session, server, frame.file_id, None).await {
+        Ok(f) => f,
+        Err(e) => return Some(e),
+    };
+    if session.local_files.contains(&frame.file_id) {
+        return Some(wire_error(
+            ErrorCode::InvalidRequest,
+            "A local mapper reports changes with RangesChanged, not range frames",
+            None,
+        ));
+    }
+    let range = commy_wire::ByteRange {
+        offset: frame.offset,
+        len: frame.data.len() as u64,
+    };
+    if !ranges_in_bounds(std::slice::from_ref(&range), file.size) {
+        return Some(wire_error(
+            ErrorCode::InvalidRequest,
+            "Range is outside the file",
+            None,
+        ));
+    }
+    let pending = session.pending_flush.entry(frame.file_id).or_default();
+    if pending.len() >= MAX_PENDING_RANGES {
+        return Some(wire_error(
+            ErrorCode::InvalidRequest,
+            "Too many ranges in one flush; send FlushEnd",
+            None,
+        ));
+    }
+    let wrote = (|| -> std::io::Result<()> {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new().write(true).open(&file.path)?;
+        f.seek(SeekFrom::Start(frame.offset))?;
+        f.write_all(&frame.data)
+    })();
+    if let Err(e) = wrote {
+        eprintln!("[forward] cannot write {}: {e}", file.path);
+        return Some(wire_error(
+            ErrorCode::InternalError,
+            "Cannot write the service file",
+            None,
+        ));
+    }
+    pending.push(range);
+    *pending = crate::server::forwarding::merge_ranges(std::mem::take(pending));
+    None
 }
 
 async fn handle_sdk_message(
@@ -2291,7 +2585,7 @@ async fn handle_sdk_message(
             }))
         }
 
-        "GetServiceFilePath" | "ConfirmLocal" | "Resync" => {
+        "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" => {
             handle_local_mapping(message, session, &server).await
         }
 
@@ -2365,6 +2659,7 @@ async fn handle_sdk_message(
 
         "Disconnect" => {
             session.drop_pending_nonces();
+            server.read().await.forwarder.leave_session(&session.session_id);
             session.state = ClientState::Disconnected;
             Some(serde_json::json!({
                 "type": "Result",
@@ -4202,5 +4497,355 @@ mod resync_tests {
         let (_, frames) = reassemble(&mut s, 4096);
         assert!(frames.iter().all(|f| f.seq == 41));
         cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use crate::server::forwarding::{merge_ranges, Outbound};
+    use commy_wire::{ByteRange, RangeFrame};
+    use serde_json::json;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
+    struct Peer {
+        s: ClientSession,
+        rx: UnboundedReceiver<Outbound>,
+    }
+
+    async fn send(
+        server: &Arc<RwLock<Server>>,
+        session: &mut ClientSession,
+        v: serde_json::Value,
+    ) -> serde_json::Value {
+        handle_sdk_message(v, session, Arc::clone(server)).await.unwrap()
+    }
+
+    fn tenant() -> String {
+        format!("fw_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(tenant: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{tenant}"));
+    }
+
+    async fn peer(server: &Arc<RwLock<Server>>, tenant: &str) -> Peer {
+        let mut s = ClientSession::new();
+        let r = send(
+            server,
+            &mut s,
+            json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x"}}),
+        )
+        .await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        let (tx, rx) = unbounded_channel();
+        s.outbound = Some(tx);
+        Peer { s, rx }
+    }
+
+    /// A 4 KiB trusted-local service; returns (service_id, file_id, path).
+    async fn service(server: &Arc<RwLock<Server>>, p: &mut Peer, tenant: &str) -> (String, u32, String) {
+        let r = send(
+            server,
+            &mut p.s,
+            json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":4096}}),
+        )
+        .await;
+        assert_eq!(r["type"], "Service", "{r}");
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        let mut g = server.write().await;
+        g.set_trusted_local(&id, true);
+        let rec = &g.service_registry[&id];
+        (id.clone(), rec.file_id, rec.file_path.clone())
+    }
+
+    async fn make_local(server: &Arc<RwLock<Server>>, p: &mut Peer, service_id: &str) {
+        let r = send(
+            server,
+            &mut p.s,
+            json!({"type":"GetServiceFilePath","data":{"request_id":"g","service_id":service_id}}),
+        )
+        .await;
+        let nonce = std::fs::read_to_string(r["data"]["nonce_path"].as_str().unwrap()).unwrap();
+        let fid = r["data"]["file_id"].as_u64().unwrap();
+        let ack = send(
+            server,
+            &mut p.s,
+            json!({"type":"ConfirmLocal","data":{"request_id":"c","file_id":fid,"nonce":nonce}}),
+        )
+        .await;
+        assert_eq!(ack["type"], "ConfirmLocalAck", "{ack}");
+    }
+
+    async fn make_remote(server: &Arc<RwLock<Server>>, p: &mut Peer, file_id: u32) {
+        let r = send(
+            server,
+            &mut p.s,
+            json!({"type":"Resync","data":{"request_id":"rs","file_id":file_id}}),
+        )
+        .await;
+        assert_eq!(r["type"], "ResyncDone", "{r}");
+        p.s.outbound_frames.clear();
+    }
+
+    fn poke(path: &str, offset: u64, bytes: &[u8]) {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.seek(SeekFrom::Start(offset)).unwrap();
+        f.write_all(bytes).unwrap();
+        f.sync_all().unwrap();
+    }
+
+    fn peek(path: &str, offset: usize, len: usize) -> Vec<u8> {
+        std::fs::read(path).unwrap()[offset..offset + len].to_vec()
+    }
+
+    fn changed(file_id: u32, ranges: serde_json::Value) -> serde_json::Value {
+        json!({"type":"RangesChanged","data":{"request_id":"f","file_id":file_id,"ranges":ranges}})
+    }
+
+    fn flush_end(file_id: u32) -> serde_json::Value {
+        json!({"type":"FlushEnd","data":{"request_id":"fe","file_id":file_id}})
+    }
+
+    fn frame(file_id: u32, offset: u64, data: &[u8]) -> Vec<u8> {
+        RangeFrame { file_id, seq: 0, offset, data: data.to_vec() }.encode()
+    }
+
+    fn next_text(p: &mut Peer) -> serde_json::Value {
+        match p.rx.try_recv() {
+            Ok(Outbound::Text(v)) => v,
+            other => panic!("expected a text message, got {other:?}"),
+        }
+    }
+
+    fn next_binary(p: &mut Peer) -> RangeFrame {
+        match p.rx.try_recv() {
+            Ok(Outbound::Binary(b)) => RangeFrame::decode(&b).unwrap(),
+            other => panic!("expected a binary frame, got {other:?}"),
+        }
+    }
+
+    fn nothing(p: &mut Peer) {
+        assert!(p.rx.try_recv().is_err(), "nothing should have been forwarded");
+    }
+
+    #[tokio::test]
+    async fn a_local_flush_reaches_local_receivers_as_ranges_and_remote_receivers_with_bytes() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, path) = service(&server, &mut a, &t).await;
+        let mut b = peer(&server, &t).await;
+        let mut c = peer(&server, &t).await;
+        make_local(&server, &mut a, &id).await;
+        make_local(&server, &mut b, &id).await;
+        make_remote(&server, &mut c, fid).await;
+
+        poke(&path, 100, &[9, 8, 7, 6]);
+        let ack = send(&server, &mut a.s, changed(fid, json!([{"offset":100,"len":4}]))).await;
+        assert_eq!(ack["type"], "FlushAck", "{ack}");
+        assert_eq!(ack["data"]["seq"], 1);
+        assert_eq!(ack["data"]["request_id"], "f");
+
+        let upd = next_text(&mut b);
+        assert_eq!(upd["type"], "RangesUpdated", "{upd}");
+        assert_eq!(upd["data"]["seq"], 1);
+        assert_eq!(upd["data"]["ranges"], json!([{"offset":100,"len":4}]));
+        let f = next_binary(&mut c);
+        assert_eq!((f.file_id, f.seq, f.offset, f.data), (fid, 1, 100, vec![9, 8, 7, 6]));
+        nothing(&mut a);
+        nothing(&mut b);
+        nothing(&mut c);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_remote_flush_writes_the_file_and_forwards_at_flush_end() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, path) = service(&server, &mut a, &t).await;
+        let mut b = peer(&server, &t).await;
+        let mut c = peer(&server, &t).await;
+        let mut d = peer(&server, &t).await;
+        make_local(&server, &mut a, &id).await;
+        make_remote(&server, &mut c, fid).await;
+        make_remote(&server, &mut d, fid).await;
+        let _ = &mut b;
+
+        let err = handle_range_frame(&frame(fid, 200, &[1, 2, 3]), &mut c.s, &server).await;
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(peek(&path, 200, 3), vec![1, 2, 3], "bytes land in the file at once");
+        nothing(&mut a);
+        nothing(&mut d);
+
+        let ack = send(&server, &mut c.s, flush_end(fid)).await;
+        assert_eq!(ack["type"], "FlushAck", "{ack}");
+        assert_eq!(ack["data"]["seq"], 1);
+        let upd = next_text(&mut a);
+        assert_eq!(upd["data"]["ranges"], json!([{"offset":200,"len":3}]));
+        let f = next_binary(&mut d);
+        assert_eq!((f.offset, f.seq, f.data), (200, 1, vec![1, 2, 3]));
+        nothing(&mut c);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn adjacent_frames_of_one_flush_merge_into_one_range() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, _path) = service(&server, &mut a, &t).await;
+        let mut c = peer(&server, &t).await;
+        make_local(&server, &mut a, &id).await;
+        make_remote(&server, &mut c, fid).await;
+        assert!(handle_range_frame(&frame(fid, 4, &[5; 4]), &mut c.s, &server).await.is_none());
+        assert!(handle_range_frame(&frame(fid, 0, &[1; 4]), &mut c.s, &server).await.is_none());
+        send(&server, &mut c.s, flush_end(fid)).await;
+        let upd = next_text(&mut a);
+        assert_eq!(upd["data"]["ranges"], json!([{"offset":0,"len":8}]));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn each_flush_gets_the_next_sequence_number() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, _p) = service(&server, &mut a, &t).await;
+        make_local(&server, &mut a, &id).await;
+        for want in 1..=3u64 {
+            let ack = send(&server, &mut a.s, changed(fid, json!([{"offset":0,"len":1}]))).await;
+            assert_eq!(ack["data"]["seq"], want, "{ack}");
+        }
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn refused_flushes_forward_nothing_and_do_not_spend_a_sequence_number() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, _p) = service(&server, &mut a, &t).await;
+        let mut b = peer(&server, &t).await;
+        make_local(&server, &mut a, &id).await;
+        make_local(&server, &mut b, &id).await;
+
+        // out of bounds, empty list, out of order, zero length
+        for bad in [
+            json!([{"offset":4090,"len":100}]),
+            json!([]),
+            json!([{"offset":8,"len":4},{"offset":0,"len":4}]),
+            json!([{"offset":0,"len":0}]),
+        ] {
+            let r = send(&server, &mut a.s, changed(fid, bad.clone())).await;
+            assert_eq!(r["type"], "Error", "{bad}: {r}");
+            assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{bad}: {r}");
+        }
+        nothing(&mut b);
+        let ack = send(&server, &mut a.s, changed(fid, json!([{"offset":0,"len":1}]))).await;
+        assert_eq!(ack["data"]["seq"], 1, "refusals must not advance seq: {ack}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn access_rules_apply_to_both_flush_paths() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, _p) = service(&server, &mut a, &t).await;
+        make_local(&server, &mut a, &id).await;
+
+        // another tenant never learns the file exists
+        let other = tenant();
+        let mut x = peer(&server, &other).await;
+        let r = send(&server, &mut x.s, changed(fid, json!([{"offset":0,"len":1}]))).await;
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
+        let r = send(&server, &mut x.s, flush_end(fid)).await;
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
+        let r = handle_range_frame(&frame(fid, 0, &[1]), &mut x.s, &server).await.unwrap();
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
+
+        // same tenant, read-only grant
+        let mut ro = peer(&server, &t).await;
+        ro.s.permissions = Some(crate::auth::PermissionSet::read_only());
+        let r = send(&server, &mut ro.s, flush_end(fid)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        let r = handle_range_frame(&frame(fid, 0, &[1]), &mut ro.s, &server).await.unwrap();
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+
+        // unauthenticated
+        let mut anon = ClientSession::new();
+        let r = handle_range_frame(&frame(fid, 0, &[1]), &mut anon, &server).await.unwrap();
+        assert_eq!(r["data"]["code"], "UNAUTHENTICATED", "{r}");
+        cleanup(&t);
+        cleanup(&other);
+    }
+
+    #[tokio::test]
+    async fn sender_kinds_cannot_be_mixed() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, path) = service(&server, &mut a, &t).await;
+        make_local(&server, &mut a, &id).await;
+        let mut c = peer(&server, &t).await;
+        make_remote(&server, &mut c, fid).await;
+
+        // a session that never proved it maps the file cannot send data-less ranges
+        let r = send(&server, &mut c.s, changed(fid, json!([{"offset":0,"len":1}]))).await;
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        // a local mapper cannot send range frames
+        let before = peek(&path, 0, 4);
+        let r = handle_range_frame(&frame(fid, 0, &[0xAA; 4]), &mut a.s, &server).await.unwrap();
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        assert_eq!(peek(&path, 0, 4), before, "a refused frame must not touch the file");
+        // FlushEnd with no frames
+        let r = send(&server, &mut c.s, flush_end(fid)).await;
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        // a malformed frame (zero-length) and an out-of-bounds frame
+        let mut bad = frame(fid, 0, &[1]);
+        bad[21..25].copy_from_slice(&0u32.to_le_bytes());
+        bad.truncate(25);
+        let r = handle_range_frame(&bad, &mut c.s, &server).await.unwrap();
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        let r = handle_range_frame(&frame(fid, 4095, &[1, 2]), &mut c.s, &server).await.unwrap();
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_disconnected_or_dropped_member_is_no_longer_forwarded_to() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = peer(&server, &t).await;
+        let (id, fid, _p) = service(&server, &mut a, &t).await;
+        let mut b = peer(&server, &t).await;
+        let mut c = peer(&server, &t).await;
+        make_local(&server, &mut a, &id).await;
+        make_local(&server, &mut b, &id).await;
+        make_remote(&server, &mut c, fid).await;
+        assert_eq!(server.read().await.forwarder.member_count(fid), 3);
+
+        send(&server, &mut b.s, json!({"type":"Disconnect","data":{}})).await;
+        assert_eq!(server.read().await.forwarder.member_count(fid), 2);
+        drop(c.rx); // connection gone without a Disconnect
+        let ack = send(&server, &mut a.s, changed(fid, json!([{"offset":0,"len":1}]))).await;
+        assert_eq!(ack["type"], "FlushAck", "{ack}");
+        nothing(&mut b);
+        assert_eq!(server.read().await.forwarder.member_count(fid), 1, "closed queue pruned");
+        cleanup(&t);
+    }
+
+    #[test]
+    fn merge_ranges_sorts_merges_overlaps_and_touching_and_drops_empty() {
+        let r = |offset, len| ByteRange { offset, len };
+        assert_eq!(merge_ranges(vec![]), vec![]);
+        assert_eq!(merge_ranges(vec![r(10, 5), r(0, 5)]), vec![r(0, 5), r(10, 5)]);
+        assert_eq!(merge_ranges(vec![r(0, 5), r(5, 5)]), vec![r(0, 10)]);
+        assert_eq!(merge_ranges(vec![r(0, 10), r(2, 3)]), vec![r(0, 10)]);
+        assert_eq!(merge_ranges(vec![r(0, 5), r(3, 10)]), vec![r(0, 13)]);
+        assert_eq!(merge_ranges(vec![r(7, 0), r(0, 1)]), vec![r(0, 1)]);
     }
 }

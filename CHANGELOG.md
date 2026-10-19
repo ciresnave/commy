@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0 (breaking)
+- Range forwarding (C3) on `commy-wire` 0.2.4. A session joins a file as a local mapper (after `ConfirmLocal`) or a remote mirror (after `Resync`). A local mapper reports changes with `RangesChanged` (no data); a remote sender writes range frames (binary, first byte 1) and ends the flush with `FlushEnd`. The server writes remote bytes into the file at once, gives each flush one `seq`, answers `FlushAck`, and forwards to every other member: local members get `RangesUpdated` (ranges only), remote members get range frames with the bytes read at forwarding time. A sender never gets its own ranges back. Refusals (`INVALID_REQUEST`, `NOT_FOUND` for another tenant's file, `PERMISSION_DENIED` without a write grant) forward nothing and do not spend a `seq`.
+- The connection loop now has an outbound queue per connection and selects between the socket and that queue. Closed queues are pruned; `Disconnect` and connection end remove the session from every file.
+- `ClientSession` gains `outbound` and `pending_flush`; `Server` gains `forwarder`. The `commy-wire` requirement is 0.2.4.
+
 ## 0.6.1
 - `Resync` (C2): a client with a read grant on a file gets the whole file as `commy-wire` range frames (at most 1 MiB each, offset order, all carrying the service's current `seq`), then `ResyncDone{seq, size}`. The connection loop sends queued binary frames before the text reply. Unknown file `NOT_FOUND`; another tenant's file or no read grant `PERMISSION_DENIED`. `ServiceRecord` gains `seq`; `ClientSession` gains `outbound_frames`.
 

@@ -282,6 +282,8 @@ pub struct Server {
     pub max_service_size: u64,
     /// The next `file_id` to hand out.
     pub next_file_id: u32,
+    /// Who is on which file, for range forwarding.
+    pub forwarder: server::forwarding::Registry,
 }
 
 /// Page size service files are rounded up to.
@@ -342,6 +344,7 @@ impl Server {
             service_registry: std::collections::HashMap::new(),
             dev_auth,
             next_file_id: 1,
+            forwarder: server::forwarding::Registry::new(),
             max_service_size: std::env::var(MAX_SERVICE_SIZE_ENV)
                 .ok()
                 .and_then(|v| v.parse().ok())
