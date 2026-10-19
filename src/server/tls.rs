@@ -114,8 +114,15 @@ impl TlsConfiguration {
 
         let private_key = keys.remove(0);
 
-        // Create ServerConfig
-        let config = ServerConfig::builder()
+        // Create ServerConfig with an explicit crypto provider. The dependency tree enables both the
+        // aws-lc-rs and ring backends, so rustls cannot pick a process-level default on its own and
+        // `ServerConfig::builder()` would panic.
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let config = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(|e| {
+                TlsError::InvalidCertificate(format!("Failed to select TLS versions: {:?}", e))
+            })?
             .with_no_client_auth()
             .with_single_cert(certificates, private_key)
             .map_err(|e| {
