@@ -2,6 +2,8 @@
 
 A production-ready Rust library for safe, zero-copy communication between processes on Windows using shared memory files.
 
+> **Requires nightly Rust.** The crate uses the unstable `allocator_api` and `slice_ptr_get` features (`#![feature(...)]`), and `rust-toolchain.toml` pins `nightly`. A stable toolchain cannot build it. This is expected to go away when the shared-allocator and container modules are removed (plan items C6 and C9); until then it stays.
+
 ## ⚠️ IMPORTANT: Permissions System Temporarily Disabled
 
 **This release has permissions intentionally disabled for integration purposes.** All authenticated clients currently receive full administrative permissions (ServiceCreate, ServiceRead, ServiceDelete, ServiceWrite) regardless of their credentials.

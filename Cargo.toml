@@ -1,6 +1,6 @@
 [package]
     authors      = ["Eric Evans <ciresnave@gmail.com>"]
-    description  = "A hierarchical, multi-tenant shared memory coordination system for Windows enabling secure, efficient data sharing between multiple processes via WebSocket and direct memory-mapping"
+    description  = "A hierarchical, multi-tenant shared memory coordination system for Windows enabling secure, efficient data sharing between multiple processes via WebSocket and direct memory-mapping Requires nightly Rust (allocator_api, slice_ptr_get)."
     edition      = "2021"
     license      = "MIT"
     name         = "commy"
