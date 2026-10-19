@@ -90,26 +90,53 @@ impl Rotations {
         min_interval: Duration,
         now: Instant,
     ) -> Result<Active, Refusal> {
+        self.begin_inner(service_id, requester, file_id, expected, Some(min_interval), now)
+    }
+
+    /// Start a rotation that access revocation requires. Not subject to the spacing or the
+    /// per-requester limit (access must end now), but still one rotation per service at a time.
+    pub fn begin_forced(
+        &self,
+        service_id: &str,
+        requester: &str,
+        file_id: u32,
+        expected: HashSet<String>,
+        now: Instant,
+    ) -> Result<Active, Refusal> {
+        self.begin_inner(service_id, requester, file_id, expected, None, now)
+    }
+
+    fn begin_inner(
+        &self,
+        service_id: &str,
+        requester: &str,
+        file_id: u32,
+        expected: HashSet<String>,
+        limits: Option<Duration>,
+        now: Instant,
+    ) -> Result<Active, Refusal> {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if g.active.contains_key(service_id) {
             return Err(Refusal::InProgress);
         }
-        if let Some(last) = g.last_started.get(service_id) {
-            if now.saturating_duration_since(*last) < min_interval {
-                return Err(Refusal::TooSoon);
+        if let Some(min_interval) = limits {
+            if let Some(last) = g.last_started.get(service_id) {
+                if now.saturating_duration_since(*last) < min_interval {
+                    return Err(Refusal::TooSoon);
+                }
             }
+            let window = g.per_requester.entry(requester.to_string()).or_default();
+            while window
+                .front()
+                .is_some_and(|t| now.saturating_duration_since(*t) >= REQUESTER_WINDOW)
+            {
+                window.pop_front();
+            }
+            if window.len() >= REQUESTER_CAP {
+                return Err(Refusal::RequesterLimit);
+            }
+            window.push_back(now);
         }
-        let window = g.per_requester.entry(requester.to_string()).or_default();
-        while window
-            .front()
-            .is_some_and(|t| now.saturating_duration_since(*t) >= REQUESTER_WINDOW)
-        {
-            window.pop_front();
-        }
-        if window.len() >= REQUESTER_CAP {
-            return Err(Refusal::RequesterLimit);
-        }
-        window.push_back(now);
         let active = Active {
             rotation_id: uuid::Uuid::new_v4().to_string(),
             file_id,
@@ -266,6 +293,25 @@ mod tests {
         assert!(r.begin("svc-y", "alice", 1, set(&[]), Duration::ZERO, now).is_ok());
         let later = now + REQUESTER_WINDOW;
         assert!(r.begin("svc-x", "mallory", 1, set(&[]), Duration::ZERO, later).is_ok());
+    }
+
+    #[test]
+    fn a_forced_rotation_skips_the_spacing_and_the_requester_limit_but_not_the_one_at_a_time_rule() {
+        let r = Rotations::new();
+        let now = t0();
+        for i in 0..REQUESTER_CAP + 2 {
+            let svc = format!("svc{i}");
+            r.begin_forced(&svc, "root", 1, set(&[]), now).unwrap();
+            r.finish(&svc);
+        }
+        // spacing: the same service again at once
+        r.begin_forced("svc0", "root", 1, set(&[]), now).unwrap();
+        r.finish("svc0");
+        r.begin_forced("svc0", "root", 1, set(&[]), now).unwrap();
+        assert_eq!(
+            r.begin_forced("svc0", "root", 1, set(&[]), now).unwrap_err(),
+            Refusal::InProgress
+        );
     }
 
     #[test]
