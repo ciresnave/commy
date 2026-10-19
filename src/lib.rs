@@ -296,6 +296,8 @@ pub struct Server {
     pub forwarder: server::forwarding::Registry,
     /// Running rotations and their rate limits.
     pub rotations: server::rotation::Rotations,
+    /// Service-scoped grants (role-system, in memory).
+    pub grants: Box<dyn server::grants::GrantStore>,
     /// Files that were rotated away; frames for them are refused as `INVALID_REQUEST`.
     pub retired_files: std::collections::HashSet<u32>,
     /// Files prepared for a resize and not yet live, by `file_id`.
@@ -370,6 +372,7 @@ impl Server {
             next_file_id: 1,
             forwarder: server::forwarding::Registry::new(),
             rotations: server::rotation::Rotations::new(),
+            grants: Box::new(server::grants::RoleSystemGrants::new()),
             retired_files: std::collections::HashSet::new(),
             prepared: std::collections::HashMap::new(),
             fill_timeout: std::env::var("COMMY_FILL_TIMEOUT_MS")

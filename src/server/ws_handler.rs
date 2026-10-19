@@ -1375,6 +1375,17 @@ async fn guard_sdk_message(
                             "Service belongs to another tenant",
                         ));
                     }
+                    // Entitled to the service at all: any grant on it will do here; each
+                    // handler then checks the action it needs.
+                    use crate::server::grants::Action;
+                    if !session_allows(&guard, session, service_id, Action::Read)
+                        && !session_allows(&guard, session, service_id, Action::Resize)
+                    {
+                        return Some(error_json(
+                            "PERMISSION_DENIED",
+                            "No access to this service",
+                        ));
+                    }
                 }
             }
             None
@@ -1426,13 +1437,15 @@ async fn handle_local_mapping(
                     rid,
                 ));
             }
-            let can_write = session.permissions.as_ref().is_some_and(|p| {
-                p.has_any(&[
-                    crate::auth::Permission::ServiceWrite,
-                    crate::auth::Permission::ServiceAdmin,
-                    crate::auth::Permission::TenantAdmin,
-                ])
-            });
+            use crate::server::grants::Action;
+            if !session_allows(&guard, session, &req.service_id, Action::Read) {
+                return Some(wire_error(
+                    ErrorCode::PermissionDenied,
+                    "No access to this service",
+                    rid,
+                ));
+            }
+            let can_write = session_allows(&guard, session, &req.service_id, Action::Write);
             let mut reply = commy_wire::ServiceFilePath {
                 request_id: req.request_id.clone(),
                 service_id: req.service_id.clone(),
@@ -1525,15 +1538,13 @@ async fn handle_local_mapping(
             else {
                 return Some(wire_error(ErrorCode::NotFound, "Unknown file", rid));
             };
-            let can_read = session.permissions.as_ref().is_some_and(|p| {
-                p.has_any(&[
-                    crate::auth::Permission::ServiceRead,
-                    crate::auth::Permission::ServiceWrite,
-                    crate::auth::Permission::ServiceAdmin,
-                    crate::auth::Permission::TenantRead,
-                    crate::auth::Permission::TenantAdmin,
-                ])
-            });
+            let can_read = guard
+                .service_registry
+                .iter()
+                .find(|(_, r)| r.file_id == req.file_id)
+                .is_some_and(|(sid, _)| {
+                    session_allows(&guard, session, sid, crate::server::grants::Action::Read)
+                });
             if session.tenant_id.as_deref() != Some(record.tenant_name.as_str()) || !can_read {
                 return Some(wire_error(
                     ErrorCode::PermissionDenied,
@@ -1675,6 +1686,45 @@ async fn handle_local_mapping(
 /// from growing the pending list without bound.
 const MAX_PENDING_RANGES: usize = 65_536;
 
+/// The identity a session's grants are filed under: its client id, or its session id when it has
+/// none.
+fn client_key(session: &ClientSession) -> String {
+    session
+        .client_id
+        .clone()
+        .unwrap_or_else(|| session.session_id.clone())
+}
+
+/// Import the session's authentication permissions into the grant store, once. Done lazily so that
+/// permissions assigned at authentication are what the first check sees.
+fn ensure_imported(guard: &Server, session: &ClientSession) {
+    use std::sync::atomic::Ordering;
+    if session.grants_imported.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if let (Some(tenant), Some(perms)) = (session.tenant_id.as_deref(), session.permissions.as_ref()) {
+        if let Err(e) = guard.grants.import_session(tenant, &client_key(session), perms) {
+            eprintln!("[grants] cannot import session permissions: {e}");
+        }
+    }
+}
+
+/// May the session do `action` to the service? Every service-scoped check goes through here.
+fn session_allows(
+    guard: &Server,
+    session: &ClientSession,
+    service_id: &str,
+    action: crate::server::grants::Action,
+) -> bool {
+    let Some(tenant) = session.tenant_id.as_deref() else {
+        return false;
+    };
+    ensure_imported(guard, session);
+    guard
+        .grants
+        .allows(tenant, &client_key(session), service_id, action)
+}
+
 /// A file the session may write, as the flush handlers need it.
 struct WritableFile {
     path: String,
@@ -1708,19 +1758,13 @@ async fn writable_file(
             rid,
         ));
     }
-    let record = guard
+    let (service_id, record) = guard
         .service_registry
-        .values()
-        .find(|r| r.file_id == file_id)
-        .filter(|r| session.tenant_id.as_deref() == Some(r.tenant_name.as_str()))
+        .iter()
+        .find(|(_, r)| r.file_id == file_id)
+        .filter(|(_, r)| session.tenant_id.as_deref() == Some(r.tenant_name.as_str()))
         .ok_or_else(|| wire_error(ErrorCode::NotFound, "Unknown file", rid))?;
-    let can_write = session.permissions.as_ref().is_some_and(|p| {
-        p.has_any(&[
-            crate::auth::Permission::ServiceWrite,
-            crate::auth::Permission::ServiceAdmin,
-            crate::auth::Permission::TenantAdmin,
-        ])
-    });
+    let can_write = session_allows(&guard, session, service_id, crate::server::grants::Action::Write);
     if !can_write {
         return Err(wire_error(
             ErrorCode::PermissionDenied,
@@ -1924,16 +1968,12 @@ async fn handle_rotate(
             "Service belongs to another tenant",
         );
     }
-    use crate::auth::Permission as P;
-    let allowed: &[P] = match req.reason {
-        RotateReason::Resize => &[P::ServiceResize, P::ServiceAdmin, P::TenantAdmin],
-        _ => &[P::ServiceAdmin, P::TenantAdmin],
+    use crate::server::grants::Action;
+    let needed = match req.reason {
+        RotateReason::Resize => Action::Resize,
+        _ => Action::Admin,
     };
-    if !session
-        .permissions
-        .as_ref()
-        .is_some_and(|p| p.has_any(allowed))
-    {
+    if !session_allows(&guard, session, &req.service_id, needed) {
         return rotation_refused(
             &guard,
             &who,
@@ -2555,6 +2595,20 @@ async fn handle_sdk_message(
                 }));
             }
 
+            {
+                // The creator administers what it creates.
+                let creator = client_key(session);
+                if let Err(e) = server_guard.grants.grant(
+                    tenant_id,
+                    &creator,
+                    Some(&service_id),
+                    &[crate::server::grants::Spec::Service(
+                        crate::server::grants::Action::Admin,
+                    )],
+                ) {
+                    eprintln!("[grants] cannot grant the creator admin: {e}");
+                }
+            }
             server_guard.service_registry.insert(
                 service_id.clone(),
                 crate::ServiceRecord {
@@ -4659,7 +4713,9 @@ mod local_mapping_tests {
 
     #[tokio::test]
     async fn a_read_only_session_is_never_offered_a_path() {
-        let (server, mut s, t, id) = setup().await;
+        let (server, _owner, t, id) = setup().await;
+        let mut s = authed(&server, &t).await;
+        s.client_id = Some("viewer".to_string());
         s.permissions = Some(crate::auth::PermissionSet::read_only());
         let r = send(&server, &mut s, get_path(&id)).await;
         assert_eq!(r["type"], "ServiceFilePath", "{r}");
@@ -5018,10 +5074,14 @@ mod resync_tests {
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut s = authed(&server, &t).await;
         let (_id, fid) = make_service(&server, &mut s, &t, 4096).await;
-        s.permissions = Some(crate::auth::PermissionSet::new());
-        let r = send(&server, &mut s, resync(fid)).await;
+        // A second client of the same tenant with no permissions at all. (Permissions are filed
+        // under the client's identity at first use, so it must not share the creator's.)
+        let mut nobody = authed(&server, &t).await;
+        nobody.client_id = Some("nobody".to_string());
+        nobody.permissions = Some(crate::auth::PermissionSet::new());
+        let r = send(&server, &mut nobody, resync(fid)).await;
         assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
-        assert!(s.outbound_frames.is_empty());
+        assert!(nobody.outbound_frames.is_empty());
         cleanup(&t);
     }
 
@@ -5914,6 +5974,208 @@ mod rotation_tests {
         let mut stranger = peer(&server, &t, "eve").await;
         let r = call(&server, &mut stranger.s, json!({"type":"RotationDrained","data":{"request_id":"d","rotation_id":d["rotation_id"],"file_id":d["file_id"],"seq":0}})).await.unwrap();
         assert_eq!(r["data"]["code"], "INVALID_REQUEST", "a session that was not asked to drain cannot drain: {r}");
+        cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod scoped_access_tests {
+    use super::*;
+    use crate::server::grants::{Action, Spec};
+    use serde_json::json;
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    fn tenant() -> String {
+        format!("sa_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(tenant: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{tenant}"));
+    }
+
+    /// An authenticated session of `client_id` holding no tenant-level permissions at all, so only
+    /// grants in the store count.
+    async fn bare_client(server: &Arc<RwLock<Server>>, tenant: &str, client_id: &str) -> ClientSession {
+        let mut s = ClientSession::new();
+        let r = call(
+            server,
+            &mut s,
+            json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x"}}),
+        )
+        .await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s.client_id = Some(client_id.to_string());
+        s.permissions = Some(crate::auth::PermissionSet::new());
+        s
+    }
+
+    /// Two services created by an admin; returns (admin session, (service_id, file_id) x2).
+    async fn two_services(server: &Arc<RwLock<Server>>, t: &str) -> (ClientSession, (String, u32), (String, u32)) {
+        let mut admin = ClientSession::new();
+        let r = call(server, &mut admin, json!({"type":"Authenticate","data":{"tenant_id":t,"api_key":"x"}})).await;
+        assert_eq!(r["data"]["success"], true);
+        admin.client_id = Some("admin".to_string());
+        let mut out = vec![];
+        for name in ["one", "two"] {
+            let r = call(
+                server,
+                &mut admin,
+                json!({"type":"CreateService","data":{"tenant_id":t,"service_name":name,"size":4096}}),
+            )
+            .await;
+            assert_eq!(r["type"], "Service", "{r}");
+            let id = r["data"]["service_id"].as_str().unwrap().to_string();
+            let fid = server.read().await.service_registry[&id].file_id;
+            out.push((id, fid));
+        }
+        let b = out.pop().unwrap();
+        let a = out.pop().unwrap();
+        (admin, a, b)
+    }
+
+    fn get_path(service_id: &str) -> serde_json::Value {
+        json!({"type":"GetServiceFilePath","data":{"request_id":"g","service_id":service_id}})
+    }
+
+    #[tokio::test]
+    async fn a_client_with_no_grant_reaches_no_service_of_its_own_tenant() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (_admin, (one, one_fid), _two) = two_services(&server, &t).await;
+        let mut bob = bare_client(&server, &t, "bob").await;
+        let r = call(&server, &mut bob, get_path(&one)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        let r = call(&server, &mut bob, json!({"type":"Resync","data":{"request_id":"r","file_id":one_fid}})).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        let r = call(&server, &mut bob, json!({"type":"FlushEnd","data":{"request_id":"f","file_id":one_fid}})).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_service_grant_opens_that_service_and_no_other() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (_admin, (one, one_fid), (two, two_fid)) = two_services(&server, &t).await;
+        server.read().await.grants.grant(&t, "bob", Some(&one), &[Spec::Service(Action::Read)]).unwrap();
+        let mut bob = bare_client(&server, &t, "bob").await;
+
+        let r = call(&server, &mut bob, get_path(&one)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert_eq!(r["data"]["file_id"], one_fid);
+        let r = call(&server, &mut bob, json!({"type":"Resync","data":{"request_id":"r","file_id":one_fid}})).await;
+        assert_eq!(r["type"], "ResyncDone", "{r}");
+
+        let r = call(&server, &mut bob, get_path(&two)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "the other service stays closed: {r}");
+        let r = call(&server, &mut bob, json!({"type":"Resync","data":{"request_id":"r","file_id":two_fid}})).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn read_access_does_not_allow_writing_but_write_access_does() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (_admin, (one, fid), _two) = two_services(&server, &t).await;
+        server.read().await.grants.grant(&t, "bob", Some(&one), &[Spec::Service(Action::Read)]).unwrap();
+        let mut bob = bare_client(&server, &t, "bob").await;
+        let frame = commy_wire::RangeFrame { file_id: fid, seq: 0, offset: 0, data: vec![1] }.encode();
+        let r = handle_range_frame(&frame, &mut bob, &server).await.unwrap();
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "read only: {r}");
+
+        server.read().await.grants.grant(&t, "bob", Some(&one), &[Spec::Service(Action::Write)]).unwrap();
+        assert!(handle_range_frame(&frame, &mut bob, &server).await.is_none(), "now allowed");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_tenant_wide_grant_reaches_every_service() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (_admin, (one, _f1), (two, _f2)) = two_services(&server, &t).await;
+        server.read().await.grants.grant(&t, "bob", None, &[Spec::Service(Action::Read)]).unwrap();
+        let mut bob = bare_client(&server, &t, "bob").await;
+        for id in [&one, &two] {
+            let r = call(&server, &mut bob, get_path(id)).await;
+            assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        }
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn revoking_one_service_closes_it_even_for_a_tenant_admin_and_leaves_the_other() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (mut admin, (one, _f1), (two, _f2)) = two_services(&server, &t).await;
+        let r = call(&server, &mut admin, get_path(&one)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "admin starts with access: {r}");
+        server.read().await.grants.revoke(&t, "admin", Some(&one), &[]).unwrap();
+        let r = call(&server, &mut admin, get_path(&one)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        let r = call(&server, &mut admin, get_path(&two)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "the other service is untouched: {r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn the_creator_of_a_service_administers_it() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        // A creator that holds only ServiceCreate at tenant level.
+        let mut c = bare_client(&server, &t, "creator").await;
+        let mut perms = crate::auth::PermissionSet::new();
+        perms.grant(crate::auth::Permission::ServiceCreate);
+        c.permissions = Some(perms);
+        let r = call(&server, &mut c, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"mine","size":4096}})).await;
+        assert_eq!(r["type"], "Service", "{r}");
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        assert!(server.read().await.grants.allows(&t, "creator", &id, Action::Admin));
+        let r = call(&server, &mut c, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        // someone else in the tenant has nothing on it
+        let mut other = bare_client(&server, &t, "other").await;
+        let r = call(&server, &mut other, get_path(&id)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn another_tenants_grants_do_not_count() {
+        let t = tenant();
+        let other = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (_admin, (one, _f), _two) = two_services(&server, &t).await;
+        // bob is granted on the same service id, but in the other tenant's role system
+        server.read().await.grants.grant(&other, "bob", Some(&one), &[Spec::Service(Action::Admin)]).unwrap();
+        let mut bob = bare_client(&server, &other, "bob").await;
+        let r = call(&server, &mut bob, get_path(&one)).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert!(r["data"].get("path").is_none());
+        cleanup(&t);
+        cleanup(&other);
+    }
+
+    #[tokio::test]
+    async fn the_guard_closes_the_older_handlers_too() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (mut admin, (one, _f), _two) = two_services(&server, &t).await;
+        let mut bob = bare_client(&server, &t, "bob").await;
+        for msg in [
+            json!({"type":"ReadVariable","data":{"service_id":one,"variable_name":"x"}}),
+            json!({"type":"WriteVariable","data":{"service_id":one,"variable_name":"x","value":[1]}}),
+            json!({"type":"AllocateVariable","data":{"service_id":one,"variable_name":"x","size":4}}),
+        ] {
+            let r = call(&server, &mut bob, msg.clone()).await;
+            assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{msg}: {r}");
+        }
+        // the admin is not stopped by the guard (the handler may still say the variable is unknown)
+        let r = call(&server, &mut admin, json!({"type":"ReadVariable","data":{"service_id":one,"variable_name":"x"}})).await;
+        assert_ne!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
         cleanup(&t);
     }
 }
