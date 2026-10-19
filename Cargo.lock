@@ -531,7 +531,6 @@ dependencies = [
  "chrono",
  "commy-wire",
  "futures",
- "libc",
  "memmap2",
  "rcgen",
  "rmp-serde",
