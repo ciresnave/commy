@@ -34,6 +34,16 @@ println!("Shared data: {:?}", numbers.len());
 
 **See [QUICKSTART.md](QUICKSTART.md) for more examples.**
 
+## Running the server (`commy` binary)
+
+| Variable | Meaning |
+|----------|---------|
+| `COMMY_TLS_CERT_PATH`, `COMMY_TLS_KEY_PATH` | PEM certificate and PKCS#8 key; both are needed for WSS. |
+| `COMMY_LISTEN_ADDR`, `COMMY_LISTEN_PORT` | Where to listen (default `0.0.0.0`, see the startup log for the port). |
+| `COMMY_ALLOW_DEV_AUTH=1` | Accept any credential as admin. Development only; never on a reachable server. Without it nobody can authenticate yet. |
+| `COMMY_MAX_SERVICE_SIZE` | Largest service file in bytes a client may request (default 10 MiB). |
+| `DATABASE_URL` | Backing store for tenant authentication data. **If unset the binary sets it to `postgresql://postgres:postgres@127.0.0.1:5432/commy`**, so a bare run expects a PostgreSQL there and logs "Using PostgreSQL backend"; point it at your database, or run one locally, for any run that is not a unit test (tests use in-memory storage). |
+
 ## ✨ Key Features
 
 ### 🔒 Type-Safe & Zero-Copy

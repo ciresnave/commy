@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+- Fix: the server panicked at TLS start-up ("Could not automatically determine the process-level CryptoProvider") because the dependency tree enables both aws-lc-rs and ring. `TlsConfiguration::from_files` now builds its `ServerConfig` with an explicit aws-lc-rs provider.
+- New `tests/wss_loopback.rs`: a self-signed certificate, the real `WssServer` accept loop and connection loop, and real TLS/WebSocket clients, covering TLS start-up, the outbound-queue select and the binary range-frame dispatch (closes the 0.7.0 known gap). Mutation-checked: dispatching on a wrong frame kind, or starving the outbound queue, fails the test.
+- README documents the server's environment variables, including the `DATABASE_URL` default.
+
 ## 0.7.0 (breaking)
 - Range forwarding (C3) on `commy-wire` 0.2.4. A session joins a file as a local mapper (after `ConfirmLocal`) or a remote mirror (after `Resync`). A local mapper reports changes with `RangesChanged` (no data); a remote sender writes range frames (binary, first byte 1) and ends the flush with `FlushEnd`. The server writes remote bytes into the file at once, gives each flush one `seq`, answers `FlushAck`, and forwards to every other member: local members get `RangesUpdated` (ranges only), remote members get range frames with the bytes read at forwarding time. A sender never gets its own ranges back. Refusals (`INVALID_REQUEST`, `NOT_FOUND` for another tenant's file, `PERMISSION_DENIED` without a write grant) forward nothing and do not spend a `seq`.
 - The connection loop now has an outbound queue per connection and selects between the socket and that queue. Closed queues are pruned; `Disconnect` and connection end remove the session from every file.
