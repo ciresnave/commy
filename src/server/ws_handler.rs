@@ -1496,6 +1496,7 @@ async fn handle_local_mapping(
                 server.read().await.forwarder.join(
                     req.file_id,
                     &session.session_id,
+                    session.client_id.as_deref(),
                     crate::server::forwarding::Mode::Local,
                     tx.clone(),
                 );
@@ -1510,6 +1511,13 @@ async fn handle_local_mapping(
         ControlMessage::Resync(req) => {
             let rid = Some(req.request_id.as_str());
             let guard = server.read().await;
+            if guard.retired_files.contains(&req.file_id) {
+                return Some(wire_error(
+                    ErrorCode::InvalidRequest,
+                    "This file was rotated; fetch the new one",
+                    rid,
+                ));
+            }
             let Some(record) = guard
                 .service_registry
                 .values()
@@ -1553,6 +1561,7 @@ async fn handle_local_mapping(
                 guard.forwarder.join(
                     record.file_id,
                     &session.session_id,
+                    session.client_id.as_deref(),
                     crate::server::forwarding::Mode::Remote,
                     tx.clone(),
                 );
@@ -1595,6 +1604,18 @@ async fn handle_local_mapping(
                 file_id: req.file_id,
                 seq,
             })))
+        }
+        ControlMessage::RotateRequest(req) => Some(handle_rotate(req, session, server).await),
+        ControlMessage::RotationDrained(req) => {
+            let rid = Some(req.request_id.as_str());
+            let guard = server.read().await;
+            match guard
+                .rotations
+                .mark_drained(&req.rotation_id, req.file_id, &session.session_id)
+            {
+                Ok(()) => None,
+                Err(why) => Some(wire_error(ErrorCode::InvalidRequest, why, rid)),
+            }
         }
         ControlMessage::FlushEnd(req) => {
             let rid = Some(req.request_id.as_str());
@@ -1646,6 +1667,13 @@ async fn writable_file(
 ) -> Result<WritableFile, serde_json::Value> {
     use commy_wire::ErrorCode;
     let guard = server.read().await;
+    if guard.retired_files.contains(&file_id) {
+        return Err(wire_error(
+            ErrorCode::InvalidRequest,
+            "This file was rotated; fetch the new one",
+            rid,
+        ));
+    }
     let record = guard
         .service_registry
         .values()
@@ -1813,6 +1841,336 @@ pub(crate) async fn handle_range_frame(
     pending.push(range);
     *pending = crate::server::forwarding::merge_ranges(std::mem::take(pending));
     None
+}
+
+/// A refused rotation request: audited, then answered with the wire error.
+fn rotation_refused(
+    guard: &Server,
+    who: &str,
+    req: &commy_wire::RotateRequest,
+    code: commy_wire::ErrorCode,
+    why: &str,
+) -> serde_json::Value {
+    guard.audit(&format!(
+        "rotation REFUSED service={} by={} reason={:?}: {}",
+        req.service_id, who, req.reason, why
+    ));
+    wire_error(code, why, Some(req.request_id.as_str()))
+}
+
+/// `RotateRequest` (plan C4): check, start, answer `RotationAccepted`; the rotation itself runs in a
+/// background task (`run_rotation`) so the connection keeps reading while SDKs drain.
+async fn handle_rotate(
+    req: commy_wire::RotateRequest,
+    session: &ClientSession,
+    server: &Arc<RwLock<Server>>,
+) -> serde_json::Value {
+    use commy_wire::{ControlMessage, ErrorCode, RotateReason};
+    let who = session
+        .client_id
+        .clone()
+        .unwrap_or_else(|| session.session_id.clone());
+    let guard = server.read().await;
+    guard.audit(&format!(
+        "rotation REQUESTED service={} by={} reason={:?}",
+        req.service_id, who, req.reason
+    ));
+    if let Err(why) = req.validate() {
+        return rotation_refused(&guard, &who, &req, ErrorCode::InvalidRequest, why);
+    }
+    let Some(record) = guard.service_registry.get(&req.service_id) else {
+        return rotation_refused(&guard, &who, &req, ErrorCode::NotFound, "Unknown service");
+    };
+    if session.tenant_id.as_deref() != Some(record.tenant_name.as_str()) {
+        return rotation_refused(
+            &guard,
+            &who,
+            &req,
+            ErrorCode::PermissionDenied,
+            "Service belongs to another tenant",
+        );
+    }
+    use crate::auth::Permission as P;
+    let allowed: &[P] = match req.reason {
+        RotateReason::Resize => &[P::ServiceResize, P::ServiceAdmin, P::TenantAdmin],
+        _ => &[P::ServiceAdmin, P::TenantAdmin],
+    };
+    if !session
+        .permissions
+        .as_ref()
+        .is_some_and(|p| p.has_any(allowed))
+    {
+        return rotation_refused(
+            &guard,
+            &who,
+            &req,
+            ErrorCode::PermissionDenied,
+            "Not permitted to rotate this service",
+        );
+    }
+    let file_id = record.file_id;
+    let members = guard.forwarder.members(file_id);
+    let new_size = match req.reason {
+        RotateReason::Resize => {
+            match crate::service_file_size(req.new_size.unwrap_or(0), guard.max_service_size) {
+                Ok(n) => Some(n),
+                Err(crate::ServiceSizeError::Zero) => {
+                    return rotation_refused(
+                        &guard,
+                        &who,
+                        &req,
+                        ErrorCode::InvalidRequest,
+                        "new_size must be at least 1 byte",
+                    )
+                }
+                Err(_) => {
+                    return rotation_refused(
+                        &guard,
+                        &who,
+                        &req,
+                        ErrorCode::InvalidRequest,
+                        &format!(
+                            "new_size exceeds the server maximum of {} bytes",
+                            guard.max_service_size
+                        ),
+                    )
+                }
+            }
+        }
+        _ => {
+            let target = req.revoke_client_id.as_deref().unwrap_or("");
+            if !members
+                .iter()
+                .any(|m| m.client_id.as_deref() == Some(target))
+            {
+                return rotation_refused(
+                    &guard,
+                    &who,
+                    &req,
+                    ErrorCode::NotFound,
+                    "That client is not on this service",
+                );
+            }
+            None
+        }
+    };
+    let expected = match req.reason {
+        RotateReason::Resize => members.iter().map(|m| m.session_id.clone()).collect(),
+        _ => std::collections::HashSet::new(),
+    };
+    let active = match guard.rotations.begin(
+        &req.service_id,
+        &who,
+        file_id,
+        expected,
+        guard.rotation_min_interval,
+        std::time::Instant::now(),
+    ) {
+        Ok(a) => a,
+        Err(why) => {
+            let text = match why {
+                crate::server::rotation::Refusal::InProgress => "A rotation is already running",
+                crate::server::rotation::Refusal::TooSoon => "This service rotated too recently",
+                crate::server::rotation::Refusal::RequesterLimit => {
+                    "Too many rotation requests from this client"
+                }
+            };
+            return rotation_refused(&guard, &who, &req, ErrorCode::RateLimited, text);
+        }
+    };
+    guard.audit(&format!(
+        "rotation GRANTED rotation_id={} service={} by={} reason={:?}",
+        active.rotation_id, req.service_id, who, req.reason
+    ));
+    drop(guard);
+    let reply = commy_wire::RotationAccepted {
+        request_id: req.request_id.clone(),
+        rotation_id: active.rotation_id.clone(),
+    };
+    tokio::spawn(run_rotation(
+        Arc::clone(server),
+        req.service_id.clone(),
+        active,
+        req.reason,
+        new_size,
+        req.revoke_client_id.clone(),
+    ));
+    wire_json(&ControlMessage::RotationAccepted(reply))
+}
+
+/// Run a rotation to its end: drain barrier (resize), build the new file, switch the service over,
+/// and tell every member. Stragglers and the revoked client get a `Loss`.
+async fn run_rotation(
+    server: Arc<RwLock<Server>>,
+    service_id: String,
+    active: crate::server::rotation::Active,
+    reason: commy_wire::RotateReason,
+    new_size: Option<u64>,
+    revoke_client_id: Option<String>,
+) {
+    use crate::server::forwarding::Outbound;
+    use commy_wire::{ControlMessage, LossKind, RotateReason};
+
+    let (timeout, members) = {
+        let g = server.read().await;
+        (g.drain_timeout, g.forwarder.members(active.file_id))
+    };
+
+    if reason == RotateReason::Resize {
+        let pending = ControlMessage::RotationPending(commy_wire::RotationPending {
+            rotation_id: active.rotation_id.clone(),
+            service_id: service_id.clone(),
+            file_id: active.file_id,
+            deadline_ms: timeout.as_millis() as u64,
+        });
+        for m in &members {
+            let _ = m.tx.send(Outbound::Text(wire_json(&pending)));
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let done = server
+                .read()
+                .await
+                .rotations
+                .active(&service_id)
+                .is_none_or(|a| a.all_drained());
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if done || left.is_zero() {
+                break;
+            }
+            let _ = tokio::time::timeout(left, active.notify.notified()).await;
+        }
+    }
+
+    let drained = server
+        .read()
+        .await
+        .rotations
+        .active(&service_id)
+        .map(|a| a.drained)
+        .unwrap_or_default();
+
+    let outcome = {
+        let mut g = server.write().await;
+        let result = switch_file(&mut g, &service_id, new_size);
+        g.rotations.finish(&service_id);
+        match &result {
+            Ok(sw) => g.audit(&format!(
+                "rotation COMMITTED rotation_id={} service={} old_file={} new_file={} generation={} size={}",
+                active.rotation_id, service_id, sw.old_file_id, sw.new_file_id, sw.generation, sw.size
+            )),
+            Err(e) => g.audit(&format!(
+                "rotation FAILED rotation_id={} service={}: {e}",
+                active.rotation_id, service_id
+            )),
+        }
+        result.map(|sw| {
+            let members = g.forwarder.take_file(sw.old_file_id);
+            (sw, members)
+        })
+    };
+    let Ok((sw, members)) = outcome else {
+        eprintln!("[rotation] {service_id}: could not build the new file");
+        return;
+    };
+
+    for m in members {
+        let lost = match reason {
+            RotateReason::Resize if !drained.contains(&m.session_id) => {
+                Some(LossKind::RotationStraggler)
+            }
+            RotateReason::Revocation
+                if m.client_id.is_some() && m.client_id == revoke_client_id =>
+            {
+                Some(LossKind::Revoked)
+            }
+            _ => None,
+        };
+        let msg = match lost {
+            Some(kind) => ControlMessage::Loss(commy_wire::Loss {
+                service_id: service_id.clone(),
+                file_id: sw.old_file_id,
+                kind,
+                ranges: Vec::new(),
+            }),
+            None => ControlMessage::RotationCommit(commy_wire::RotationCommit {
+                rotation_id: active.rotation_id.clone(),
+                service_id: service_id.clone(),
+                reason,
+                old_file_id: sw.old_file_id,
+                new_file_id: sw.new_file_id,
+                generation: sw.generation,
+                size: sw.size,
+            }),
+        };
+        let _ = m.tx.send(Outbound::Text(wire_json(&msg)));
+    }
+    // Best effort: the old file may still be mapped by a local SDK (Windows refuses to delete it).
+    let _ = std::fs::remove_file(&sw.old_path);
+}
+
+/// What a rotation changed.
+struct Switch {
+    old_file_id: u32,
+    new_file_id: u32,
+    generation: u64,
+    size: u64,
+    old_path: String,
+}
+
+/// Build the new file (the old bytes that fit, zero padded), map it as the service's file, and
+/// give the service its new `file_id` and generation. Old-offset writes are never replayed.
+fn switch_file(
+    g: &mut Server,
+    service_id: &str,
+    new_size: Option<u64>,
+) -> Result<Switch, String> {
+    let (old_path, old_file_id, tenant_name, service_name) = {
+        let r = g
+            .service_registry
+            .get(service_id)
+            .ok_or("service vanished")?;
+        (
+            r.file_path.clone(),
+            r.file_id,
+            r.tenant_name.clone(),
+            r.service_name.clone(),
+        )
+    };
+    let mut data = std::fs::read(&old_path).map_err(|e| e.to_string())?;
+    let size = new_size.unwrap_or(data.len() as u64);
+    data.resize(size as usize, 0);
+    let dir = std::path::Path::new(&old_path)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_string());
+    let new_path = format!("{dir}/service_{}.mem", uuid::Uuid::new_v4());
+    std::fs::write(&new_path, &data).map_err(|e| e.to_string())?;
+    let new_file_id = g.next_file_id;
+    g.next_file_id = new_file_id.wrapping_add(1).max(1);
+    let tenant = g.tenants.get_mut(&tenant_name).ok_or("tenant vanished")?;
+    tenant
+        .register_service(&service_name, &new_path, size as usize)
+        .map_err(|e| e.to_string())?;
+    let generation = {
+        let r = g
+            .service_registry
+            .get_mut(service_id)
+            .ok_or("service vanished")?;
+        r.file_path = new_path;
+        r.file_id = new_file_id;
+        r.seq = 0;
+        r.generation += 1;
+        r.generation
+    };
+    g.retired_files.insert(old_file_id);
+    Ok(Switch {
+        old_file_id,
+        new_file_id,
+        generation,
+        size,
+        old_path,
+    })
 }
 
 async fn handle_sdk_message(
@@ -1999,6 +2357,7 @@ async fn handle_sdk_message(
                     file_id,
                     trusted_local: false,
                     seq: 0,
+                    generation: 0,
                 },
             );
 
@@ -2585,7 +2944,7 @@ async fn handle_sdk_message(
             }))
         }
 
-        "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" => {
+        "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" | "RotateRequest" | "RotationDrained" => {
             handle_local_mapping(message, session, &server).await
         }
 
@@ -4847,5 +5206,381 @@ mod forwarding_tests {
         assert_eq!(merge_ranges(vec![r(0, 10), r(2, 3)]), vec![r(0, 10)]);
         assert_eq!(merge_ranges(vec![r(0, 5), r(3, 10)]), vec![r(0, 13)]);
         assert_eq!(merge_ranges(vec![r(7, 0), r(0, 1)]), vec![r(0, 1)]);
+    }
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+    use crate::server::forwarding::Outbound;
+    use serde_json::json;
+    use std::time::Duration;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
+    struct Peer {
+        s: ClientSession,
+        rx: UnboundedReceiver<Outbound>,
+    }
+
+    fn tenant() -> String {
+        format!("ro_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(tenant: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{tenant}"));
+    }
+
+    fn new_server() -> Arc<RwLock<Server>> {
+        Arc::new(RwLock::new(
+            Server::with_dev_auth(true)
+                .with_drain_timeout(Duration::from_millis(400))
+                .with_rotation_min_interval(Duration::ZERO),
+        ))
+    }
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> Option<serde_json::Value> {
+        handle_sdk_message(v, s, Arc::clone(server)).await
+    }
+
+    async fn peer(server: &Arc<RwLock<Server>>, tenant: &str, client_id: &str) -> Peer {
+        let mut s = ClientSession::new();
+        let r = call(
+            server,
+            &mut s,
+            json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x"}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s.client_id = Some(client_id.to_string());
+        let (tx, rx) = unbounded_channel();
+        s.outbound = Some(tx);
+        Peer { s, rx }
+    }
+
+    /// A service of `size` bytes, open to local mapping; returns (service_id, file_id, path).
+    async fn service(server: &Arc<RwLock<Server>>, p: &mut Peer, tenant: &str, size: u64) -> (String, u32, String) {
+        let r = call(
+            server,
+            &mut p.s,
+            json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":size}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["type"], "Service", "{r}");
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        let mut g = server.write().await;
+        g.set_trusted_local(&id, true);
+        let rec = &g.service_registry[&id];
+        (id.clone(), rec.file_id, rec.file_path.clone())
+    }
+
+    async fn make_local(server: &Arc<RwLock<Server>>, p: &mut Peer, service_id: &str) {
+        let r = call(server, &mut p.s, json!({"type":"GetServiceFilePath","data":{"request_id":"g","service_id":service_id}}))
+            .await
+            .unwrap();
+        let nonce = std::fs::read_to_string(r["data"]["nonce_path"].as_str().unwrap()).unwrap();
+        let fid = r["data"]["file_id"].as_u64().unwrap();
+        let ack = call(server, &mut p.s, json!({"type":"ConfirmLocal","data":{"request_id":"c","file_id":fid,"nonce":nonce}}))
+            .await
+            .unwrap();
+        assert_eq!(ack["type"], "ConfirmLocalAck", "{ack}");
+    }
+
+    async fn make_remote(server: &Arc<RwLock<Server>>, p: &mut Peer, file_id: u32) {
+        let r = call(server, &mut p.s, json!({"type":"Resync","data":{"request_id":"rs","file_id":file_id}}))
+            .await
+            .unwrap();
+        assert_eq!(r["type"], "ResyncDone", "{r}");
+        p.s.outbound_frames.clear();
+    }
+
+    fn resize(service_id: &str, new_size: u64) -> serde_json::Value {
+        json!({"type":"RotateRequest","data":{"request_id":"q","service_id":service_id,"reason":"RESIZE","new_size":new_size}})
+    }
+
+    fn revoke(service_id: &str, client: &str) -> serde_json::Value {
+        json!({"type":"RotateRequest","data":{"request_id":"q","service_id":service_id,"reason":"REVOCATION","revoke_client_id":client}})
+    }
+
+    async fn recv(p: &mut Peer) -> serde_json::Value {
+        match tokio::time::timeout(Duration::from_secs(3), p.rx.recv()).await {
+            Ok(Some(Outbound::Text(v))) => v,
+            other => panic!("expected a text message, got {other:?}"),
+        }
+    }
+
+    fn quiet(p: &mut Peer) {
+        assert!(p.rx.try_recv().is_err(), "no message expected");
+    }
+
+    async fn drain(server: &Arc<RwLock<Server>>, p: &mut Peer, pending: &serde_json::Value) {
+        assert_eq!(pending["type"], "RotationPending", "{pending}");
+        let d = &pending["data"];
+        let r = call(
+            server,
+            &mut p.s,
+            json!({"type":"RotationDrained","data":{"request_id":"d","rotation_id":d["rotation_id"],"file_id":d["file_id"],"seq":0}}),
+        )
+        .await;
+        assert!(r.is_none(), "a drain acknowledgement has no reply: {r:?}");
+    }
+
+    fn poke(path: &str, offset: u64, bytes: &[u8]) {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.seek(SeekFrom::Start(offset)).unwrap();
+        f.write_all(bytes).unwrap();
+        f.sync_all().unwrap();
+    }
+
+    #[tokio::test]
+    async fn resize_drains_every_member_then_commits_a_bigger_file_that_keeps_the_old_bytes() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, fid, path) = service(&server, &mut a, &t, 4096).await;
+        let mut b = peer(&server, &t, "bob").await;
+        make_local(&server, &mut a, &id).await;
+        make_remote(&server, &mut b, fid).await;
+        poke(&path, 10, &[7, 7, 7]);
+
+        let acc = call(&server, &mut a.s, resize(&id, 8192)).await.unwrap();
+        assert_eq!(acc["type"], "RotationAccepted", "{acc}");
+        assert_eq!(acc["data"]["request_id"], "q");
+
+        let pa = recv(&mut a).await;
+        let pb = recv(&mut b).await;
+        assert_eq!(pa["data"]["rotation_id"], acc["data"]["rotation_id"]);
+        assert_eq!(pa["data"]["deadline_ms"], 400);
+        assert_eq!(pb["data"]["file_id"], fid);
+        drain(&server, &mut a, &pa).await;
+        drain(&server, &mut b, &pb).await;
+
+        let ca = recv(&mut a).await;
+        let cb = recv(&mut b).await;
+        assert_eq!(ca["type"], "RotationCommit", "{ca}");
+        assert_eq!(ca, cb, "every member gets the same commit");
+        let d = &ca["data"];
+        assert_eq!((d["reason"].as_str(), d["old_file_id"].as_u64(), d["generation"].as_u64(), d["size"].as_u64()),
+                   (Some("RESIZE"), Some(fid as u64), Some(1), Some(8192)));
+        let new_fid = d["new_file_id"].as_u64().unwrap() as u32;
+        assert_ne!(new_fid, fid);
+
+        let (new_path, seq, retired) = {
+            let g = server.read().await;
+            let r = &g.service_registry[&id];
+            (r.file_path.clone(), r.seq, g.retired_files.contains(&fid))
+        };
+        assert_ne!(new_path, path, "new random file name");
+        assert_eq!(std::fs::metadata(&new_path).unwrap().len(), 8192);
+        assert_eq!(&std::fs::read(&new_path).unwrap()[10..13], &[7, 7, 7], "old bytes copied");
+        assert_eq!(seq, 0, "seq restarts per file_id");
+        assert!(retired);
+        let events = server.read().await.audit_events().join("\n");
+        for word in ["REQUESTED", "GRANTED", "COMMITTED"] {
+            assert!(events.contains(word), "{word} must be audited: {events}");
+        }
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn after_a_commit_the_old_file_is_refused_and_the_new_one_gets_a_fresh_handshake() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, fid, _p) = service(&server, &mut a, &t, 4096).await;
+        make_local(&server, &mut a, &id).await;
+        call(&server, &mut a.s, resize(&id, 8192)).await.unwrap();
+        let pend = recv(&mut a).await;
+        drain(&server, &mut a, &pend).await;
+        let commit = recv(&mut a).await;
+        let new_fid = commit["data"]["new_file_id"].as_u64().unwrap();
+
+        let old = call(&server, &mut a.s, json!({"type":"RangesChanged","data":{"request_id":"f","file_id":fid,"ranges":[{"offset":0,"len":1}]}}))
+            .await
+            .unwrap();
+        assert_eq!(old["data"]["code"], "INVALID_REQUEST", "{old}");
+        let old = call(&server, &mut a.s, json!({"type":"Resync","data":{"request_id":"r","file_id":fid}})).await.unwrap();
+        assert_eq!(old["data"]["code"], "INVALID_REQUEST", "{old}");
+
+        let r = call(&server, &mut a.s, json!({"type":"GetServiceFilePath","data":{"request_id":"g2","service_id":id}}))
+            .await
+            .unwrap();
+        assert_eq!(r["data"]["file_id"], new_fid, "{r}");
+        assert!(r["data"]["nonce_path"].is_string(), "a fresh nonce is offered for the new file");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_member_that_does_not_drain_in_time_is_dropped_with_a_straggler_loss() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, fid, _p) = service(&server, &mut a, &t, 4096).await;
+        let mut b = peer(&server, &t, "bob").await;
+        make_local(&server, &mut a, &id).await;
+        make_remote(&server, &mut b, fid).await;
+
+        call(&server, &mut a.s, resize(&id, 8192)).await.unwrap();
+        let pa = recv(&mut a).await;
+        let _pb = recv(&mut b).await; // b never answers
+        drain(&server, &mut a, &pa).await;
+
+        let ca = recv(&mut a).await;
+        assert_eq!(ca["type"], "RotationCommit", "{ca}");
+        let lb = recv(&mut b).await;
+        assert_eq!(lb["type"], "Loss", "{lb}");
+        assert_eq!(lb["data"]["kind"], "ROTATION_STRAGGLER");
+        assert_eq!(lb["data"]["file_id"], fid);
+        quiet(&mut b);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn shrinking_keeps_only_the_bytes_that_fit() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, _fid, path) = service(&server, &mut a, &t, 8192).await;
+        poke(&path, 100, &[1]);
+        poke(&path, 5000, &[2]);
+        call(&server, &mut a.s, resize(&id, 4096)).await.unwrap();
+        // no members: nobody to drain, commit follows at once
+        for _ in 0..50 {
+            if server.read().await.service_registry[&id].generation == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let new_path = server.read().await.service_registry[&id].file_path.clone();
+        let bytes = std::fs::read(&new_path).unwrap();
+        assert_eq!(bytes.len(), 4096);
+        assert_eq!(bytes[100], 1);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn revocation_keeps_the_layout_tells_the_rest_and_drops_the_revoked_client() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, fid, path) = service(&server, &mut a, &t, 4096).await;
+        let mut b = peer(&server, &t, "bob").await;
+        make_local(&server, &mut a, &id).await;
+        make_remote(&server, &mut b, fid).await;
+        poke(&path, 20, &[5, 5]);
+
+        let acc = call(&server, &mut a.s, revoke(&id, "bob")).await.unwrap();
+        assert_eq!(acc["type"], "RotationAccepted", "{acc}");
+        // no drain barrier: no RotationPending to anyone
+        let ca = recv(&mut a).await;
+        assert_eq!(ca["type"], "RotationCommit", "{ca}");
+        assert_eq!(ca["data"]["reason"], "REVOCATION");
+        assert_eq!(ca["data"]["size"], 4096);
+        let lb = recv(&mut b).await;
+        assert_eq!(lb["type"], "Loss", "{lb}");
+        assert_eq!(lb["data"]["kind"], "REVOKED");
+        quiet(&mut a);
+        quiet(&mut b);
+        let new_path = server.read().await.service_registry[&id].file_path.clone();
+        assert_eq!(&std::fs::read(&new_path).unwrap()[20..22], &[5, 5], "old bytes kept");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn permissions_are_checked_before_anything_is_sent() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, fid, _p) = service(&server, &mut a, &t, 4096).await;
+        let mut b = peer(&server, &t, "bob").await;
+        make_local(&server, &mut a, &id).await;
+        make_remote(&server, &mut b, fid).await;
+
+        // a read-only session may do neither
+        let mut ro = peer(&server, &t, "ro").await;
+        ro.s.permissions = Some(crate::auth::PermissionSet::read_only());
+        for req in [resize(&id, 8192), revoke(&id, "bob")] {
+            let r = call(&server, &mut ro.s, req).await.unwrap();
+            assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        }
+        // ServiceResize alone may resize but not revoke
+        let mut rz = peer(&server, &t, "rz").await;
+        let mut only_resize = crate::auth::PermissionSet::new();
+        only_resize.grant(crate::auth::Permission::ServiceResize);
+        rz.s.permissions = Some(only_resize);
+        let r = call(&server, &mut rz.s, revoke(&id, "bob")).await.unwrap();
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        quiet(&mut a);
+        quiet(&mut b);
+        let r = call(&server, &mut rz.s, resize(&id, 8192)).await.unwrap();
+        assert_eq!(r["type"], "RotationAccepted", "{r}");
+        let events = server.read().await.audit_events().join("\n");
+        assert!(events.contains("REFUSED"), "{events}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn another_tenant_cannot_rotate_the_service() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, _fid, _p) = service(&server, &mut a, &t, 4096).await;
+        let other = tenant();
+        let mut x = peer(&server, &other, "mallory").await;
+        let r = call(&server, &mut x.s, resize(&id, 8192)).await.unwrap();
+        assert_eq!(r["type"], "Error", "{r}");
+        assert!(server.read().await.rotations.active(&id).is_none());
+        cleanup(&t);
+        cleanup(&other);
+    }
+
+    #[tokio::test]
+    async fn bad_requests_are_refused_and_start_nothing() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, _fid, _p) = service(&server, &mut a, &t, 4096).await;
+        let max = server.read().await.max_service_size;
+        let cases = [
+            (json!({"type":"RotateRequest","data":{"request_id":"q","service_id":id,"reason":"RESIZE"}}), "INVALID_REQUEST"),
+            (resize(&id, 0), "INVALID_REQUEST"),
+            (resize(&id, max + 1), "INVALID_REQUEST"),
+            (revoke(&id, "nobody"), "NOT_FOUND"),
+            (resize("no-such-service", 4096), "NOT_FOUND"),
+        ];
+        for (req, code) in cases {
+            let r = call(&server, &mut a.s, req.clone()).await.unwrap();
+            assert_eq!(r["data"]["code"], code, "{req}: {r}");
+        }
+        assert!(server.read().await.rotations.active(&id).is_none());
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn only_one_rotation_runs_at_a_time_and_drain_acks_are_checked() {
+        let t = tenant();
+        let server = new_server();
+        let mut a = peer(&server, &t, "alice").await;
+        let (id, _fid, _p) = service(&server, &mut a, &t, 4096).await;
+        make_local(&server, &mut a, &id).await;
+        let acc = call(&server, &mut a.s, resize(&id, 8192)).await.unwrap();
+        assert_eq!(acc["type"], "RotationAccepted", "{acc}");
+        let second = call(&server, &mut a.s, resize(&id, 16384)).await.unwrap();
+        assert_eq!(second["data"]["code"], "RATE_LIMITED", "{second}");
+
+        let pend = recv(&mut a).await;
+        let d = &pend["data"];
+        let wrong = call(&server, &mut a.s, json!({"type":"RotationDrained","data":{"request_id":"d","rotation_id":"nope","file_id":d["file_id"],"seq":0}}))
+            .await
+            .unwrap();
+        assert_eq!(wrong["data"]["code"], "INVALID_REQUEST", "{wrong}");
+        let mut stranger = peer(&server, &t, "eve").await;
+        let r = call(&server, &mut stranger.s, json!({"type":"RotationDrained","data":{"request_id":"d","rotation_id":d["rotation_id"],"file_id":d["file_id"],"seq":0}}))
+            .await
+            .unwrap();
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "a session that was not asked to drain cannot drain: {r}");
+        cleanup(&t);
     }
 }

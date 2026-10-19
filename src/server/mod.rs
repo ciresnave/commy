@@ -20,6 +20,7 @@
 pub mod clustering;
 pub mod forwarding;
 pub mod local_mapping;
+pub mod rotation;
 pub mod message_router;
 pub mod session_manager;
 pub mod tls;

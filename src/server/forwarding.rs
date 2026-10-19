@@ -29,10 +29,19 @@ pub enum Mode {
     Remote,
 }
 
+/// A session on a file.
+#[derive(Clone, Debug)]
+pub struct MemberInfo {
+    pub session_id: String,
+    pub client_id: Option<String>,
+    pub mode: Mode,
+    pub tx: OutTx,
+}
+
 #[derive(Default)]
 struct Inner {
-    /// `file_id` to (`session_id` to mode and queue).
-    files: HashMap<u32, HashMap<String, (Mode, OutTx)>>,
+    /// `file_id` to (`session_id` to member).
+    files: HashMap<u32, HashMap<String, MemberInfo>>,
 }
 
 /// Membership of sessions in files. Cheap to call from handlers: one short lock, no awaits.
@@ -47,12 +56,43 @@ impl Registry {
     }
 
     /// Add (or change) a session's membership of a file.
-    pub fn join(&self, file_id: u32, session_id: &str, mode: Mode, tx: OutTx) {
+    pub fn join(
+        &self,
+        file_id: u32,
+        session_id: &str,
+        client_id: Option<&str>,
+        mode: Mode,
+        tx: OutTx,
+    ) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        g.files.entry(file_id).or_default().insert(
+            session_id.to_string(),
+            MemberInfo {
+                session_id: session_id.to_string(),
+                client_id: client_id.map(str::to_string),
+                mode,
+                tx,
+            },
+        );
+    }
+
+    /// The live members of a file (closed queues pruned).
+    pub fn members(&self, file_id: u32) -> Vec<MemberInfo> {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(members) = g.files.get_mut(&file_id) else {
+            return Vec::new();
+        };
+        members.retain(|_, m| !m.tx.is_closed());
+        members.values().cloned().collect()
+    }
+
+    /// Remove and return every member of a file (the file was rotated away).
+    pub fn take_file(&self, file_id: u32) -> Vec<MemberInfo> {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         g.files
-            .entry(file_id)
-            .or_default()
-            .insert(session_id.to_string(), (mode, tx));
+            .remove(&file_id)
+            .map(|m| m.into_values().collect())
+            .unwrap_or_default()
     }
 
     /// Remove a session from every file (on disconnect).
@@ -70,11 +110,11 @@ impl Registry {
         let Some(members) = g.files.get_mut(&file_id) else {
             return Vec::new();
         };
-        members.retain(|_, (_, tx)| !tx.is_closed());
+        members.retain(|_, m| !m.tx.is_closed());
         let out = members
             .iter()
             .filter(|(id, _)| id.as_str() != except)
-            .map(|(_, (mode, tx))| (*mode, tx.clone()))
+            .map(|(_, m)| (m.mode, m.tx.clone()))
             .collect();
         if members.is_empty() {
             g.files.remove(&file_id);
