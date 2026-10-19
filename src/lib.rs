@@ -251,6 +251,14 @@ impl Tenant {
     }
 }
 
+/// A file prepared for a resize: created, zero filled, not live; only the requester may write it.
+pub struct PreparedFile {
+    pub service_id: String,
+    pub requester_session: String,
+    pub path: String,
+    pub size: u64,
+}
+
 /// Server-side record for a service.
 /// Only the Server knows the (tenant_name, service_name) → file mapping — clients only
 /// know the opaque service_id returned at creation time.
@@ -290,6 +298,10 @@ pub struct Server {
     pub rotations: server::rotation::Rotations,
     /// Files that were rotated away; frames for them are refused as `INVALID_REQUEST`.
     pub retired_files: std::collections::HashSet<u32>,
+    /// Files prepared for a resize and not yet live, by `file_id`.
+    pub prepared: std::collections::HashMap<u32, PreparedFile>,
+    /// How long the requester has to fill a prepared file (default 30 s, `COMMY_FILL_TIMEOUT_MS`).
+    pub fill_timeout: std::time::Duration,
     /// How long a resize waits for every SDK to drain (default 5 s, `COMMY_DRAIN_TIMEOUT_MS`).
     pub drain_timeout: std::time::Duration,
     /// Least time between two rotations of one service.
@@ -359,6 +371,12 @@ impl Server {
             forwarder: server::forwarding::Registry::new(),
             rotations: server::rotation::Rotations::new(),
             retired_files: std::collections::HashSet::new(),
+            prepared: std::collections::HashMap::new(),
+            fill_timeout: std::env::var("COMMY_FILL_TIMEOUT_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(std::time::Duration::from_secs(30)),
             drain_timeout: std::env::var("COMMY_DRAIN_TIMEOUT_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -388,6 +406,12 @@ impl Server {
     /// Set how long a resize waits for SDKs to drain.
     pub fn with_drain_timeout(mut self, t: std::time::Duration) -> Self {
         self.drain_timeout = t;
+        self
+    }
+
+    /// Set how long a requester has to fill a prepared file.
+    pub fn with_fill_timeout(mut self, t: std::time::Duration) -> Self {
+        self.fill_timeout = t;
         self
     }
 
