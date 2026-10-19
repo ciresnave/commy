@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+- Service-scoped access control, part 2, on `commy-wire` 0.3.1: `Grant`, `Revoke` and `ListGrants` (+ `GrantAck`, `Grants`). Granting or revoking at service scope needs `service:admin` on that service; tenant-wide changes and handing out `tenant:admin` need tenant admin. Unknown permission names, empty lists and unknown services are refused. `ListGrants` shows a tenant admin everything, a service admin that service, anyone else their own entries. Every grant, revoke and refusal is audited.
+- **Revocation now closes the C4 gap.** When a `Revoke` removes a client's last access to a service (including a tenant-wide revoke, for each service lost), the server starts a revocation rotation of that service: the file moves to a new random name, the remaining members get `RotationCommit`, and the revoked client gets `Loss{REVOKED}` and, holding no grant, cannot fetch the new file. It happens even if the client never joined the file (it may have been offered the path). Revocation rotations are exempt from the spacing and per-requester limits (`Rotations::begin_forced`) but still wait for a running rotation.
+
 ## 0.10.0 (breaking)
 - Service-scoped access control (C10, part 1: enforcement), on role-system 1.3.0 (owner decision: reuse it). Grants are per client, tenant and service; a tenant-wide grant is shorthand for all services; `service:admin` implies write, read and resize; `service:write` implies read; revoking one service denies it even for a tenant-wide grant or tenant admin (role-system deny).
 - Every handler that names a service or a file of one now checks the session against it: `GetServiceFilePath` (read; the path only with write), `Resync` (read), range frames, `RangesChanged`, `FlushEnd` (write), `RotateRequest` (resize needs `service:resize`, revocation `service:admin`), and the guard refuses any message naming a service the client has no access to (`PERMISSION_DENIED`), which also closes the older variable handlers.

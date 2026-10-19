@@ -1617,6 +1617,9 @@ async fn handle_local_mapping(
             })))
         }
         ControlMessage::RotateRequest(req) => Some(handle_rotate(req, session, server).await),
+        m @ (ControlMessage::Grant(_) | ControlMessage::Revoke(_) | ControlMessage::ListGrants(_)) => {
+            Some(handle_grants(m, session, server).await)
+        }
         ControlMessage::RotationDrained(req) => {
             let rid = Some(req.request_id.as_str());
             let guard = server.read().await;
@@ -2420,6 +2423,228 @@ fn switch_to_copy(g: &mut Server, service_id: &str) -> Result<Switch, String> {
     switch_to_prepared(g, service_id, new_file_id, &new_path, size)
 }
 
+/// Why a grant message was refused: audited, then answered with the wire error.
+fn grant_refused(
+    guard: &Server,
+    who: &str,
+    what: &str,
+    code: commy_wire::ErrorCode,
+    why: &str,
+    rid: &str,
+) -> serde_json::Value {
+    guard.audit(&format!("grant REFUSED {what} by={who}: {why}"));
+    wire_error(code, why, Some(rid))
+}
+
+/// Parse wire permission names into grant specs.
+fn parse_specs(names: &[String]) -> Result<Vec<crate::server::grants::Spec>, String> {
+    names
+        .iter()
+        .map(|n| crate::server::grants::parse_permission(n).map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// Revoking access moves the file, so the revoked client's knowledge of its path is worthless and it
+/// is dropped from the file with `Loss{REVOKED}`. Access must end now, so this is not subject to the
+/// rotation rate limits; it waits out a rotation that is already running.
+fn spawn_revocation_rotation(
+    server: Arc<RwLock<Server>>,
+    service_id: String,
+    client_id: String,
+    who: String,
+) {
+    tokio::spawn(async move {
+        for _ in 0..300 {
+            let started = {
+                let g = server.read().await;
+                let Some(record) = g.service_registry.get(&service_id) else {
+                    return;
+                };
+                match g.rotations.begin_forced(
+                    &service_id,
+                    &who,
+                    record.file_id,
+                    std::collections::HashSet::new(),
+                    std::time::Instant::now(),
+                ) {
+                    Ok(active) => {
+                        g.audit(&format!(
+                            "rotation GRANTED rotation_id={} service={} by={} reason=Revocation (access revoked from {})",
+                            active.rotation_id, service_id, who, client_id
+                        ));
+                        Some(active)
+                    }
+                    Err(_) => None,
+                }
+            };
+            if let Some(active) = started {
+                run_rotation(
+                    server,
+                    service_id,
+                    active,
+                    commy_wire::RotateReason::Revocation,
+                    None,
+                    Some(client_id),
+                )
+                .await;
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        server.read().await.audit(&format!(
+            "rotation FAILED service={service_id}: another rotation never finished; access revoked from {client_id} but the file was not moved"
+        ));
+    });
+}
+
+/// `Grant`, `Revoke` and `ListGrants` (plan C10).
+async fn handle_grants(
+    request: commy_wire::ControlMessage,
+    session: &ClientSession,
+    server: &Arc<RwLock<Server>>,
+) -> serde_json::Value {
+    use crate::server::grants::{Action, Spec};
+    use commy_wire::{ControlMessage, ErrorCode};
+
+    let who = client_key(session);
+    let Some(tenant) = session.tenant_id.clone() else {
+        return wire_error(ErrorCode::Unauthenticated, "Not authenticated", None);
+    };
+    match request {
+        ControlMessage::Grant(req) => {
+            let rid = req.request_id.clone();
+            let what = format!("Grant client={} service={:?} {:?}", req.client_id, req.service_id, req.permissions);
+            let guard = server.read().await;
+            if let Err(why) = req.validate() {
+                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, why, &rid);
+            }
+            let specs = match parse_specs(&req.permissions) {
+                Ok(s) => s,
+                Err(e) => return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e, &rid),
+            };
+            ensure_imported(&guard, session);
+            if let Err(e) = authorise_grant_change(&guard, session, &tenant, &who, req.service_id.as_deref(), &specs) {
+                return grant_refused(&guard, &who, &what, e.0, e.1, &rid);
+            }
+            if let Err(e) = guard.grants.grant(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
+                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e.to_string(), &rid);
+            }
+            guard.audit(&format!("grant GRANTED {what} by={who}"));
+            wire_json(&ControlMessage::GrantAck(commy_wire::GrantAck { request_id: rid }))
+        }
+        ControlMessage::Revoke(req) => {
+            let rid = req.request_id.clone();
+            let what = format!("Revoke client={} service={:?} {:?}", req.client_id, req.service_id, req.permissions);
+            let guard = server.read().await;
+            if let Err(why) = req.validate() {
+                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, why, &rid);
+            }
+            let specs = match parse_specs(&req.permissions) {
+                Ok(s) => s,
+                Err(e) => return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e, &rid),
+            };
+            ensure_imported(&guard, session);
+            if let Err(e) = authorise_grant_change(&guard, session, &tenant, &who, req.service_id.as_deref(), &specs) {
+                return grant_refused(&guard, &who, &what, e.0, e.1, &rid);
+            }
+            // Which of this tenant's services could the client reach before?
+            let reach = |g: &Server| -> Vec<String> {
+                g.service_registry
+                    .iter()
+                    .filter(|(_, r)| r.tenant_name == tenant)
+                    .filter(|(id, _)| {
+                        g.grants.allows(&tenant, &req.client_id, id, Action::Read)
+                            || g.grants.allows(&tenant, &req.client_id, id, Action::Resize)
+                    })
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            };
+            let before = reach(&guard);
+            if let Err(e) = guard.grants.revoke(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
+                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e.to_string(), &rid);
+            }
+            let after = reach(&guard);
+            guard.audit(&format!("grant REVOKED {what} by={who}"));
+            // Every service the client lost access to moves to a new file.
+            let lost: Vec<String> = before.into_iter().filter(|id| !after.contains(id)).collect();
+            drop(guard);
+            for service_id in lost {
+                spawn_revocation_rotation(Arc::clone(server), service_id, req.client_id.clone(), who.clone());
+            }
+            wire_json(&ControlMessage::GrantAck(commy_wire::GrantAck { request_id: rid }))
+        }
+        ControlMessage::ListGrants(req) => {
+            let rid = req.request_id.clone();
+            let guard = server.read().await;
+            ensure_imported(&guard, session);
+            if let Some(sid) = &req.service_id {
+                match guard.service_registry.get(sid) {
+                    Some(r) if r.tenant_name == tenant => {}
+                    _ => return wire_error(ErrorCode::NotFound, "Unknown service", Some(&rid)),
+                }
+            }
+            let tenant_admin = guard.grants.is_tenant_admin(&tenant, &who);
+            let service_admin = req
+                .service_id
+                .as_deref()
+                .is_some_and(|sid| guard.grants.allows(&tenant, &who, sid, Action::Admin));
+            // A tenant admin sees everything, a service admin that service, anyone else their own.
+            let see_all = tenant_admin || service_admin;
+            let client_filter = if see_all { req.client_id.as_deref() } else { Some(who.as_str()) };
+            if !see_all && req.client_id.as_deref().is_some_and(|c| c != who) {
+                return wire_error(ErrorCode::PermissionDenied, "You may list only your own grants", Some(&rid));
+            }
+            let entries = guard
+                .grants
+                .list(&tenant, client_filter, req.service_id.as_deref())
+                .into_iter()
+                .map(|e| commy_wire::GrantEntry {
+                    client_id: e.client_id,
+                    service_id: e.service_id,
+                    permissions: e.permissions,
+                })
+                .collect();
+            let _ = Spec::TenantAdmin;
+            wire_json(&ControlMessage::Grants(commy_wire::Grants { request_id: rid, entries }))
+        }
+        _ => wire_error(ErrorCode::InvalidRequest, "Not a grant request", None),
+    }
+}
+
+/// May the caller change grants at this scope? Service scope needs `service:admin` on that service;
+/// tenant scope needs tenant admin; handing out `tenant:admin` needs tenant admin.
+fn authorise_grant_change(
+    guard: &Server,
+    session: &ClientSession,
+    tenant: &str,
+    who: &str,
+    service: Option<&str>,
+    specs: &[crate::server::grants::Spec],
+) -> Result<(), (commy_wire::ErrorCode, &'static str)> {
+    use commy_wire::ErrorCode;
+    let tenant_admin = guard.grants.is_tenant_admin(tenant, who);
+    match service {
+        Some(sid) => {
+            match guard.service_registry.get(sid) {
+                Some(r) if r.tenant_name == tenant => {}
+                _ => return Err((ErrorCode::NotFound, "Unknown service")),
+            }
+            if !session_allows(guard, session, sid, crate::server::grants::Action::Admin) {
+                return Err((ErrorCode::PermissionDenied, "Needs service:admin on this service"));
+            }
+        }
+        None => {
+            if !tenant_admin {
+                return Err((ErrorCode::PermissionDenied, "Tenant-wide grants need tenant:admin"));
+            }
+        }
+    }
+    if specs.iter().any(|s| matches!(s, crate::server::grants::Spec::TenantAdmin)) && !tenant_admin {
+        return Err((ErrorCode::PermissionDenied, "Handing out tenant:admin needs tenant:admin"));
+    }
+    Ok(())
+}
+
 async fn handle_sdk_message(
     message: serde_json::Value,
     session: &mut ClientSession,
@@ -3205,7 +3430,7 @@ async fn handle_sdk_message(
             }))
         }
 
-        "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" | "RotateRequest" | "RotationDrained" | "RotationFilled" | "RotationAbort" => {
+        "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" | "RotateRequest" | "RotationDrained" | "RotationFilled" | "RotationAbort" | "Grant" | "Revoke" | "ListGrants" => {
             handle_local_mapping(message, session, &server).await
         }
 
@@ -6176,6 +6401,300 @@ mod scoped_access_tests {
         // the admin is not stopped by the guard (the handler may still say the variable is unknown)
         let r = call(&server, &mut admin, json!({"type":"ReadVariable","data":{"service_id":one,"variable_name":"x"}})).await;
         assert_ne!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod grant_message_tests {
+    use super::*;
+    use crate::server::forwarding::Outbound;
+    use serde_json::json;
+    use std::time::Duration;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
+    struct Peer {
+        s: ClientSession,
+        rx: UnboundedReceiver<Outbound>,
+    }
+
+    fn tenant() -> String {
+        format!("gm_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(tenant: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{tenant}"));
+    }
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    /// An authenticated peer. `admin` keeps the tenant-admin permissions dev auth gives; otherwise
+    /// the peer holds no tenant-level permissions and only grants count.
+    async fn peer(server: &Arc<RwLock<Server>>, t: &str, client_id: &str, admin: bool) -> Peer {
+        let mut s = ClientSession::new();
+        let r = call(server, &mut s, json!({"type":"Authenticate","data":{"tenant_id":t,"api_key":"x"}})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s.client_id = Some(client_id.to_string());
+        if !admin {
+            s.permissions = Some(crate::auth::PermissionSet::new());
+        }
+        let (tx, rx) = unbounded_channel();
+        s.outbound = Some(tx);
+        Peer { s, rx }
+    }
+
+    async fn new_service(server: &Arc<RwLock<Server>>, p: &mut Peer, t: &str, name: &str) -> (String, u32) {
+        let r = call(server, &mut p.s, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":name,"size":4096}})).await;
+        assert_eq!(r["type"], "Service", "{r}");
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        let fid = server.read().await.service_registry[&id].file_id;
+        (id, fid)
+    }
+
+    fn grant(client: &str, service: Option<&str>, perms: &[&str]) -> serde_json::Value {
+        let mut d = json!({"request_id":"g","client_id":client,"permissions":perms});
+        if let Some(s) = service {
+            d["service_id"] = json!(s);
+        }
+        json!({"type":"Grant","data":d})
+    }
+
+    fn revoke(client: &str, service: Option<&str>, perms: &[&str]) -> serde_json::Value {
+        let mut d = json!({"request_id":"v","client_id":client});
+        if !perms.is_empty() {
+            d["permissions"] = json!(perms);
+        }
+        if let Some(s) = service {
+            d["service_id"] = json!(s);
+        }
+        json!({"type":"Revoke","data":d})
+    }
+
+    fn get_path(service_id: &str) -> serde_json::Value {
+        json!({"type":"GetServiceFilePath","data":{"request_id":"p","service_id":service_id}})
+    }
+
+    async fn join_remote(server: &Arc<RwLock<Server>>, p: &mut Peer, file_id: u32) {
+        let r = call(server, &mut p.s, json!({"type":"Resync","data":{"request_id":"rs","file_id":file_id}})).await;
+        assert_eq!(r["type"], "ResyncDone", "{r}");
+        p.s.outbound_frames.clear();
+    }
+
+    async fn recv(p: &mut Peer) -> serde_json::Value {
+        match tokio::time::timeout(Duration::from_secs(3), p.rx.recv()).await {
+            Ok(Some(Outbound::Text(v))) => v,
+            other => panic!("expected a text message, got {other:?}"),
+        }
+    }
+
+    async fn generation(server: &Arc<RwLock<Server>>, id: &str) -> u64 {
+        server.read().await.service_registry[id].generation
+    }
+
+    async fn wait_generation(server: &Arc<RwLock<Server>>, id: &str, want: u64) {
+        for _ in 0..100 {
+            if generation(server, id).await >= want {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        panic!("service never reached generation {want}");
+    }
+
+    #[tokio::test]
+    async fn an_admin_grants_a_service_and_the_client_reaches_that_service_only() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _f1) = new_service(&server, &mut admin, &t, "one").await;
+        let (two, _f2) = new_service(&server, &mut admin, &t, "two").await;
+        let mut bob = peer(&server, &t, "bob", false).await;
+        assert_eq!(call(&server, &mut bob.s, get_path(&one)).await["data"]["code"], "PERMISSION_DENIED");
+
+        let ack = call(&server, &mut admin.s, grant("bob", Some(&one), &["service:write"])).await;
+        assert_eq!(ack["type"], "GrantAck", "{ack}");
+        assert_eq!(ack["data"]["request_id"], "g");
+        let r = call(&server, &mut bob.s, get_path(&one)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert_eq!(call(&server, &mut bob.s, get_path(&two)).await["data"]["code"], "PERMISSION_DENIED");
+        let events = server.read().await.audit_events().join("\n");
+        assert!(events.contains("grant GRANTED"), "{events}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn only_the_right_administrators_may_change_grants() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _f1) = new_service(&server, &mut admin, &t, "one").await;
+        let (two, _f2) = new_service(&server, &mut admin, &t, "two").await;
+        call(&server, &mut admin.s, grant("writer", Some(&one), &["service:write"])).await;
+        call(&server, &mut admin.s, grant("svcadmin", Some(&one), &["service:admin"])).await;
+
+        let mut writer = peer(&server, &t, "writer", false).await;
+        let r = call(&server, &mut writer.s, grant("x", Some(&one), &["service:read"])).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "write is not admin: {r}");
+
+        let mut sa = peer(&server, &t, "svcadmin", false).await;
+        let r = call(&server, &mut sa.s, grant("x", Some(&one), &["service:read"])).await;
+        assert_eq!(r["type"], "GrantAck", "a service admin grants on its service: {r}");
+        let r = call(&server, &mut sa.s, grant("x", Some(&two), &["service:read"])).await;
+        assert_eq!(r["type"], "Error", "not on another service: {r}");
+        let r = call(&server, &mut sa.s, grant("x", None, &["service:read"])).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "not tenant-wide: {r}");
+        let r = call(&server, &mut sa.s, revoke("x", None, &[])).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        let events = server.read().await.audit_events().join("\n");
+        assert!(events.contains("grant REFUSED"), "{events}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn bad_grant_requests_are_refused() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _f) = new_service(&server, &mut admin, &t, "one").await;
+        let cases = [
+            (grant("bob", Some(&one), &["service:delete"]), "INVALID_REQUEST"),
+            (grant("bob", Some(&one), &["tenant:admin"]), "INVALID_REQUEST"),
+            (grant("bob", Some(&one), &[]), "INVALID_REQUEST"),
+            (grant("", Some(&one), &["service:read"]), "INVALID_REQUEST"),
+            (grant("bob", Some("no-such-service"), &["service:read"]), "NOT_FOUND"),
+        ];
+        for (req, code) in cases {
+            let r = call(&server, &mut admin.s, req.clone()).await;
+            assert_eq!(r["data"]["code"], code, "{req}: {r}");
+        }
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn listing_shows_each_caller_only_what_it_may_see() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _f) = new_service(&server, &mut admin, &t, "one").await;
+        call(&server, &mut admin.s, grant("bob", Some(&one), &["service:read"])).await;
+        call(&server, &mut admin.s, grant("carol", Some(&one), &["service:write"])).await;
+
+        let list = json!({"type":"ListGrants","data":{"request_id":"l"}});
+        let all = call(&server, &mut admin.s, list.clone()).await;
+        assert_eq!(all["type"], "Grants", "{all}");
+        let clients: Vec<&str> = all["data"]["entries"].as_array().unwrap().iter().map(|e| e["client_id"].as_str().unwrap()).collect();
+        for c in ["admin", "bob", "carol"] {
+            assert!(clients.contains(&c), "{c} missing: {all}");
+        }
+
+        let mut bob = peer(&server, &t, "bob", false).await;
+        let mine = call(&server, &mut bob.s, list).await;
+        let entries = mine["data"]["entries"].as_array().unwrap();
+        assert!(!entries.is_empty() && entries.iter().all(|e| e["client_id"] == "bob"), "{mine}");
+        let other = call(&server, &mut bob.s, json!({"type":"ListGrants","data":{"request_id":"l2","client_id":"carol"}})).await;
+        assert_eq!(other["data"]["code"], "PERMISSION_DENIED", "{other}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn revoking_a_client_from_a_service_moves_the_file_and_drops_the_client() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, fid) = new_service(&server, &mut admin, &t, "one").await;
+        call(&server, &mut admin.s, grant("bob", Some(&one), &["service:write"])).await;
+        let mut bob = peer(&server, &t, "bob", false).await;
+        join_remote(&server, &mut admin, fid).await;
+        join_remote(&server, &mut bob, fid).await;
+
+        let ack = call(&server, &mut admin.s, revoke("bob", Some(&one), &[])).await;
+        assert_eq!(ack["type"], "GrantAck", "{ack}");
+        wait_generation(&server, &one, 1).await;
+
+        let loss = recv(&mut bob).await;
+        assert_eq!(loss["type"], "Loss", "{loss}");
+        assert_eq!(loss["data"]["kind"], "REVOKED");
+        let commit = recv(&mut admin).await;
+        assert_eq!(commit["type"], "RotationCommit", "{commit}");
+        assert_eq!(commit["data"]["reason"], "REVOCATION");
+        let new_fid = commit["data"]["new_file_id"].as_u64().unwrap();
+        assert_ne!(new_fid, fid as u64);
+
+        // bob can reach neither the old file nor the new one
+        assert_eq!(call(&server, &mut bob.s, get_path(&one)).await["data"]["code"], "PERMISSION_DENIED");
+        let r = call(&server, &mut bob.s, json!({"type":"Resync","data":{"request_id":"r","file_id":new_fid}})).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        let events = server.read().await.audit_events().join("\n");
+        assert!(events.contains("grant REVOKED"), "{events}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_revoked_client_that_only_held_a_path_still_loses_it() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _fid) = new_service(&server, &mut admin, &t, "one").await;
+        call(&server, &mut admin.s, grant("bob", Some(&one), &["service:write"])).await;
+        // bob is not a member of the file (never confirmed or resynced), revoke still moves the file
+        let ack = call(&server, &mut admin.s, revoke("bob", Some(&one), &[])).await;
+        assert_eq!(ack["type"], "GrantAck", "{ack}");
+        wait_generation(&server, &one, 1).await;
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn revoking_someone_with_no_access_moves_nothing() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _f) = new_service(&server, &mut admin, &t, "one").await;
+        let ack = call(&server, &mut admin.s, revoke("nobody", Some(&one), &[])).await;
+        assert_eq!(ack["type"], "GrantAck", "{ack}");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(generation(&server, &one).await, 0);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_tenant_wide_revoke_moves_every_service_the_client_lost_and_only_those() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _f1) = new_service(&server, &mut admin, &t, "one").await;
+        let (two, _f2) = new_service(&server, &mut admin, &t, "two").await;
+        let (three, _f3) = new_service(&server, &mut admin, &t, "three").await;
+        call(&server, &mut admin.s, grant("bob", None, &["service:read"])).await;
+        call(&server, &mut admin.s, grant("bob", Some(&three), &["service:write"])).await;
+        let ack = call(&server, &mut admin.s, revoke("bob", None, &[])).await;
+        assert_eq!(ack["type"], "GrantAck", "{ack}");
+        wait_generation(&server, &one, 1).await;
+        wait_generation(&server, &two, 1).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(generation(&server, &three).await, 0, "bob still has a service grant on three");
+        let mut bob = peer(&server, &t, "bob", false).await;
+        assert_eq!(call(&server, &mut bob.s, get_path(&one)).await["data"]["code"], "PERMISSION_DENIED");
+        assert_eq!(call(&server, &mut bob.s, get_path(&three)).await["type"], "ServiceFilePath");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn revocation_is_not_held_up_by_the_rotation_rate_limits() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(
+            Server::with_dev_auth(true).with_rotation_min_interval(Duration::from_secs(3600)),
+        ));
+        let mut admin = peer(&server, &t, "admin", true).await;
+        let (one, _f) = new_service(&server, &mut admin, &t, "one").await;
+        call(&server, &mut admin.s, grant("bob", Some(&one), &["service:read"])).await;
+        call(&server, &mut admin.s, grant("carol", Some(&one), &["service:read"])).await;
+        call(&server, &mut admin.s, revoke("bob", Some(&one), &[])).await;
+        wait_generation(&server, &one, 1).await;
+        // an hour-long spacing would refuse a normal rotation now; a revocation goes through
+        call(&server, &mut admin.s, revoke("carol", Some(&one), &[])).await;
+        wait_generation(&server, &one, 2).await;
         cleanup(&t);
     }
 }
