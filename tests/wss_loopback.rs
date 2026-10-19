@@ -210,15 +210,17 @@ async fn a_local_and_a_remote_client_see_each_others_flushes_over_real_wss() {
     cleanup(&tenant);
 }
 
-/// A resize over real WSS: the drain barrier reaches both clients through the outbound queue, their
-/// acknowledgements come back as text frames, and both receive the commit.
+/// A resize over real WSS (prepare and commit): the drain barrier reaches both clients through the
+/// outbound queue, the requester alone is handed the new file, fills it with a binary range frame and
+/// `FlushEnd`, answers `RotationFilled`, and both receive the commit.
 #[tokio::test]
-async fn a_resize_drains_and_commits_over_real_wss() {
+async fn a_resize_drains_prepares_fills_and_commits_over_real_wss() {
     let tenant = format!("lr_{}", uuid::Uuid::new_v4().simple());
     let (port, server, certs) = start_server().await;
     {
         let mut g = server.write().await;
         g.drain_timeout = std::time::Duration::from_secs(3);
+        g.fill_timeout = std::time::Duration::from_secs(5);
         g.rotation_min_interval = std::time::Duration::ZERO;
     }
     let mut a = connect(port, &certs).await;
@@ -251,16 +253,33 @@ async fn a_resize_drains_and_commits_over_real_wss() {
     let a_pending = a_pending.expect("A must receive RotationPending");
     let b_pending = next_text(&mut b).await;
     assert_eq!(b_pending["type"], "RotationPending", "{b_pending}");
+    assert_eq!(a_pending["data"]["fill_ms"], 5000);
 
     for (c, p) in [(&mut a, &a_pending), (&mut b, &b_pending)] {
         say(c, json!({"type":"RotationDrained","data":{"request_id":"d","rotation_id":p["data"]["rotation_id"],"file_id":file_id,"seq":0}})).await;
     }
+
+    // The requester alone is handed the prepared file (no path: it is a remote mirror).
+    let prep = next_text(&mut a).await;
+    assert_eq!(prep["type"], "RotationPrepared", "{prep}");
+    assert!(prep["data"].get("path").is_none(), "{prep}");
+    let new_fid = prep["data"]["new_file_id"].as_u64().unwrap() as u32;
+    let frame = commy_wire::RangeFrame { file_id: new_fid, seq: 0, offset: 300, data: vec![8, 8] };
+    a.send(Message::Binary(frame.encode().into())).await.unwrap();
+    say(&mut a, json!({"type":"FlushEnd","data":{"request_id":"fe","file_id":new_fid}})).await;
+    let ack = next_text(&mut a).await;
+    assert_eq!((ack["type"].as_str(), ack["data"]["seq"].as_u64()), (Some("FlushAck"), Some(0)), "{ack}");
+    say(&mut a, json!({"type":"RotationFilled","data":{"request_id":"fl","rotation_id":prep["data"]["rotation_id"]}})).await;
+
     let ca = next_text(&mut a).await;
     let cb = next_text(&mut b).await;
     assert_eq!(ca["type"], "RotationCommit", "{ca}");
     assert_eq!(ca, cb);
     assert_eq!(ca["data"]["size"], 8192);
     assert_eq!(ca["data"]["old_file_id"], file_id);
+    assert_eq!(ca["data"]["new_file_id"], new_fid);
+    let live = server.read().await.service_registry[&service_id].file_path.clone();
+    assert_eq!(&std::fs::read(live).unwrap()[300..302], &[8, 8]);
 
     cleanup(&tenant);
 }

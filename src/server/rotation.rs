@@ -20,11 +20,30 @@ pub enum Refusal {
     RequesterLimit,
 }
 
+/// Where a resize is: waiting for SDKs to drain, or waiting for the requester to fill the new file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    Draining,
+    Filling,
+}
+
+/// The requester's answer once the new file is prepared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FillResult {
+    Filled,
+    Aborted,
+}
+
 /// A running rotation.
 #[derive(Clone, Debug)]
 pub struct Active {
     pub rotation_id: String,
     pub file_id: u32,
+    /// The session that asked for the rotation, and the queue to reach it.
+    pub requester_session: Option<String>,
+    pub requester_tx: Option<crate::server::forwarding::OutTx>,
+    pub phase: Phase,
+    pub fill_result: Option<FillResult>,
     /// Sessions that must drain (resize only).
     pub expected: HashSet<String>,
     pub drained: HashSet<String>,
@@ -94,6 +113,10 @@ impl Rotations {
         let active = Active {
             rotation_id: uuid::Uuid::new_v4().to_string(),
             file_id,
+            requester_session: None,
+            requester_tx: None,
+            phase: Phase::Draining,
+            fill_result: None,
             expected,
             drained: HashSet::new(),
             notify: Arc::new(Notify::new()),
@@ -123,6 +146,54 @@ impl Rotations {
         }
         active.drained.insert(session_id.to_string());
         active.notify.notify_one();
+        Ok(())
+    }
+
+    /// Record who asked for the rotation and how to reach them.
+    pub fn set_requester(
+        &self,
+        service_id: &str,
+        session_id: &str,
+        tx: Option<crate::server::forwarding::OutTx>,
+    ) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(a) = g.active.get_mut(service_id) {
+            a.requester_session = Some(session_id.to_string());
+            a.requester_tx = tx;
+        }
+    }
+
+    /// The new file is prepared: from now the requester may answer `Filled` or `Aborted`.
+    pub fn set_filling(&self, service_id: &str) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(a) = g.active.get_mut(service_id) {
+            a.phase = Phase::Filling;
+        }
+    }
+
+    /// The requester's answer. Only the requester may give it, only once, and only after the new
+    /// file was prepared.
+    pub fn respond(
+        &self,
+        rotation_id: &str,
+        session_id: &str,
+        result: FillResult,
+    ) -> Result<(), &'static str> {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(a) = g.active.values_mut().find(|a| a.rotation_id == rotation_id) else {
+            return Err("no such rotation is running");
+        };
+        if a.requester_session.as_deref() != Some(session_id) {
+            return Err("only the requester may answer");
+        }
+        if a.phase != Phase::Filling {
+            return Err("the new file is not prepared yet");
+        }
+        if a.fill_result.is_some() {
+            return Err("this rotation was already answered");
+        }
+        a.fill_result = Some(result);
+        a.notify.notify_one();
         Ok(())
     }
 
@@ -218,6 +289,20 @@ mod tests {
         assert!(r.mark_drained(&a.rotation_id, 8, "s1").is_err(), "wrong file");
         assert!(r.mark_drained(&a.rotation_id, 7, "stranger").is_err(), "not asked");
         assert!(!r.active("svc").unwrap().all_drained());
+    }
+
+    #[test]
+    fn only_the_requester_may_answer_and_only_after_prepare_and_once() {
+        let r = Rotations::new();
+        let a = r.begin("svc", "a", 7, set(&[]), Duration::ZERO, t0()).unwrap();
+        r.set_requester("svc", "req", None);
+        assert!(r.respond(&a.rotation_id, "req", FillResult::Filled).is_err(), "not prepared yet");
+        r.set_filling("svc");
+        assert!(r.respond(&a.rotation_id, "stranger", FillResult::Filled).is_err());
+        assert!(r.respond("nope", "req", FillResult::Filled).is_err());
+        r.respond(&a.rotation_id, "req", FillResult::Filled).unwrap();
+        assert!(r.respond(&a.rotation_id, "req", FillResult::Aborted).is_err(), "only once");
+        assert_eq!(r.active("svc").unwrap().fill_result, Some(FillResult::Filled));
     }
 
     #[test]
