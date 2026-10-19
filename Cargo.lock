@@ -525,7 +525,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "commy"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "auth-framework",
  "chrono",
@@ -534,6 +534,7 @@ dependencies = [
  "memmap2",
  "rcgen",
  "rmp-serde",
+ "role-system",
  "rustls",
  "rustls-pemfile",
  "serde",
@@ -2593,9 +2594,9 @@ dependencies = [
 
 [[package]]
 name = "role-system"
-version = "1.1.1"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5da3feb24d3d572b58bdb3ffb86bcb1f8d94f9b58c80300beebc5a2656d11258"
+checksum = "504fe3a1811fd969f3ac1a7f590f6fa95c6509fe942eb06d008ef4108bb23201"
 dependencies = [
  "async-trait",
  "chrono",

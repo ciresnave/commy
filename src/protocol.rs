@@ -256,6 +256,8 @@ pub struct ClientSession {
     pub outbound: Option<crate::server::forwarding::OutTx>,
     /// Ranges a remote sender has written into the file and not yet ended with `FlushEnd`.
     pub pending_flush: std::collections::HashMap<u32, Vec<commy_wire::ByteRange>>,
+    /// Whether this session's authentication permissions were imported into the grant store.
+    pub grants_imported: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ClientSession {
@@ -277,6 +279,7 @@ impl ClientSession {
             outbound_frames: Vec::new(),
             outbound: None,
             pending_flush: std::collections::HashMap::new(),
+            grants_imported: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
