@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.1
+- `Resync` (C2): a client with a read grant on a file gets the whole file as `commy-wire` range frames (at most 1 MiB each, offset order, all carrying the service's current `seq`), then `ResyncDone{seq, size}`. The connection loop sends queued binary frames before the text reply. Unknown file `NOT_FOUND`; another tenant's file or no read grant `PERMISSION_DENIED`. `ServiceRecord` gains `seq`; `ClientSession` gains `outbound_frames`.
+
 ## 0.6.0 (breaking)
 - `GetServiceFilePath` is real (C1) and now uses the `commy-wire` 0.2.1 messages: it needs a `request_id` and returns `ServiceFilePath` with the service's `file_id`. `path` and `nonce_path` are present only when the service has been opened to local mapping (`Server::set_trusted_local`, default off) and the caller holds a write grant (`ServiceWrite`, `ServiceAdmin` or `TenantAdmin`).
 - `ConfirmLocal` checks the per-connection nonce (random, in a 0600 side file in the tenant directory), deletes it on the first attempt, and answers `ConfirmLocalAck` or `PERMISSION_DENIED`. At most 16 unconfirmed nonces per session (`RATE_LIMITED`); unconfirmed nonce files are removed on `Disconnect` and swept after 60 s.

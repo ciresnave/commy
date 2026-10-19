@@ -263,6 +263,8 @@ pub struct ServiceRecord {
     /// Whether an admin has opened this service to local mapping. Off by default: the server
     /// cannot see stores into a mapping, so only OS file permissions guard it.
     pub trusted_local: bool,
+    /// The service's current sequence number (a snapshot carries it; C3 will advance it).
+    pub seq: u64,
 }
 
 pub struct Server {

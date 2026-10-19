@@ -250,6 +250,8 @@ pub struct ClientSession {
     pub pending_nonces: std::collections::HashMap<u32, crate::server::local_mapping::PendingNonce>,
     /// Files this session proved it can map locally (`file_id`s).
     pub local_files: std::collections::HashSet<u32>,
+    /// Binary frames the connection loop sends before the next text reply (resync snapshots).
+    pub outbound_frames: Vec<Vec<u8>>,
 }
 
 impl ClientSession {
@@ -268,6 +270,7 @@ impl ClientSession {
             subscriptions: std::collections::HashSet::new(),
             pending_nonces: std::collections::HashMap::new(),
             local_files: std::collections::HashSet::new(),
+            outbound_frames: Vec::new(),
         }
     }
 

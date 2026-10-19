@@ -120,13 +120,28 @@ pub async fn handle_connection(
                                 );
 
                                 // Handle SDK message based on type field
-                                if let Some(response) = handle_sdk_message(
+                                let reply = handle_sdk_message(
                                     msg_value,
                                     &mut session,
                                     Arc::clone(&_server),
                                 )
-                                .await
-                                {
+                                .await;
+                                // Binary frames a handler queued (a resync snapshot) go out first,
+                                // so the text reply that ends the snapshot arrives last.
+                                let frames: Vec<Vec<u8>> =
+                                    session.outbound_frames.drain(..).collect();
+                                let mut send_failed = false;
+                                for frame in frames {
+                                    if let Err(e) = write.send(Message::Binary(frame.into())).await {
+                                        eprintln!("Failed to send range frame: {}", e);
+                                        send_failed = true;
+                                        break;
+                                    }
+                                }
+                                if send_failed {
+                                    break;
+                                }
+                                if let Some(response) = reply {
                                     // Send response back as Text (JSON)
                                     if let Ok(serialized) = serde_json::to_string(&response) {
                                         println!(
@@ -1448,9 +1463,59 @@ async fn handle_local_mapping(
                 },
             )))
         }
+        ControlMessage::Resync(req) => {
+            let rid = Some(req.request_id.as_str());
+            let guard = server.read().await;
+            let Some(record) = guard
+                .service_registry
+                .values()
+                .find(|r| r.file_id == req.file_id)
+            else {
+                return Some(wire_error(ErrorCode::NotFound, "Unknown file", rid));
+            };
+            let can_read = session.permissions.as_ref().is_some_and(|p| {
+                p.has_any(&[
+                    crate::auth::Permission::ServiceRead,
+                    crate::auth::Permission::ServiceWrite,
+                    crate::auth::Permission::ServiceAdmin,
+                    crate::auth::Permission::TenantRead,
+                    crate::auth::Permission::TenantAdmin,
+                ])
+            });
+            if session.tenant_id.as_deref() != Some(record.tenant_name.as_str()) || !can_read {
+                return Some(wire_error(
+                    ErrorCode::PermissionDenied,
+                    "No read access to this file",
+                    rid,
+                ));
+            }
+            let bytes = match std::fs::read(&record.file_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("[resync] cannot read {}: {e}", record.file_path);
+                    return Some(wire_error(
+                        ErrorCode::InternalError,
+                        "Cannot read the service file",
+                        rid,
+                    ));
+                }
+            };
+            let seq = record.seq;
+            for frame in commy_wire::RangeFrame::split(record.file_id, seq, 0, &bytes) {
+                session.outbound_frames.push(frame.encode());
+            }
+            Some(wire_json(&ControlMessage::ResyncDone(
+                commy_wire::ResyncDone {
+                    request_id: req.request_id,
+                    file_id: record.file_id,
+                    seq,
+                    size: bytes.len() as u64,
+                },
+            )))
+        }
         _ => Some(wire_error(
             ErrorCode::InvalidRequest,
-            "Not a local-mapping request",
+            "Not a local-mapping or resync request",
             None,
         )),
     }
@@ -1639,6 +1704,7 @@ async fn handle_sdk_message(
                     file_path,
                     file_id,
                     trusted_local: false,
+                    seq: 0,
                 },
             );
 
@@ -2225,7 +2291,7 @@ async fn handle_sdk_message(
             }))
         }
 
-        "GetServiceFilePath" | "ConfirmLocal" => {
+        "GetServiceFilePath" | "ConfirmLocal" | "Resync" => {
             handle_local_mapping(message, session, &server).await
         }
 
@@ -3924,5 +3990,217 @@ mod local_mapping_tests {
         let p = crate::server::local_mapping::create_nonce_file(d.path()).unwrap();
         let mode = std::fs::metadata(&p.path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+}
+
+#[cfg(test)]
+mod resync_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn send(
+        server: &Arc<RwLock<Server>>,
+        session: &mut ClientSession,
+        v: serde_json::Value,
+    ) -> serde_json::Value {
+        handle_sdk_message(v, session, Arc::clone(server)).await.unwrap()
+    }
+
+    async fn authed(server: &Arc<RwLock<Server>>, tenant: &str) -> ClientSession {
+        let mut s = ClientSession::new();
+        let r = send(
+            server,
+            &mut s,
+            json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x"}}),
+        )
+        .await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s
+    }
+
+    /// Create a service of `size` bytes; returns (service_id, file_id).
+    async fn make_service(
+        server: &Arc<RwLock<Server>>,
+        s: &mut ClientSession,
+        tenant: &str,
+        size: u64,
+    ) -> (String, u32) {
+        let r = send(
+            server,
+            s,
+            json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":size}}),
+        )
+        .await;
+        assert_eq!(r["type"], "Service", "{r}");
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        let file_id = server.read().await.service_registry[&id].file_id;
+        (id, file_id)
+    }
+
+    fn resync(file_id: u32) -> serde_json::Value {
+        json!({"type":"Resync","data":{"request_id":"rs1","file_id":file_id}})
+    }
+
+    fn tenant() -> String {
+        format!("rs_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(tenant: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{tenant}"));
+    }
+
+    fn file_path(tenant: &str, service_id: &str) -> String {
+        format!("tenant_{tenant}/service_{service_id}.mem")
+    }
+
+    /// Overwrite the file's bytes in place. `std::fs::write` truncates, which Windows refuses
+    /// while the server holds the file mapped.
+    fn fill(path: &str, content: &[u8]) {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.write_all(content).unwrap();
+        f.sync_all().unwrap();
+    }
+
+    /// Decode every queued frame and reassemble the file image they describe.
+    fn reassemble(s: &mut ClientSession, size: usize) -> (Vec<u8>, Vec<commy_wire::RangeFrame>) {
+        let frames: Vec<_> = s
+            .outbound_frames
+            .drain(..)
+            .map(|b| commy_wire::RangeFrame::decode(&b).expect("a valid range frame"))
+            .collect();
+        let mut image = vec![0u8; size];
+        for f in &frames {
+            image[f.offset as usize..f.offset as usize + f.data.len()].copy_from_slice(&f.data);
+        }
+        (image, frames)
+    }
+
+    #[tokio::test]
+    async fn resync_sends_the_whole_file_then_resync_done() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let (id, fid) = make_service(&server, &mut s, &t, 8192).await;
+        let mut content = vec![0u8; 8192];
+        for (i, b) in content.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        fill(&file_path(&t, &id), &content);
+
+        let r = send(&server, &mut s, resync(fid)).await;
+        assert_eq!(r["type"], "ResyncDone", "{r}");
+        assert_eq!(r["data"]["request_id"], "rs1");
+        assert_eq!(r["data"]["file_id"], fid);
+        assert_eq!(r["data"]["size"], 8192);
+        let (image, frames) = reassemble(&mut s, 8192);
+        assert_eq!(image, content, "frames must reproduce the file exactly");
+        assert!(frames.iter().all(|f| f.file_id == fid));
+        assert!(frames.iter().all(|f| f.seq == r["data"]["seq"].as_u64().unwrap()));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_file_over_one_frame_is_split_at_the_maximum_in_offset_order() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let size = commy_wire::MAX_PAYLOAD as u64 * 2 + 4096;
+        let (id, fid) = make_service(&server, &mut s, &t, size).await;
+        let mut content = vec![0u8; size as usize];
+        content[commy_wire::MAX_PAYLOAD] = 9;
+        content[size as usize - 1] = 7;
+        fill(&file_path(&t, &id), &content);
+
+        let r = send(&server, &mut s, resync(fid)).await;
+        assert_eq!(r["type"], "ResyncDone", "{r}");
+        let (image, frames) = reassemble(&mut s, size as usize);
+        assert_eq!(frames.len(), 3);
+        assert!(frames.iter().all(|f| f.data.len() <= commy_wire::MAX_PAYLOAD));
+        assert!(frames.windows(2).all(|w| w[0].offset < w[1].offset));
+        assert_eq!(image, content);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn unknown_file_is_not_found_and_queues_nothing() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let r = send(&server, &mut s, resync(424242)).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
+        assert_eq!(r["data"]["request_id"], "rs1");
+        assert!(s.outbound_frames.is_empty());
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn another_tenants_file_is_refused_and_queues_nothing() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut owner = authed(&server, &t).await;
+        let (_id, fid) = make_service(&server, &mut owner, &t, 4096).await;
+        let other = tenant();
+        let mut s2 = authed(&server, &other).await;
+        let r = send(&server, &mut s2, resync(fid)).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        assert!(s2.outbound_frames.is_empty());
+        cleanup(&t);
+        cleanup(&other);
+    }
+
+    #[tokio::test]
+    async fn a_session_without_a_read_grant_is_refused() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let (_id, fid) = make_service(&server, &mut s, &t, 4096).await;
+        s.permissions = Some(crate::auth::PermissionSet::new());
+        let r = send(&server, &mut s, resync(fid)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        assert!(s.outbound_frames.is_empty());
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_session_cannot_resync() {
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = ClientSession::new();
+        let r = send(&server, &mut s, resync(1)).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert!(s.outbound_frames.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resync_without_request_id_is_invalid() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let (_id, fid) = make_service(&server, &mut s, &t, 4096).await;
+        let r = send(
+            &server,
+            &mut s,
+            json!({"type":"Resync","data":{"file_id":fid}}),
+        )
+        .await;
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        assert!(s.outbound_frames.is_empty());
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn the_final_seq_is_the_services_current_seq() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = authed(&server, &t).await;
+        let (id, fid) = make_service(&server, &mut s, &t, 4096).await;
+        server.write().await.service_registry.get_mut(&id).unwrap().seq = 41;
+        let r = send(&server, &mut s, resync(fid)).await;
+        assert_eq!(r["data"]["seq"], 41, "{r}");
+        let (_, frames) = reassemble(&mut s, 4096);
+        assert!(frames.iter().all(|f| f.seq == 41));
+        cleanup(&t);
     }
 }
