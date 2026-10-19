@@ -209,3 +209,58 @@ async fn a_local_and_a_remote_client_see_each_others_flushes_over_real_wss() {
 
     cleanup(&tenant);
 }
+
+/// A resize over real WSS: the drain barrier reaches both clients through the outbound queue, their
+/// acknowledgements come back as text frames, and both receive the commit.
+#[tokio::test]
+async fn a_resize_drains_and_commits_over_real_wss() {
+    let tenant = format!("lr_{}", uuid::Uuid::new_v4().simple());
+    let (port, server, certs) = start_server().await;
+    {
+        let mut g = server.write().await;
+        g.drain_timeout = std::time::Duration::from_secs(3);
+        g.rotation_min_interval = std::time::Duration::ZERO;
+    }
+    let mut a = connect(port, &certs).await;
+    let mut b = connect(port, &certs).await;
+    authenticate(&mut a, &tenant).await;
+    authenticate(&mut b, &tenant).await;
+    say(&mut a, json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":4096}})).await;
+    let r = next_text(&mut a).await;
+    let service_id = r["data"]["service_id"].as_str().unwrap().to_string();
+    let file_id = server.read().await.service_registry[&service_id].file_id;
+
+    // Both clients become remote mirrors (Resync: one frame, then ResyncDone).
+    for c in [&mut a, &mut b] {
+        say(c, json!({"type":"Resync","data":{"request_id":"rs","file_id":file_id}})).await;
+        let _frame = next_binary(c).await;
+        assert_eq!(next_text(c).await["type"], "ResyncDone");
+    }
+
+    say(&mut a, json!({"type":"RotateRequest","data":{"request_id":"q","service_id":service_id,"reason":"RESIZE","new_size":8192}})).await;
+    // A gets RotationAccepted and RotationPending in either order; B gets RotationPending.
+    let mut a_pending = None;
+    for _ in 0..2 {
+        let m = next_text(&mut a).await;
+        match m["type"].as_str().unwrap() {
+            "RotationAccepted" => {}
+            "RotationPending" => a_pending = Some(m),
+            other => panic!("unexpected {other}: {m}"),
+        }
+    }
+    let a_pending = a_pending.expect("A must receive RotationPending");
+    let b_pending = next_text(&mut b).await;
+    assert_eq!(b_pending["type"], "RotationPending", "{b_pending}");
+
+    for (c, p) in [(&mut a, &a_pending), (&mut b, &b_pending)] {
+        say(c, json!({"type":"RotationDrained","data":{"request_id":"d","rotation_id":p["data"]["rotation_id"],"file_id":file_id,"seq":0}})).await;
+    }
+    let ca = next_text(&mut a).await;
+    let cb = next_text(&mut b).await;
+    assert_eq!(ca["type"], "RotationCommit", "{ca}");
+    assert_eq!(ca, cb);
+    assert_eq!(ca["data"]["size"], 8192);
+    assert_eq!(ca["data"]["old_file_id"], file_id);
+
+    cleanup(&tenant);
+}

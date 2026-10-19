@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 (breaking)
+- Rotation (C4) on `commy-wire` 0.2.4 (`spec/rotation.md`). `RotateRequest` with `RESIZE` runs a drain barrier: every member of the old file gets `RotationPending{deadline_ms}`, flushes and answers `RotationDrained`; at the deadline (default 5 s, `COMMY_DRAIN_TIMEOUT_MS`) the server builds the new file at a new random name (old bytes that fit, zero padded), switches the service to it, and sends `RotationCommit` to every member that drained. A member that did not gets `Loss{ROTATION_STRAGGLER}`. `REVOCATION` has no barrier: same size and bytes, `RotationCommit` to everyone but the revoked client, who gets `Loss{REVOKED}`.
+- New permission `ServiceResize` (`service:resize`); resize needs it, `ServiceAdmin` or `TenantAdmin`; revocation needs `ServiceAdmin` or `TenantAdmin`. The new size must respect the server maximum.
+- Limits: one rotation per service at a time, at least one second between rotations of a service, at most six rotations per requester per minute (`RATE_LIMITED`).
+- After a commit, frames and `Resync` for the old `file_id` are refused (`INVALID_REQUEST`); `GetServiceFilePath` returns the new `file_id` with a fresh nonce. Each service's `seq` restarts at 0 and `generation` increases by one.
+- Interim audit trail (`Server::audit_events`, also on stderr): every rotation request, grant, refusal and commit. A durable audit log is a later item.
+- **Known gap:** a revocation only rotates the file and removes the client from it. It does not revoke the client's grants, so the client can fetch the new file again until its permissions are revoked (service-scoped grants, C10). Do not treat it as access revocation on its own.
+- `ServiceRecord` gains `generation`; `Server` gains `rotations`, `retired_files`, `drain_timeout`, `rotation_min_interval`; `Forwarding::join` takes the client id.
+
 ## 0.7.1
 - Fix: the server panicked at TLS start-up ("Could not automatically determine the process-level CryptoProvider") because the dependency tree enables both aws-lc-rs and ring. `TlsConfiguration::from_files` now builds its `ServerConfig` with an explicit aws-lc-rs provider.
 - New `tests/wss_loopback.rs`: a self-signed certificate, the real `WssServer` accept loop and connection loop, and real TLS/WebSocket clients, covering TLS start-up, the outbound-queue select and the binary range-frame dispatch (closes the 0.7.0 known gap). Mutation-checked: dispatching on a wrong frame kind, or starving the outbound queue, fails the test.

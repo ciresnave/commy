@@ -22,6 +22,8 @@ pub enum Permission {
     ServiceCreate,
     ServiceDelete,
     ServiceAdmin,
+    /// Resize a service (rotate its file to a new size). `ServiceAdmin` implies it.
+    ServiceResize,
     ServiceRead,
     ServiceWrite,
     
@@ -177,6 +179,7 @@ impl PermissionSet {
                 "service:create" => set.grant(Permission::ServiceCreate),
                 "service:delete" => set.grant(Permission::ServiceDelete),
                 "service:admin" => set.grant(Permission::ServiceAdmin),
+                "service:resize" => set.grant(Permission::ServiceResize),
                 "service:read" => set.grant(Permission::ServiceRead),
                 "service:write" => set.grant(Permission::ServiceWrite),
                 "variable:read" => set.grant(Permission::VariableRead),

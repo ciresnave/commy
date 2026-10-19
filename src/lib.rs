@@ -265,6 +265,8 @@ pub struct ServiceRecord {
     pub trusted_local: bool,
     /// The service's current sequence number (a snapshot carries it; C3 will advance it).
     pub seq: u64,
+    /// How many times the file has been rotated.
+    pub generation: u64,
 }
 
 pub struct Server {
@@ -284,6 +286,16 @@ pub struct Server {
     pub next_file_id: u32,
     /// Who is on which file, for range forwarding.
     pub forwarder: server::forwarding::Registry,
+    /// Running rotations and their rate limits.
+    pub rotations: server::rotation::Rotations,
+    /// Files that were rotated away; frames for them are refused as `INVALID_REQUEST`.
+    pub retired_files: std::collections::HashSet<u32>,
+    /// How long a resize waits for every SDK to drain (default 5 s, `COMMY_DRAIN_TIMEOUT_MS`).
+    pub drain_timeout: std::time::Duration,
+    /// Least time between two rotations of one service.
+    pub rotation_min_interval: std::time::Duration,
+    /// Rotation requests, grants and refusals, oldest first (capped).
+    audit_log: std::sync::Mutex<Vec<String>>,
 }
 
 /// Page size service files are rounded up to.
@@ -345,6 +357,15 @@ impl Server {
             dev_auth,
             next_file_id: 1,
             forwarder: server::forwarding::Registry::new(),
+            rotations: server::rotation::Rotations::new(),
+            retired_files: std::collections::HashSet::new(),
+            drain_timeout: std::env::var("COMMY_DRAIN_TIMEOUT_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(std::time::Duration::from_secs(5)),
+            rotation_min_interval: server::rotation::DEFAULT_MIN_INTERVAL,
+            audit_log: std::sync::Mutex::new(Vec::new()),
             max_service_size: std::env::var(MAX_SERVICE_SIZE_ENV)
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -362,6 +383,37 @@ impl Server {
             }
             None => false,
         }
+    }
+
+    /// Set how long a resize waits for SDKs to drain.
+    pub fn with_drain_timeout(mut self, t: std::time::Duration) -> Self {
+        self.drain_timeout = t;
+        self
+    }
+
+    /// Set the least time between two rotations of one service.
+    pub fn with_rotation_min_interval(mut self, t: std::time::Duration) -> Self {
+        self.rotation_min_interval = t;
+        self
+    }
+
+    /// Record a security-relevant event. Interim audit trail: kept in memory (last 10,000 events)
+    /// and printed to stderr; a durable audit log is a later item.
+    pub fn audit(&self, line: &str) {
+        eprintln!("[audit] {line}");
+        let mut log = self.audit_log.lock().unwrap_or_else(|e| e.into_inner());
+        if log.len() >= 10_000 {
+            log.remove(0);
+        }
+        log.push(line.to_string());
+    }
+
+    /// The recorded audit events, oldest first.
+    pub fn audit_events(&self) -> Vec<String> {
+        self.audit_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Set the largest service file a client may ask for (bytes).
