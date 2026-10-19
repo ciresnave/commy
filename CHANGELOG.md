@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.8.1
+- Fix: the crate did not compile on Linux and macOS (`E0432: unresolved import libc`): `src/allocator.rs` imported `libc` for an unused helper, while `libc` was an optional dependency no feature enabled. The dead helper (`process_is_alive`), the import and the optional `libc` dependency (and its implicit `libc` feature) are removed.
+
 ## 0.8.0 (breaking)
 - Rotation (C4) on `commy-wire` 0.2.4 (`spec/rotation.md`). `RotateRequest` with `RESIZE` runs a drain barrier: every member of the old file gets `RotationPending{deadline_ms}`, flushes and answers `RotationDrained`; at the deadline (default 5 s, `COMMY_DRAIN_TIMEOUT_MS`) the server builds the new file at a new random name (old bytes that fit, zero padded), switches the service to it, and sends `RotationCommit` to every member that drained. A member that did not gets `Loss{ROTATION_STRAGGLER}`. `REVOCATION` has no barrier: same size and bytes, `RotationCommit` to everyone but the revoked client, who gets `Loss{REVOKED}`.
 - New permission `ServiceResize` (`service:resize`); resize needs it, `ServiceAdmin` or `TenantAdmin`; revocation needs `ServiceAdmin` or `TenantAdmin`. The new size must respect the server maximum.

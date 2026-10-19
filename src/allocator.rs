@@ -4,8 +4,6 @@
 /// multiple processes to safely share data through offsets rather than pointers.
 ///
 
-#[cfg(unix)]
-use libc;
 /// # Resizing Behavior
 ///
 /// When `allow_growth` is enabled and the allocator runs out of space, it can
@@ -123,20 +121,6 @@ fn current_timestamp() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-/// Check if a process with the given PID is still alive (Unix only)
-///
-/// Note: This is kept for reference but not currently used. The heartbeat-based
-/// stale detection in ResizeLockGuard is more robust and doesn't require permissions.
-#[allow(dead_code)]
-#[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    // On Unix, send signal 0 to check if process exists without affecting it
-    unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
 /// RAII guard for resize lock with automatic heartbeat updates
