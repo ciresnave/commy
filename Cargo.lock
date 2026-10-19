@@ -510,7 +510,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "commy"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "auth-framework",
  "chrono",
@@ -534,9 +534,9 @@ dependencies = [
 
 [[package]]
 name = "commy-wire"
-version = "0.2.1"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffafe989dc78eed4c75dde7fa6885df634ac5d14eb2701973b531c2fa3747e18"
+checksum = "06747e81f71dcff0d50bc9ed09cbe2a7f10ee2c644a85d3245ca9cc33bb5d796"
 dependencies = [
  "serde",
 ]

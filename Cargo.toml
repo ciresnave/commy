@@ -5,7 +5,7 @@
     license      = "MIT"
     name         = "commy"
     repository   = "https://github.com/ciresnave/commy"
-    version      = "0.6.1"
+    version      = "0.7.0"
 
 [lib]
 
@@ -16,7 +16,7 @@
 [dependencies]
     auth-framework    = "0.4"
     chrono            = { version = "0.4", features = ["serde"] }
-commy-wire = "0.2.1"
+commy-wire = "0.2.4"
     futures           = "0.3"
     libc              = { version = "0.2", optional = true }
     memmap2           = "0.9"

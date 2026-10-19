@@ -252,6 +252,10 @@ pub struct ClientSession {
     pub local_files: std::collections::HashSet<u32>,
     /// Binary frames the connection loop sends before the next text reply (resync snapshots).
     pub outbound_frames: Vec<Vec<u8>>,
+    /// Queue other connections use to forward ranges to this one (set by the connection loop).
+    pub outbound: Option<crate::server::forwarding::OutTx>,
+    /// Ranges a remote sender has written into the file and not yet ended with `FlushEnd`.
+    pub pending_flush: std::collections::HashMap<u32, Vec<commy_wire::ByteRange>>,
 }
 
 impl ClientSession {
@@ -271,6 +275,8 @@ impl ClientSession {
             pending_nonces: std::collections::HashMap::new(),
             local_files: std::collections::HashSet::new(),
             outbound_frames: Vec::new(),
+            outbound: None,
+            pending_flush: std::collections::HashMap::new(),
         }
     }
 
