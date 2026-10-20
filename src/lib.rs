@@ -212,6 +212,8 @@ pub struct Server {
     pub rotation_min_interval: std::time::Duration,
     /// Rotation requests, grants and refusals, oldest first (capped).
     audit_log: std::sync::Mutex<Vec<String>>,
+    /// Audit events that could not be written to the durable log.
+    audit_failures: std::sync::atomic::AtomicU64,
     /// Durable state (service registry and grants), if enabled. Off for `Server::new()` unless
     /// `enable_persistence` is called; the binary turns it on.
     persistence: Option<persist::Persistence>,
@@ -305,6 +307,7 @@ impl Server {
                 .unwrap_or(std::time::Duration::from_secs(5)),
             rotation_min_interval: server::rotation::DEFAULT_MIN_INTERVAL,
             audit_log: std::sync::Mutex::new(Vec::new()),
+            audit_failures: std::sync::atomic::AtomicU64::new(0),
             persistence: None,
             grant_lock: std::sync::Mutex::new(()),
             max_service_size: std::env::var(MAX_SERVICE_SIZE_ENV)
@@ -393,7 +396,20 @@ impl Server {
             );
             report.services_loaded += 1;
         }
+        if let Some(keep) = std::env::var("COMMY_AUDIT_MAX_EVENTS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            p.set_audit_limit(keep);
+        }
         self.persistence = Some(p);
+        self.audit(&format!(
+            "server STARTED state: {} service(s) loaded, {} skipped (file missing), {} grant change(s) replayed, {} skipped",
+            report.services_loaded,
+            report.services_missing_file,
+            report.grant_ops_replayed,
+            report.grant_ops_skipped
+        ));
         Ok(report)
     }
 
@@ -497,15 +513,53 @@ impl Server {
         self
     }
 
-    /// Record a security-relevant event. Interim audit trail: kept in memory (last 10,000 events)
-    /// and printed to stderr; a durable audit log is a later item.
+    /// Record a security-relevant event: printed to stderr, kept in memory (the last 10,000), and,
+    /// with persistence, appended to the durable audit log. A failed write to the durable log is
+    /// counted ([`Server::audit_failures`]) and printed; it never blocks the operation it describes
+    /// (the changes that matter are recorded fail-closed by the state store itself).
     pub fn audit(&self, line: &str) {
         eprintln!("[audit] {line}");
-        let mut log = self.audit_log.lock().unwrap_or_else(|e| e.into_inner());
-        if log.len() >= 10_000 {
-            log.remove(0);
+        {
+            let mut log = self.audit_log.lock().unwrap_or_else(|e| e.into_inner());
+            if log.len() >= 10_000 {
+                log.remove(0);
+            }
+            log.push(line.to_string());
         }
-        log.push(line.to_string());
+        if let Some(p) = &self.persistence {
+            if let Err(e) = p.append_audit(line) {
+                self.audit_failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                eprintln!("[audit] NOT RECORDED in the durable log: {e}");
+            }
+        }
+    }
+
+    /// Keep only the newest `keep` audit events in the durable log (no-op without persistence).
+    /// `COMMY_AUDIT_MAX_EVENTS` sets it at start-up.
+    pub fn set_audit_limit(&self, keep: u64) {
+        if let Some(p) = &self.persistence {
+            p.set_audit_limit(keep);
+        }
+    }
+
+    /// How many audit events could not be written to the durable log since start-up.
+    pub fn audit_failures(&self) -> u64 {
+        self.audit_failures
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Stored audit events after sequence `after` (all if `None`), oldest first, at most `limit`.
+    /// Empty without persistence.
+    pub fn audit_history(
+        &self,
+        after: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<(u64, persist::AuditEvent)>, persist::PersistError> {
+        match &self.persistence {
+            Some(p) => p.load_audit(after, limit),
+            None => Ok(Vec::new()),
+        }
     }
 
     /// The recorded audit events, oldest first.

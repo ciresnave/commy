@@ -48,6 +48,7 @@ It is **not frozen** until the first coordinated release.
 | `COMMY_DRAIN_TIMEOUT_MS` | How long a resize waits for every client to drain (default 5000). |
 | `COMMY_FILL_TIMEOUT_MS` | How long a resize requester has to fill the new file (default 30000). |
 | `COMMY_STATE_DIR` | Directory for durable state: the service registry and the grants (default `./commy_state`, created private to the server and administrators). `off` keeps everything in memory, lost at exit. Sessions, nonces and rotations in flight are not stored; clients resynchronise after a restart. |
+| `COMMY_AUDIT_MAX_EVENTS` | How many audit events the durable audit log keeps (default 100000). When the log is full the oldest event is removed as each new one is written. |
 | `DATABASE_URL` | Backing store for tenant authentication data. **If unset the binary sets it to `postgresql://postgres:postgres@127.0.0.1:5432/commy`**, so a bare run expects a PostgreSQL there. Any value that is not `postgresql://` or `mysql://` (for example `memory`) selects in-memory storage, which needs no database. |
 
 Service files live under `tenant_<id>/` in the server's working directory.
@@ -57,7 +58,7 @@ Service files live under `tenant_<id>/` in the server's working directory.
 - Authentication is development-only (`COMMY_ALLOW_DEV_AUTH`).
 - Service files carry no per-file operating-system permissions; a long random name inside a tenant
   directory is the only barrier on the server's machine.
-- The audit trail is in memory (and on stderr); a durable log is not built yet.
+- The audit log is durable but best effort: events are appended under `<state dir>/audit/` (one file per event, `audit/<sequence>`, JSON with a millisecond timestamp and the text), the newest `COMMY_AUDIT_MAX_EVENTS` (default 100,000) are kept and older ones are removed as new ones arrive. A write that fails is counted (`Server::audit_failures`) and printed, and never blocks the operation it describes; the changes themselves (grants, services, deletions) are recorded fail closed by the state store. Nothing signs or chains the events, so it is evidence, not tamper-proof.
   permission); it needs a real implementation.
 - Many of the Markdown files in this repository predate the redesign and describe named variables,
   the shared allocator and the containers, which were removed in 0.11.0. Trust this README and

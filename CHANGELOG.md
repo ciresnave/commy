@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+- **R6: durable audit log** on PersistAnt. Every `Server::audit` event (rotation requests, grants and refusals, local-mapping changes, service deletions, start-up) is appended to a log of its own under the state directory (`<state dir>/audit/`, one file per event, key `audit/<20-digit sequence>`, JSON `{ts_ms, line}`), kept apart from the state so the two can be handled and fail separately. The newest `COMMY_AUDIT_MAX_EVENTS` (default 100,000) are kept; older ones are removed as new ones are written. A start-up event records what was loaded.
+- **Best effort.** A failed audit write is counted (`Server::audit_failures()`) and printed to stderr, and never blocks the operation it describes (the state changes themselves are recorded fail closed by R5). A test shows a failing audit store increments the counter and does not stop `Grant` or `Revoke`.
+- New: `Server::audit_history(after, limit)`, `Server::audit_failures()`, `Server::set_audit_limit`, `persist::{AuditEvent, Persistence::{append_audit, load_audit, set_audit_limit, open_with_audit}}`. The in-memory trail (`audit_events`) is unchanged.
+- Not: tamper-evident (no signing or hash chain), and not readable over the wire yet.
+
 ## 0.13.3
 - **One error-code spelling on the SDK protocol.** The legacy handlers sent `NotFound`, `Unauthorized`, `InvalidRequest` and `InternalError` (and the MessagePack path `PARSE_ERROR` / `INVALID_JSON`), which `commy-wire` does not allow and clients read as unknown. They now send `NOT_FOUND`, `INVALID_REQUEST`, `INTERNAL_ERROR`; "not authenticated" is `UNAUTHENTICATED`; a session that is authenticated but for another tenant, or lacks access, is `PERMISSION_DENIED` (the old `Unauthorized` covered both); a malformed MessagePack or JSON frame is `INVALID_REQUEST`.
 - An `Error` reply to an SDK-protocol request that carried a `request_id` echoes it.
