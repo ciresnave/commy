@@ -132,7 +132,7 @@ pub async fn handle_connection(
                                 );
                                 // Send error response
                                 let error_response = WssMessage::Error {
-                                    code: "PARSE_ERROR".to_string(),
+                                    code: "INVALID_REQUEST".to_string(),
                                     message: format!("Invalid message format: {}", e),
                                     details: None,
                                 };
@@ -208,7 +208,7 @@ pub async fn handle_connection(
                                     peer_addr, text
                                 );
                                 let error = WssMessage::Error {
-                                    code: "INVALID_JSON".to_string(),
+                                    code: "INVALID_REQUEST".to_string(),
                                     message: "Invalid JSON format".to_string(),
                                     details: None,
                                 };
@@ -789,7 +789,7 @@ fn error_json(code: &str, message: &str) -> serde_json::Value {
 }
 
 fn invalid_request(message: &str) -> serde_json::Value {
-    error_json("InvalidRequest", message)
+    error_json("INVALID_REQUEST", message)
 }
 
 /// A session may use tenant resources only after it has authenticated.
@@ -807,7 +807,7 @@ fn session_is_authenticated(session: &ClientSession) -> bool {
 /// tenant it is authenticated to.
 fn require_own_tenant_admin(session: &ClientSession, tenant_id: &str) -> Option<serde_json::Value> {
     if session.tenant_id.as_deref() != Some(tenant_id) {
-        return Some(error_json("Unauthorized", "Not authenticated to this tenant"));
+        return Some(error_json("PERMISSION_DENIED", "Not authenticated to this tenant"));
     }
     let admin = session
         .permissions
@@ -848,14 +848,14 @@ async fn guard_sdk_message(
     match msg_type {
         "Authenticate" => {
             if !server.read().await.dev_auth {
-                return Some(error_json("Unauthorized", DEV_AUTH_REFUSED));
+                return Some(error_json("UNAUTHENTICATED", DEV_AUTH_REFUSED));
             }
             None
         }
         "Heartbeat" | "Disconnect" => None,
         _ => {
             if !session_is_authenticated(session) {
-                return Some(error_json("Unauthorized", "Not authenticated"));
+                return Some(error_json("UNAUTHENTICATED", "Not authenticated"));
             }
             if let Some(service_id) = data
                 .and_then(|d| d.get("service_id"))
@@ -865,7 +865,7 @@ async fn guard_sdk_message(
                 if let Some(record) = guard.service_registry.get(service_id) {
                     if session.tenant_id.as_deref() != Some(record.tenant_name.as_str()) {
                         return Some(error_json(
-                            "Unauthorized",
+                            "PERMISSION_DENIED",
                             "Service belongs to another tenant",
                         ));
                     }
@@ -2220,7 +2220,31 @@ fn authorise_grant_change(
     Ok(())
 }
 
+/// Handles one SDK-protocol message. An error reply echoes the request's `request_id` when it had one,
+/// so a client can match the reply to the request (`commy-wire`: every request carries a
+/// `request_id` that the reply echoes).
 async fn handle_sdk_message(
+    message: serde_json::Value,
+    session: &mut ClientSession,
+    server: Arc<RwLock<Server>>,
+) -> Option<serde_json::Value> {
+    let request_id = message
+        .get("data")
+        .and_then(|d| d.get("request_id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut reply = handle_sdk_message_inner(message, session, server).await;
+    if let (Some(rid), Some(r)) = (request_id, reply.as_mut()) {
+        if r.get("type").and_then(|t| t.as_str()) == Some("Error") {
+            if let Some(data) = r.get_mut("data").and_then(|d| d.as_object_mut()) {
+                data.entry("request_id").or_insert(serde_json::Value::String(rid));
+            }
+        }
+    }
+    reply
+}
+
+async fn handle_sdk_message_inner(
     message: serde_json::Value,
     session: &mut ClientSession,
     server: Arc<RwLock<Server>>,
@@ -2365,7 +2389,7 @@ async fn handle_sdk_message(
                 return Some(serde_json::json!({
                     "type": "Error",
                     "data": {
-                        "code": "Unauthorized",
+                        "code": "PERMISSION_DENIED",
                         "message": "Not authenticated to this tenant"
                     }
                 }));
@@ -2412,7 +2436,7 @@ async fn handle_sdk_message(
             if let Err(e) = crate::private_dir::create_private(std::path::Path::new(&tenant_dir)) {
                 return Some(serde_json::json!({
                     "type": "Error",
-                    "data": { "code": "InternalError", "message": format!("Failed to create tenant directory: {}", e) }
+                    "data": { "code": "INTERNAL_ERROR", "message": format!("Failed to create tenant directory: {}", e) }
                 }));
             }
 
@@ -2424,7 +2448,7 @@ async fn handle_sdk_message(
                 None => {
                     return Some(serde_json::json!({
                         "type": "Error",
-                        "data": { "code": "NotFound", "message": format!("Tenant '{}' not found", tenant_id) }
+                        "data": { "code": "NOT_FOUND", "message": format!("Tenant '{}' not found", tenant_id) }
                     }))
                 }
             };
@@ -2432,7 +2456,7 @@ async fn handle_sdk_message(
             if let Err(e) = tenant.register_service(service_name, &file_path, file_size as usize) {
                 return Some(serde_json::json!({
                     "type": "Error",
-                    "data": { "code": "InternalError", "message": format!("Failed to create service file: {}", e) }
+                    "data": { "code": "INTERNAL_ERROR", "message": format!("Failed to create service file: {}", e) }
                 }));
             }
 
@@ -2451,7 +2475,7 @@ async fn handle_sdk_message(
                     let _ = std::fs::remove_file(&file_path);
                     return Some(serde_json::json!({
                         "type": "Error",
-                        "data": { "code": "InternalError", "message": "Could not record the new service" }
+                        "data": { "code": "INTERNAL_ERROR", "message": "Could not record the new service" }
                     }));
                 }
             }
@@ -2470,7 +2494,7 @@ async fn handle_sdk_message(
                 let _ = std::fs::remove_file(&file_path);
                 return Some(serde_json::json!({
                     "type": "Error",
-                    "data": { "code": "InternalError", "message": "Could not record the new service" }
+                    "data": { "code": "INTERNAL_ERROR", "message": "Could not record the new service" }
                 }));
             }
             server_guard.service_registry.insert(
@@ -2526,7 +2550,7 @@ async fn handle_sdk_message(
                 return Some(serde_json::json!({
                     "type": "Error",
                     "data": {
-                        "code": "Unauthorized",
+                        "code": "PERMISSION_DENIED",
                         "message": "Not authenticated to this tenant"
                     }
                 }));
@@ -2586,7 +2610,7 @@ async fn handle_sdk_message(
                     Some(serde_json::json!({
                         "type": "Error",
                         "data": {
-                            "code": "NotFound",
+                            "code": "NOT_FOUND",
                             "message": format!("Service '{}' not found in tenant '{}'", service_name, tenant_id)
                         }
                     }))
@@ -2616,7 +2640,7 @@ async fn handle_sdk_message(
                 return Some(serde_json::json!({
                     "type": "Error",
                     "data": {
-                        "code": "Unauthorized",
+                        "code": "PERMISSION_DENIED",
                         "message": "Not authenticated to this tenant"
                     }
                 }));
@@ -2746,7 +2770,7 @@ async fn handle_sdk_message(
                 return Some(serde_json::json!({
                     "type": "Error",
                     "data": {
-                        "code": "InvalidRequest",
+                        "code": "INVALID_REQUEST",
                         "message": "tenant_id and tenant_name are required"
                     }
                 }));
@@ -2784,7 +2808,7 @@ async fn handle_sdk_message(
                 return Some(serde_json::json!({
                     "type": "Error",
                     "data": {
-                        "code": "InvalidRequest",
+                        "code": "INVALID_REQUEST",
                         "message": "tenant_id is required"
                     }
                 }));
@@ -2800,7 +2824,7 @@ async fn handle_sdk_message(
             if server_guard.tenants.remove(tenant_id).is_none() {
                 return Some(serde_json::json!({
                     "type": "Error",
-                    "data": { "code": "NotFound", "message": format!("Tenant '{}' not found", tenant_id) }
+                    "data": { "code": "NOT_FOUND", "message": format!("Tenant '{}' not found", tenant_id) }
                 }));
             }
             server_guard
@@ -2987,7 +3011,7 @@ mod sdk_tests {
             .await
             .unwrap();
         assert_eq!(resp["type"], "Error");
-        assert_eq!(resp["data"]["code"], "NotFound");
+        assert_eq!(resp["data"]["code"], "NOT_FOUND");
         cleanup_tenant(&tenant_id);
     }
 
@@ -3070,7 +3094,7 @@ mod sdk_tests {
             .unwrap();
         assert_eq!(resp["type"], "Error");
         assert_ne!(
-            resp["data"]["code"], "NotFound",
+            resp["data"]["code"], "NOT_FOUND",
             "Wrong tenant must be an auth error, not NotFound"
         );
         cleanup_tenant(&tenant_id);
@@ -3147,7 +3171,7 @@ mod sdk_tests {
         );
         let code = resp["data"]["code"].as_str().unwrap_or("");
         assert!(
-            code == "Unauthorized" || code == "PERMISSION_DENIED" || code == "Unauthorized",
+            code == "UNAUTHENTICATED" || code == "PERMISSION_DENIED",
             "wrong tenant must yield Unauthorized, got: {}",
             code
         );
@@ -3311,7 +3335,7 @@ mod sdk_tests {
             "DeleteTenant with empty tenant_id must return Error: {resp}"
         );
         assert_eq!(
-            resp["data"]["code"], "InvalidRequest",
+            resp["data"]["code"], "INVALID_REQUEST",
             "empty tenant_id must yield InvalidRequest: {resp}"
         );
     }
@@ -3707,7 +3731,7 @@ mod service_size_tests {
         )
         .await;
         assert_eq!(r["type"], "Error", "{r}");
-        assert_eq!(r["data"]["code"], "InvalidRequest", "{r}");
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
         cleanup(&t);
     }
 
@@ -3725,7 +3749,7 @@ mod service_size_tests {
         ] {
             let r = send(&server, &mut s, create(&t, bad.clone())).await;
             assert_eq!(r["type"], "Error", "size {bad} must be refused: {r}");
-            assert_eq!(r["data"]["code"], "InvalidRequest", "{r}");
+            assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
         }
         assert!(server.read().await.service_registry.is_empty());
         cleanup(&t);
@@ -3755,7 +3779,7 @@ mod service_size_tests {
         let mut s = authed(&server, &t).await;
         let r = send(&server, &mut s, create(&t, serde_json::json!(8193))).await;
         assert_eq!(r["type"], "Error", "{r}");
-        assert_eq!(r["data"]["code"], "InvalidRequest", "{r}");
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
         let r = send(&server, &mut s, create(&t, serde_json::json!(8192))).await;
         assert_eq!(r["type"], "Service", "{r}");
         assert_eq!(server.read().await.service_registry.len(), 1);
@@ -6266,7 +6290,7 @@ mod delete_service_tests {
         drop(g);
         // and the wire agrees
         let r = call(&server, &mut admin.s, json!({"type":"GetService","data":{"tenant_id":t,"service_name":"doomed"}})).await;
-        assert_eq!(r["data"]["code"], "NotFound", "{r}");
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
         let r = call(&server, &mut admin.s, json!({"type":"GetServiceFilePath","data":{"request_id":"p","service_id":id}})).await;
         assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
         let r = call(&server, &mut admin.s, json!({"type":"Resync","data":{"request_id":"r","file_id":fid}})).await;
@@ -6401,5 +6425,93 @@ mod delete_service_tests {
         assert!(server.read().await.service_registry.contains_key(&id));
         assert!(std::path::Path::new(&path).exists(), "the file is still there");
         cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod wire_error_code_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    fn wire_spelling(code: &str) -> bool {
+        commy_wire::ErrorCode::ALL.iter().any(|c| c.as_str() == code)
+    }
+
+    /// Every error the SDK protocol can produce uses the one spelling `commy-wire` allows, and the
+    /// ones that came with a `request_id` echo it.
+    #[tokio::test]
+    async fn every_error_reply_uses_the_wire_spelling_and_echoes_the_request_id() {
+        let t = format!("ec_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut anon = ClientSession::new();
+        let mut admin = ClientSession::new();
+        call(&server, &mut admin, json!({"type":"Authenticate","data":{"tenant_id":t,"api_key":"x","client_id":"admin"}})).await;
+        let r = call(&server, &mut admin, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc","size":4096}})).await;
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        let mut nobody = ClientSession::new();
+        call(&server, &mut nobody, json!({"type":"Authenticate","data":{"tenant_id":t,"api_key":"x","client_id":"nobody","dev_scopes":[]}})).await;
+        let mut other = ClientSession::new();
+        let other_t = format!("ec_{}", uuid::Uuid::new_v4().simple());
+        call(&server, &mut other, json!({"type":"Authenticate","data":{"tenant_id":other_t,"api_key":"x"}})).await;
+
+        // 0 = anonymous, 1 = admin, 2 = a client with no grant, 3 = a client of another tenant
+        let cases: Vec<(&str, usize, serde_json::Value)> = vec![
+            ("unauthenticated", 0, json!({"type":"CreateService","data":{"request_id":"r1","tenant_id":t,"service_name":"x","size":1}})),
+            ("unknown type", 1, json!({"type":"NoSuchMessage","data":{"request_id":"r2"}})),
+            ("bad size", 1, json!({"type":"CreateService","data":{"request_id":"r3","tenant_id":t,"service_name":"x","size":0}})),
+            ("bad tenant id", 1, json!({"type":"CreateService","data":{"request_id":"r4","tenant_id":"../x","service_name":"x","size":1}})),
+            ("other tenant's service", 3, json!({"type":"GetServiceFilePath","data":{"request_id":"r5","service_id":id}})),
+            ("no access", 2, json!({"type":"GetServiceFilePath","data":{"request_id":"r6","service_id":id}})),
+            ("unknown service", 1, json!({"type":"GetService","data":{"request_id":"r7","tenant_id":t,"service_name":"nope"}})),
+            ("cross tenant create", 1, json!({"type":"CreateService","data":{"request_id":"r8","tenant_id":other_t,"service_name":"x","size":1}})),
+            ("delete unknown", 1, json!({"type":"DeleteService","data":{"request_id":"r9","tenant_id":t,"service_name":"nope"}})),
+            ("delete tenant missing", 1, json!({"type":"DeleteTenant","data":{"request_id":"r10","tenant_id":"absent_tenant"}})),
+        ];
+        for (name, who, msg) in cases {
+            let rid = msg["data"]["request_id"].as_str().unwrap().to_string();
+            let session = match who {
+                0 => &mut anon,
+                1 => &mut admin,
+                2 => &mut nobody,
+                _ => &mut other,
+            };
+            let r = call(&server, session, msg).await;
+            assert_eq!(r["type"], "Error", "{name}: {r}");
+            let code = r["data"]["code"].as_str().unwrap_or("");
+            assert!(wire_spelling(code), "{name}: '{code}' is not a commy-wire error code: {r}");
+            assert_eq!(r["data"]["request_id"], rid, "{name}: the request_id must be echoed: {r}");
+        }
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
+        let _ = std::fs::remove_dir_all(format!("tenant_{other_t}"));
+    }
+
+    #[tokio::test]
+    async fn the_error_reply_parses_as_a_wire_control_message() {
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut anon = ClientSession::new();
+        let r = call(&server, &mut anon, json!({"type":"GetService","data":{"request_id":"q","tenant_id":"t","service_name":"s"}})).await;
+        let parsed: commy_wire::ControlMessage = serde_json::from_value(r.clone()).unwrap_or_else(|e| panic!("{r}: {e}"));
+        match parsed {
+            commy_wire::ControlMessage::Error(e) => {
+                assert_eq!(e.code, commy_wire::ErrorCode::Unauthenticated);
+                assert_eq!(e.request_id.as_deref(), Some("q"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_old_camel_case_spellings_are_gone_from_replies() {
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut anon = ClientSession::new();
+        let r = call(&server, &mut anon, json!({"type":"NoSuchMessage","data":{}})).await;
+        let code = r["data"]["code"].as_str().unwrap();
+        for legacy in ["NotFound", "Unauthorized", "InvalidRequest", "InternalError", "PARSE_ERROR", "INVALID_JSON"] {
+            assert_ne!(code, legacy);
+        }
     }
 }

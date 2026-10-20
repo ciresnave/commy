@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.3
+- **One error-code spelling on the SDK protocol.** The legacy handlers sent `NotFound`, `Unauthorized`, `InvalidRequest` and `InternalError` (and the MessagePack path `PARSE_ERROR` / `INVALID_JSON`), which `commy-wire` does not allow and clients read as unknown. They now send `NOT_FOUND`, `INVALID_REQUEST`, `INTERNAL_ERROR`; "not authenticated" is `UNAUTHENTICATED`; a session that is authenticated but for another tenant, or lacks access, is `PERMISSION_DENIED` (the old `Unauthorized` covered both); a malformed MessagePack or JSON frame is `INVALID_REQUEST`.
+- An `Error` reply to an SDK-protocol request that carried a `request_id` echoes it.
+- Breaking for a client that matched the old CamelCase codes (the Rust SDK reads them as unknown and is adding aliases meanwhile).
+
 ## 0.13.2
 - **`DeleteService` is real.** With `service:admin` on the service it removes the service from the registry and the tenant, retires its `file_id` (frames and `Resync` for it are refused), drops its service-scoped grants (tenant-wide grants stay), removes the file, tells every member of the file with `Loss{REVOKED}` and answers `Result{success:true}`. It is refused (`RATE_LIMITED`) while a rotation of the service is running, and `NOT_FOUND` for an unknown or already deleted name.
 - **Durable and fail closed.** With persistence, a deletion is recorded first as a tombstone (`deleted/<id>`, an atomic write) and refused (`INTERNAL_ERROR`) if it cannot be recorded; the stored service row is then removed, and a leftover row is ignored because the tombstone wins. A restart does not bring a deleted service back.
