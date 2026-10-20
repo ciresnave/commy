@@ -20,3 +20,5 @@ seed_test_credentials.*
 .commy_examples/
 server_debug.log
 commy_output.txt
+*.pfx
+*.pem
