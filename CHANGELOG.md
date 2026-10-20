@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.18.1
+- CI hardening (CodeRipper SUP-001, SUP-008, WSP-001): every action is pinned to a commit SHA (`actions/checkout`, `actions/cache`, `dtolnay/rust-toolchain`), the workflow's default token is read-only and only the release job gets `contents: write`, checkouts do not persist credentials, every `cargo test` / `cargo build` uses `--locked`, the cache key includes `Cargo.lock`, and `.github/CODEOWNERS` names the owner.
 ## 0.18.0 (breaking)
 - **R10 part 2: the cluster code is behind a Cargo feature.** `src/clustering.rs` and `src/server/clustering` (`commy::clustering`, `commy::server::clustering`) are compiled only with `--features clustering`, which is off by default. The server never used them; they replicated the old variable model. Breaking for anyone importing those paths: enable the feature. The two cluster integration test files run only with the feature, and CI runs them (`cargo test --features clustering`).
 - The binary no longer builds a clustering configuration or prints cluster nodes; `COMMY_CLUSTER_ENABLED=true` prints a warning that it is ignored.
