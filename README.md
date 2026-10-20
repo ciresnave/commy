@@ -58,7 +58,7 @@ Service files live under `tenant_<id>/` in the server's working directory.
 - Service files carry no per-file operating-system permissions; a long random name inside a tenant
   directory is the only barrier on the server's machine.
 - The audit trail is in memory (and on stderr); a durable log is not built yet.
-- `DeleteService` answers success but deletes nothing (and checks only the tenant-level delete
+- `DeleteService` answers `NOT_IMPLEMENTED` (it deletes nothing; it checks `service:admin`).
   permission); it needs a real implementation.
 - Many of the Markdown files in this repository predate the redesign and describe named variables,
   the shared allocator and the containers, which were removed in 0.11.0. Trust this README and
