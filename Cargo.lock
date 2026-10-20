@@ -626,12 +626,13 @@ dependencies = [
 
 [[package]]
 name = "commy"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "auth-framework",
  "chrono",
  "commy-wire",
  "futures",
+ "hkdf",
  "memmap2",
  "persistant",
  "rcgen",
@@ -640,7 +641,8 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
+ "sqlx",
  "tempfile",
  "thiserror",
  "tokio",
@@ -2117,6 +2119,7 @@ version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]

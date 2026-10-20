@@ -19,6 +19,7 @@
 
 pub mod clustering;
 pub mod forwarding;
+pub mod framework_verifier;
 pub mod grants;
 pub mod local_mapping;
 pub mod rotation;
