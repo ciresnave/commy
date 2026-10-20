@@ -278,6 +278,7 @@ async fn handle_message(
     match message {
         Authenticate {
             tenant_id,
+            client_id,
             credentials: _credentials,
             auth_method,
             ..
@@ -329,6 +330,21 @@ async fn handle_message(
             let _ = auth_context_arc; // Keep reference to auth context (may be used in future)
                                       // Auth-framework is registered but NOT initialized to avoid configuration issues
                                       // In production, implement proper auth-framework integration with database backend
+
+            if !client_id.is_empty() && !valid_client_id(&client_id) {
+                return Some(AuthenticationResponse {
+                    success: false,
+                    message: "Invalid client id".to_string(),
+                    server_version: env!("CARGO_PKG_VERSION").to_string(),
+                    token: None,
+                    expires_in_seconds: None,
+                });
+            }
+            session.client_id = Some(if client_id.is_empty() {
+                session.session_id.clone()
+            } else {
+                client_id
+            });
 
             // Grant full admin permissions to all clients in development mode
             session.tenant_id = Some(tenant_id.clone());
@@ -1166,6 +1182,19 @@ async fn handle_local_mapping(
 /// Most merged ranges one remote flush may accumulate before `FlushEnd`; keeps a fragmented writer
 /// from growing the pending list without bound.
 const MAX_PENDING_RANGES: usize = 65_536;
+
+/// Longest client id accepted.
+const MAX_CLIENT_ID_LEN: usize = 128;
+
+/// A client id is how grants name a client: 1 to 128 characters of letters, digits and `_ - . @ :`.
+/// (No `|`, which the grant store uses as a separator, and no spaces or control characters.)
+fn valid_client_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_CLIENT_ID_LEN
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@' | ':'))
+}
 
 /// The identity a session's grants are filed under: its client id, or its session id when it has
 /// none.
@@ -2152,7 +2181,37 @@ async fn handle_sdk_message(
                 .and_then(|v| v.as_str())
                 .unwrap_or("any-key-works");
 
+            // The client names itself (development authentication trusts the claim); a client that
+            // does not gets its session id. Either way the id is returned so grants can target it.
+            let client_id = match data.and_then(|d| d.get("client_id")) {
+                None | Some(serde_json::Value::Null) => session.session_id.clone(),
+                Some(v) => match v.as_str().filter(|id| valid_client_id(id)) {
+                    Some(id) => id.to_string(),
+                    None => {
+                        return Some(invalid_request(
+                            "client_id must be 1 to 128 characters of letters, digits and _ - . @ :",
+                        ))
+                    }
+                },
+            };
+            // Development authentication gives an administrator unless the request asks for
+            // exactly the scopes it lists (an empty list asks for none): lets a test client be
+            // a client that holds no grant.
+            let dev_scopes: Option<Vec<String>> = match data.and_then(|d| d.get("dev_scopes")) {
+                None | Some(serde_json::Value::Null) => None,
+                Some(serde_json::Value::Array(list)) => {
+                    let names: Option<Vec<String>> =
+                        list.iter().map(|v| v.as_str().map(str::to_string)).collect();
+                    match names {
+                        Some(n) => Some(n),
+                        None => return Some(invalid_request("dev_scopes must be a list of strings")),
+                    }
+                }
+                Some(_) => return Some(invalid_request("dev_scopes must be a list of strings")),
+            };
+
             // Set session authentication
+            session.client_id = Some(client_id.clone());
             session.tenant_id = Some(tenant_id.to_string());
             session.state = ClientState::Active;
             let token_str = format!(
@@ -2164,13 +2223,20 @@ async fn handle_sdk_message(
             );
             session.token = Some(token_str.clone());
 
-            // Create permissions with all service operations
-            let mut permissions = crate::auth::PermissionSet::admin();
-            permissions.grant(crate::auth::Permission::ServiceCreate);
-            permissions.grant(crate::auth::Permission::ServiceRead);
-            permissions.grant(crate::auth::Permission::ServiceDelete);
-            permissions.grant(crate::auth::Permission::ServiceWrite);
+            let permissions = match &dev_scopes {
+                Some(scopes) => crate::auth::PermissionSet::from_scopes(scopes),
+                None => {
+                    // Create permissions with all service operations
+                    let mut permissions = crate::auth::PermissionSet::admin();
+                    permissions.grant(crate::auth::Permission::ServiceCreate);
+                    permissions.grant(crate::auth::Permission::ServiceRead);
+                    permissions.grant(crate::auth::Permission::ServiceDelete);
+                    permissions.grant(crate::auth::Permission::ServiceWrite);
+                    permissions
+                }
+            };
             session.permissions = Some(permissions);
+            session.grants_imported.store(false, std::sync::atomic::Ordering::Release);
 
             // Ensure the tenant record exists in the server so services can be created under it
             {
@@ -2179,8 +2245,11 @@ async fn handle_sdk_message(
             }
 
             println!(
-                "Client {} authenticated successfully (DEV MODE) to tenant: {} with admin permissions",
-                session.session_id, tenant_id
+                "Client {} ({}) authenticated successfully (DEV MODE) to tenant: {} with {}",
+                session.session_id,
+                client_id,
+                tenant_id,
+                if dev_scopes.is_some() { "the requested scopes" } else { "admin permissions" }
             );
 
             // Return proper ServerMessage::AuthenticationResult format
@@ -2190,7 +2259,8 @@ async fn handle_sdk_message(
                     "success": true,
                     "message": "Authentication successful (development mode)",
                     "server_version": env!("CARGO_PKG_VERSION"),
-                    "permissions": ["all"]
+                    "client_id": client_id,
+                    "permissions": if dev_scopes.is_some() { serde_json::json!(dev_scopes) } else { serde_json::json!(["all"]) }
                 }
             }))
         }
@@ -5315,6 +5385,180 @@ mod grant_message_tests {
         // an hour-long spacing would refuse a normal rotation now; a revocation goes through
         call(&server, &mut admin.s, revoke("carol", Some(&one), &[])).await;
         wait_generation(&server, &one, 2).await;
+        cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod dev_auth_identity_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    fn tenant() -> String {
+        format!("di_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(t: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
+    }
+
+    async fn login(server: &Arc<RwLock<Server>>, t: &str, extra: serde_json::Value) -> (ClientSession, serde_json::Value) {
+        let mut data = json!({"tenant_id": t, "api_key": "x"});
+        for (k, v) in extra.as_object().unwrap() {
+            data[k] = v.clone();
+        }
+        let mut s = ClientSession::new();
+        let r = call(server, &mut s, json!({"type":"Authenticate","data":data})).await;
+        (s, r)
+    }
+
+    async fn make_service(server: &Arc<RwLock<Server>>, admin: &mut ClientSession, t: &str) -> String {
+        let r = call(server, admin, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc","size":4096}})).await;
+        assert_eq!(r["type"], "Service", "{r}");
+        r["data"]["service_id"].as_str().unwrap().to_string()
+    }
+
+    fn get_path(id: &str) -> serde_json::Value {
+        json!({"type":"GetServiceFilePath","data":{"request_id":"p","service_id":id}})
+    }
+
+    #[tokio::test]
+    async fn authenticate_honours_the_client_id_and_echoes_it() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (s, r) = login(&server, &t, json!({"client_id":"alice@example.com"})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        assert_eq!(r["data"]["client_id"], "alice@example.com");
+        assert_eq!(s.client_id.as_deref(), Some("alice@example.com"));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn without_a_client_id_the_session_id_is_returned_so_grants_can_name_it() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (s, r) = login(&server, &t, json!({})).await;
+        assert_eq!(r["data"]["client_id"].as_str(), Some(s.session_id.as_str()), "{r}");
+        assert_eq!(s.client_id.as_deref(), Some(s.session_id.as_str()));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn bad_client_ids_are_refused() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let long = "a".repeat(129);
+        for bad in [json!(""), json!("a b"), json!("x|y"), json!("tab\there"), json!(long), json!(5), json!(["a"])] {
+            let (s, r) = login(&server, &t, json!({"client_id": bad.clone()})).await;
+            assert_eq!(r["type"], "Error", "{bad}: {r}");
+            assert!(s.client_id.is_none() && s.token.is_none(), "{bad}: session must stay unauthenticated");
+        }
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn dev_scopes_let_a_client_hold_no_grant_until_an_admin_gives_it_one_over_the_wire() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (mut admin, _) = login(&server, &t, json!({"client_id":"admin"})).await;
+        let id = make_service(&server, &mut admin, &t).await;
+
+        let (mut bob, r) = login(&server, &t, json!({"client_id":"bob","dev_scopes":[]})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        let r = call(&server, &mut bob, get_path(&id)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "a client with no grant is denied: {r}");
+
+        let ack = call(&server, &mut admin, json!({"type":"Grant","data":{"request_id":"g","client_id":"bob","service_id":id,"permissions":["service:write"]}})).await;
+        assert_eq!(ack["type"], "GrantAck", "{ack}");
+        let r = call(&server, &mut bob, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+
+        // a fresh session of the same client id shares the grant
+        let (mut bob2, _) = login(&server, &t, json!({"client_id":"bob","dev_scopes":[]})).await;
+        let r = call(&server, &mut bob2, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+
+        // and it is not an administrator
+        let r = call(&server, &mut bob, json!({"type":"Grant","data":{"request_id":"g2","client_id":"eve","service_id":id,"permissions":["service:read"]}})).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_session_without_a_client_id_can_be_granted_by_the_id_it_was_given() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (mut admin, _) = login(&server, &t, json!({"client_id":"admin"})).await;
+        let id = make_service(&server, &mut admin, &t).await;
+        let (mut anon, r) = login(&server, &t, json!({"dev_scopes":[]})).await;
+        let given = r["data"]["client_id"].as_str().unwrap().to_string();
+        assert_eq!(call(&server, &mut anon, get_path(&id)).await["data"]["code"], "PERMISSION_DENIED");
+        call(&server, &mut admin, json!({"type":"Grant","data":{"request_id":"g","client_id":given,"service_id":id,"permissions":["service:read"]}})).await;
+        assert_eq!(call(&server, &mut anon, get_path(&id)).await["type"], "ServiceFilePath");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_read_scope_reads_but_is_not_offered_a_path_and_default_is_still_admin() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let (mut admin, r) = login(&server, &t, json!({"client_id":"admin"})).await;
+        assert_eq!(r["data"]["permissions"], json!(["all"]), "no dev_scopes still means admin: {r}");
+        let id = make_service(&server, &mut admin, &t).await;
+        server.write().await.set_trusted_local(&id, true);
+        let (mut viewer, r) = login(&server, &t, json!({"client_id":"viewer","dev_scopes":["read"]})).await;
+        assert_eq!(r["data"]["permissions"], json!(["read"]));
+        let r = call(&server, &mut viewer, get_path(&id)).await;
+        // "read" is a tenant-level scope: it opens every service for reading, not for writing
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert!(r["data"].get("path").is_none(), "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn dev_scopes_must_be_a_list_of_strings() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        for bad in [json!("admin"), json!([1, 2]), json!({"a": 1})] {
+            let (s, r) = login(&server, &t, json!({"dev_scopes": bad.clone()})).await;
+            assert_eq!(r["type"], "Error", "{bad}: {r}");
+            assert!(s.token.is_none());
+        }
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn the_messagepack_authenticate_sets_the_client_id_too() {
+        let t = tenant();
+        let mut server = Server::with_dev_auth(true);
+        let _ = server.get_tenant(&t);
+        let server = Arc::new(RwLock::new(server));
+        let mut s = ClientSession::new();
+        let msg = WssMessage::Authenticate {
+            tenant_id: t.clone(),
+            client_id: "carol".to_string(),
+            client_version: "1".to_string(),
+            credentials: "x".to_string(),
+            auth_method: "api_key".to_string(),
+        };
+        let r = handle_message(msg, &mut s, Arc::clone(&server)).await;
+        assert!(matches!(r, Some(WssMessage::AuthenticationResponse { success: true, .. })), "{r:?}");
+        assert_eq!(s.client_id.as_deref(), Some("carol"));
+        let mut s2 = ClientSession::new();
+        let bad = WssMessage::Authenticate {
+            tenant_id: t.clone(),
+            client_id: "no good".to_string(),
+            client_version: "1".to_string(),
+            credentials: "x".to_string(),
+            auth_method: "api_key".to_string(),
+        };
+        let r = handle_message(bad, &mut s2, server).await;
+        assert!(matches!(r, Some(WssMessage::AuthenticationResponse { success: false, .. })), "{r:?}");
+        assert!(s2.token.is_none());
         cleanup(&t);
     }
 }

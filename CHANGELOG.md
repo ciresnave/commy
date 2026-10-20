@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2
+- Fix (dev authentication identity): `Authenticate` never set `client_id`, so grants were filed under the session id, which no client ever learned: a grant could not target a client over the wire and a client holding no grant could not exist. Now `Authenticate` honours `client_id` (1 to 128 characters of letters, digits and `_ - . @ :`; anything else is refused), falls back to the session id when none is given, and returns the id in `AuthenticationResult.client_id`. The MessagePack `Authenticate` sets it too. Development authentication still trusts the claim, so any dev client can claim any id; it is development only.
+- New, development authentication only: `dev_scopes` in `Authenticate` (a list of scopes such as `["read"]`, or `[]` for none) gives exactly those permissions instead of administrator, so a test client can be a client that holds no grant. Absent means administrator, as before.
+
 ## 0.11.1
 - Security hygiene: `dev-key.pem`, `dev-key-temp.pem`, `dev-cert.pem`, `dev-cert-temp.pem`, `dev-cert.pfx` and four log/output files (`commy_server.log`, `commy_test.log`, `server_debug.log`, `commy_output.txt`) were tracked in git and shipped inside every published crate from 0.1.0 to 0.11.0. They are untracked and ignored (`*.pem`, `*.pfx`, `*.log`). The key is a throwaway self-signed development key (subject `O=Commy Dev, CN=127.0.0.1`, valid Feb 2026 to Feb 2027), referenced only by the test scripts that generate their own; it protects nothing real, but treat it as public. The logs contained the test database URL with the test password of a local test container. They remain in git history and in the already-published crates.
 
