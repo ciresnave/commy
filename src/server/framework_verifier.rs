@@ -332,8 +332,9 @@ mod tests {
         assert_eq!(check(&v, "acme", key("ak_not-a-real-key")).await.err(), Some(VerifyError::Rejected));
         assert_eq!(check(&v, "acme", key("")).await.err(), Some(VerifyError::Rejected));
         let mut flipped = k.clone();
-        flipped.pop();
-        flipped.push('x');
+        let last = flipped.pop().unwrap();
+        // a different character, whatever the key ends with (a fixed 'x' left the key unchanged when it already ended in 'x')
+        flipped.push(if last == 'x' { 'y' } else { 'x' });
         assert_eq!(check(&v, "acme", key(&flipped)).await.err(), Some(VerifyError::Rejected));
         let (_id2, short) = user_with_key(&f, "shortlived", "user", Some(Duration::from_secs(1))).await;
         assert!(check(&v, "acme", key(&short)).await.is_ok(), "valid while fresh");
