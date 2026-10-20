@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.2
+- **`DeleteService` is real.** With `service:admin` on the service it removes the service from the registry and the tenant, retires its `file_id` (frames and `Resync` for it are refused), drops its service-scoped grants (tenant-wide grants stay), removes the file, tells every member of the file with `Loss{REVOKED}` and answers `Result{success:true}`. It is refused (`RATE_LIMITED`) while a rotation of the service is running, and `NOT_FOUND` for an unknown or already deleted name.
+- **Durable and fail closed.** With persistence, a deletion is recorded first as a tombstone (`deleted/<id>`, an atomic write) and refused (`INTERNAL_ERROR`) if it cannot be recorded; the stored service row is then removed, and a leftover row is ignored because the tombstone wins. A restart does not bring a deleted service back.
+- `Tenant::remove_service`, `Server::forget_row`, `persist::Tombstone`; `Persistence::delete_service` now takes the tenant and name.
+- Known: the file is removed best effort (Windows refuses while a local client still has it mapped; audited); the grant log still grows.
+
 ## 0.13.1
 - **`DeleteService` no longer lies.** It answered `{"type":"Result","success":true,"message":"Service deleted successfully"}` while deleting nothing. It now resolves the service, needs `service:admin` on it (`PERMISSION_DENIED` otherwise, `NOT_FOUND` for an unknown name) and answers `NOT_IMPLEMENTED` ("the service was not deleted"). The old tenant-level `ServiceDelete` permission check is gone: service-scoped admin replaces it. The real deletion follows.
 - `GetService` (by name) only returns the id of a service the client can read; one it cannot reach looks like one that does not exist (it used to check only a tenant-level `ServiceRead`, so a client denied on one service could still learn its id).
