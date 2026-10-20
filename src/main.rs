@@ -110,7 +110,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create the core Commy server
-    let server = Arc::new(RwLock::new(Server::new()));
+    let mut server_value = Server::new();
+    // Durable state: the service registry and the grants. COMMY_STATE_DIR names the directory
+    // (default ./commy_state); "off" keeps everything in memory, lost at exit.
+    match env::var("COMMY_STATE_DIR").as_deref() {
+        Ok("off") => println!("[Commy] COMMY_STATE_DIR=off: services and grants are NOT persisted"),
+        other => {
+            let dir = std::path::PathBuf::from(other.unwrap_or("commy_state"));
+            match server_value.enable_persistence(&dir) {
+                Ok(r) => println!(
+                    "[Commy] State in {}: {} service(s) loaded ({} skipped, file missing), {} grant change(s) replayed ({} skipped)",
+                    dir.display(),
+                    r.services_loaded,
+                    r.services_missing_file,
+                    r.grant_ops_replayed,
+                    r.grant_ops_skipped
+                ),
+                Err(e) => {
+                    eprintln!("[Commy] cannot open the state directory {}: {e}", dir.display());
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    let server = Arc::new(RwLock::new(server_value));
 
     // Set up tenants with authentication
     {

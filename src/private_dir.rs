@@ -33,6 +33,21 @@ pub fn create_private(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Create `path` so that only the server and administrators can use it at all (not even traverse):
+/// for state that holds access decisions. Like [`create_private`], only a directory this call
+/// creates is restricted; failure to restrict it fails the call.
+pub fn create_secret(path: &Path) -> io::Result<()> {
+    let existed = path.exists();
+    std::fs::create_dir_all(path)?;
+    if !existed {
+        if let Err(e) = secret_dir(path) {
+            let _ = std::fs::remove_dir(path);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 /// Make a file readable and writable by the server and administrators only (used for the local
 /// mapping nonce, which must not be readable by other accounts even though the directory's files are).
 pub fn make_file_private(path: &Path) -> io::Result<()> {
@@ -43,6 +58,12 @@ pub fn make_file_private(path: &Path) -> io::Result<()> {
 fn restrict_dir(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o711))
+}
+
+#[cfg(unix)]
+fn secret_dir(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
 #[cfg(unix)]
@@ -105,6 +126,23 @@ mod win {
         icacls(path, &["/grant", &format!("{USERS}:(OI)(IO)M")])
     }
 
+    pub fn secret_dir(path: &Path) -> io::Result<()> {
+        let me = current_account()?;
+        let full = |who: &str| format!("{who}:(OI)(CI)F");
+        icacls(
+            path,
+            &[
+                "/inheritance:r",
+                "/grant:r",
+                &full(SYSTEM),
+                "/grant:r",
+                &full(ADMINISTRATORS),
+                "/grant:r",
+                &full(&me),
+            ],
+        )
+    }
+
     pub fn restrict_file(path: &Path) -> io::Result<()> {
         let me = current_account()?;
         icacls(
@@ -128,12 +166,22 @@ fn restrict_dir(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(windows)]
+fn secret_dir(path: &Path) -> io::Result<()> {
+    win::secret_dir(path)
+}
+
+#[cfg(windows)]
 fn restrict_file(path: &Path) -> io::Result<()> {
     win::restrict_file(path)
 }
 
 #[cfg(not(any(unix, windows)))]
 fn restrict_dir(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn secret_dir(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
@@ -276,5 +324,33 @@ mod tests {
         let f = p.join("service.mem");
         let svc = crate::Service::open_or_create(f.to_str().unwrap(), 4096).unwrap();
         assert_eq!(svc.len(), 4096);
+    }
+
+    #[test]
+    fn a_secret_directory_is_usable_by_its_owner() {
+        let (_d, p) = fresh();
+        create_secret(&p).unwrap();
+        std::fs::write(p.join("f"), b"x").unwrap();
+        assert_eq!(std::fs::read_dir(&p).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_secret_directory_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_d, p) = fresh();
+        create_secret(&p).unwrap();
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o700);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_secret_directory_has_no_users_entry() {
+        let (_d, p) = fresh();
+        create_secret(&p).unwrap();
+        let text = acl(&p);
+        assert!(!text.contains("BUILTIN\\Users"), "{text}");
+        assert!(!text.contains("Everyone"), "{text}");
+        assert!(text.contains("BUILTIN\\Administrators:(OI)(CI)(F)"), "{text}");
     }
 }
