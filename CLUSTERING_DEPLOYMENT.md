@@ -1,5 +1,9 @@
 # Commy Clustering: Deployment Guide
 
+> **Note (0.11.0):** this document predates the bare-bytes redesign. Anything it says about named
+> variables, the shared allocator, the containers or a nightly toolchain no longer applies; see
+> `README.md`, `ROADMAP.md` and `CHANGELOG.md`. It is kept for its deployment steps and needs rewriting.
+
 This guide covers deploying Commy in a multi-server clustered configuration for high availability, fault tolerance, and distributed consistency.
 
 ## Table of Contents
