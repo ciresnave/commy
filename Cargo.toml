@@ -5,7 +5,11 @@
     license      = "MIT"
     name         = "commy"
     repository   = "https://github.com/ciresnave/commy"
-    version      = "0.17.1"
+    version      = "0.18.0"
+
+[features]
+    # The cluster code (src/clustering.rs, src/server/clustering) is experimental and not used by the server.
+    clustering = []
 
 [lib]
 

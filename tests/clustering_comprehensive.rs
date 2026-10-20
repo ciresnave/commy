@@ -1,3 +1,4 @@
+#![cfg(feature = "clustering")]
 //! Comprehensive Clustering Integration Tests
 //!
 //! These tests simulate realistic multi-server scenarios including:

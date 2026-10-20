@@ -47,7 +47,7 @@ in the working directory.
 
 ## Known limits
 
-- One server only: the clustering code is experimental and unused (`docs/CLUSTERING.md`).
+- One server only: the clustering code is experimental, unused and compiled only with the Cargo feature `clustering` (`docs/CLUSTERING.md`).
 - Service files carry no per-file operating-system permissions; a long random name inside an
   unlisted tenant directory is the only barrier on the server's machine.
 - The audit log is durable but best effort and not tamper-evident (events are appended under

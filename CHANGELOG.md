@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.0 (breaking)
+- **R10 part 2: the cluster code is behind a Cargo feature.** `src/clustering.rs` and `src/server/clustering` (`commy::clustering`, `commy::server::clustering`) are compiled only with `--features clustering`, which is off by default. The server never used them; they replicated the old variable model. Breaking for anyone importing those paths: enable the feature. The two cluster integration test files run only with the feature, and CI runs them (`cargo test --features clustering`).
+- The binary no longer builds a clustering configuration or prints cluster nodes; `COMMY_CLUSTER_ENABLED=true` prints a warning that it is ignored.
+- The binary no longer sets `DATABASE_URL` to a PostgreSQL default, prints a PostgreSQL "Backend" line, or creates a `my_tenant` tenant at start-up and claims "all credentials accepted" (all leftovers from before real authentication; tenants are created on first login).
 ## 0.17.1
 - Docs (R10 part 1): the stale `CLUSTERING_DEPLOYMENT.md`, `DOCKER_DEPLOYMENT.md`, `DOCKER_INTEGRATION.md`, `DOCKER_QUICK_REF.md`, `AUTHENTICATION_SETUP.md` and `docker-compose.cluster.yml` are removed; `docs/DEPLOYMENT.md` (settings, production start, Docker) and `docs/CLUSTERING.md` (experimental, unused, not deployable) replace them, and the README's run section and known limits are corrected (authentication is no longer development-only).
 - `Dockerfile`: builds with the lock file (`--locked`), listens on 8443, keeps state in a `/var/lib/commy` volume, and its health check is a TCP connect (the old one fetched `/health`, which the server does not serve, so a container was never healthy). Build tested from a clean `git archive`.

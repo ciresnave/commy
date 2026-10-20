@@ -2,6 +2,7 @@ use std::path::Path;
 
 pub mod auth;
 pub mod auth_methods;
+#[cfg(feature = "clustering")]
 pub mod clustering;
 pub mod config;
 pub mod liveness;
