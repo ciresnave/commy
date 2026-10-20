@@ -3,6 +3,7 @@ use std::path::Path;
 pub mod auth;
 pub mod auth_methods;
 pub mod clustering;
+pub mod config;
 pub mod liveness;
 pub mod persist;
 pub mod private_dir;
@@ -192,6 +193,8 @@ pub struct Server {
     pub dev_auth: bool,
     /// Largest service file (bytes) a client may ask for.
     pub max_service_size: u64,
+    /// How many audit events to keep (`COMMY_AUDIT_MAX_EVENTS`); `None` keeps the store's default.
+    pub audit_max_events: Option<u64>,
     /// The next `file_id` to hand out.
     pub next_file_id: u32,
     /// Who is on which file, for range forwarding.
@@ -318,6 +321,26 @@ impl Server {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_MAX_SERVICE_SIZE),
+            audit_max_events: std::env::var("COMMY_AUDIT_MAX_EVENTS")
+                .ok()
+                .and_then(|v| v.parse().ok()),
+        }
+    }
+
+    /// Apply the limits and timeouts from `settings` (environment first, then the configuration
+    /// file; see [`config`]). Call before [`Server::enable_persistence`].
+    pub fn configure(&mut self, settings: &config::Settings) {
+        if let Some(ms) = settings.get_parsed::<u64>("COMMY_FILL_TIMEOUT_MS") {
+            self.fill_timeout = std::time::Duration::from_millis(ms);
+        }
+        if let Some(ms) = settings.get_parsed::<u64>("COMMY_DRAIN_TIMEOUT_MS") {
+            self.drain_timeout = std::time::Duration::from_millis(ms);
+        }
+        if let Some(max) = settings.get_parsed::<u64>(MAX_SERVICE_SIZE_ENV) {
+            self.max_service_size = max;
+        }
+        if let Some(keep) = settings.get_parsed::<u64>("COMMY_AUDIT_MAX_EVENTS") {
+            self.audit_max_events = Some(keep);
         }
     }
 
@@ -406,10 +429,7 @@ impl Server {
             );
             report.services_loaded += 1;
         }
-        if let Some(keep) = std::env::var("COMMY_AUDIT_MAX_EVENTS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-        {
+        if let Some(keep) = self.audit_max_events {
             p.set_audit_limit(keep);
         }
         self.persistence = Some(p);

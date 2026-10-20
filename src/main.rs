@@ -40,24 +40,39 @@ async fn register_test_credentials(_db_url: &str) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse environment variables for configuration
-    let server_id = env::var("COMMY_SERVER_ID").unwrap_or_else(|_| "node-1".to_string());
+    // Configuration: environment variables, then the file (COMMY_CONFIG or ./commy.toml), then defaults.
+    let settings = match commy::config::Settings::from_env() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[Commy] cannot start: {e}");
+            std::process::exit(1);
+        }
+    };
+    match settings.source() {
+        Some(p) => println!("[Commy] Configuration file: {}", p.display()),
+        None => println!("[Commy] No configuration file (COMMY_CONFIG or ./commy.toml): environment and defaults"),
+    }
+    let server_id = settings.get("COMMY_SERVER_ID").unwrap_or_else(|| "node-1".to_string());
 
-    let listen_addr = env::var("COMMY_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let listen_addr = settings.get("COMMY_LISTEN_ADDR").unwrap_or_else(|| "0.0.0.0".to_string());
 
-    let listen_port: u16 = env::var("COMMY_LISTEN_PORT")
-        .unwrap_or_else(|_| "8443".to_string())
-        .parse()
-        .expect("Invalid COMMY_LISTEN_PORT");
+    let listen_port: u16 = match settings.get("COMMY_LISTEN_PORT") {
+        None => 8443,
+        Some(v) => v.trim().parse().unwrap_or_else(|_| {
+            eprintln!("[Commy] cannot start: listen_port / COMMY_LISTEN_PORT is not a port number");
+            std::process::exit(1);
+        }),
+    };
 
-    let cluster_enabled = env::var("COMMY_CLUSTER_ENABLED")
-        .unwrap_or_else(|_| "false".to_string())
+    let cluster_enabled = settings
+        .get("COMMY_CLUSTER_ENABLED")
+        .unwrap_or_else(|| "false".to_string())
         .to_lowercase()
         == "true";
 
     // TLS configuration - these can point to self-signed certs for development
-    let cert_path = env::var("COMMY_TLS_CERT_PATH").ok();
-    let key_path = env::var("COMMY_TLS_KEY_PATH").ok();
+    let cert_path = settings.get("COMMY_TLS_CERT_PATH");
+    let key_path = settings.get("COMMY_TLS_KEY_PATH");
 
     let use_tls = cert_path.is_some() && key_path.is_some();
 
@@ -97,8 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[Commy] Clustering enabled: {}", cluster_enabled);
 
     if cluster_enabled {
-        let cluster_nodes = env::var("COMMY_CLUSTER_NODES")
-            .unwrap_or_else(|_| "node-1:9000,node-2:9000,node-3:9000".to_string());
+        let cluster_nodes = settings
+            .get("COMMY_CLUSTER_NODES")
+            .unwrap_or_else(|| "node-1:9000,node-2:9000,node-3:9000".to_string());
         println!("[Commy] Cluster nodes: {}", cluster_nodes);
     }
     println!("[Commy] ════════════════════════════════════════════");
@@ -111,10 +127,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create the core Commy server
     let mut server_value = Server::new();
+    server_value.configure(&settings);
     // Durable state: the service registry and the grants. COMMY_STATE_DIR names the directory
     // (default ./commy_state); "off" keeps everything in memory, lost at exit.
-    match env::var("COMMY_STATE_DIR").as_deref() {
-        Ok("off") => println!("[Commy] COMMY_STATE_DIR=off: services and grants are NOT persisted"),
+    match settings.get("COMMY_STATE_DIR").as_deref() {
+        Some("off") => println!("[Commy] COMMY_STATE_DIR=off: services and grants are NOT persisted"),
         other => {
             let dir = std::path::PathBuf::from(other.unwrap_or("commy_state"));
             match server_value.enable_persistence(&dir) {
@@ -140,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("[Commy] COMMY_ALLOW_DEV_AUTH=1: development authentication ACCEPTS ANY CREDENTIALS");
     } else {
         let auth_dir = std::path::PathBuf::from(
-            env::var("COMMY_AUTH_DIR").unwrap_or_else(|_| "commy_state/auth".to_string()),
+            settings.get("COMMY_AUTH_DIR").unwrap_or_else(|| "commy_state/auth".to_string()),
         );
         match commy::server::framework_verifier::FrameworkVerifier::from_env(&auth_dir) {
             Ok(v) => {

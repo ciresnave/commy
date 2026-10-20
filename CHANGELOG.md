@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.0
+- **R7: configuration file.** Every setting the binary reads can now be given in a TOML file, `COMMY_CONFIG` or `./commy.toml` (example: `commy.example.toml`). Precedence: environment variable, then file, then default, so existing deployments are unchanged. Keys are the variable names without `COMMY_`, lower case (`server_id`, `listen_addr`, `listen_port`, `tls_cert_path`, `tls_key_path`, `state_dir`, `auth_dir`, `max_service_size`, `drain_timeout_ms`, `fill_timeout_ms`, `audit_max_events`, `cluster_enabled`, `cluster_nodes`).
+- An unknown key, bad TOML, a value that is not a string, integer or boolean, or an unreadable `COMMY_CONFIG` file stops the start-up with a message (a misspelt setting is never silently ignored). `auth_master_secret`, `database_url` and `allow_dev_auth` are refused in a file, with a reason that does not echo the value: secrets and the insecure switch stay in the environment.
+- New `commy::config::Settings` and `Server::configure`; `Server::audit_max_events` replaces a direct environment read in `enable_persistence`. New dependency `toml` 1.1.
 ## 0.16.1
 - Docs only: `docs/RELEASE-PLAN.md` and `ROADMAP.md` brought up to date (versions read at `main` 0.16.0, known gaps without the authentication, durable-state and audit items that are done, R3 status).
 
