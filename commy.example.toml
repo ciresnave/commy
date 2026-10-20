@@ -1,0 +1,18 @@
+# Commy configuration file. Copy to commy.toml (read from the working directory) or point
+# COMMY_CONFIG at it. An environment variable COMMY_<NAME> always overrides the file.
+# Secrets are NOT allowed here: COMMY_AUTH_MASTER_SECRET and DATABASE_URL stay in the environment,
+# and COMMY_ALLOW_DEV_AUTH can only be switched on there.
+
+# server_id = "node-1"
+# listen_addr = "0.0.0.0"
+# listen_port = 8443
+# tls_cert_path = "certs/server.pem"
+# tls_key_path = "certs/server.key"
+# state_dir = "commy_state"            # "off" keeps nothing on disk
+# auth_dir = "commy_state/auth"        # per-tenant auth-framework databases
+# max_service_size = 10485760          # bytes a client may ask for
+# drain_timeout_ms = 5000
+# fill_timeout_ms = 30000
+# audit_max_events = 100000
+# cluster_enabled = false
+# cluster_nodes = "node-1:9000,node-2:9000,node-3:9000"
