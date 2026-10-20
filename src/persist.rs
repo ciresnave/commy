@@ -69,6 +69,22 @@ impl Record for Tombstone {
     const SCHEMA: u32 = 1;
 }
 
+/// One audit event, as stored.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditEvent {
+    /// Milliseconds since the Unix epoch, server clock.
+    pub ts_ms: u64,
+    pub line: String,
+}
+
+impl Record for AuditEvent {
+    const KIND: &'static str = "commy-audit";
+    const SCHEMA: u32 = 1;
+}
+
+/// Default number of audit events kept; the oldest are removed past this.
+pub const DEFAULT_AUDIT_LIMIT: u64 = 100_000;
+
 impl Record for GrantOp {
     const KIND: &'static str = "commy-grant-op";
     const SCHEMA: u32 = 1;
@@ -93,7 +109,13 @@ fn err<E: std::fmt::Display>(e: E) -> PersistError {
 /// The state store.
 pub struct Persistence {
     store: Store,
+    /// The audit log has a store of its own (its own directory on disk), so it can be kept,
+    /// rotated, shipped or made append-only separately from the state, and so a failure of one
+    /// does not take the other down.
+    audit_store: Store,
     next_seq: Mutex<u64>,
+    /// (next audit sequence, oldest audit sequence still stored, how many events to keep)
+    audit: Mutex<(u64, u64, u64)>,
 }
 
 const PAGE: usize = 256;
@@ -113,34 +135,56 @@ impl Persistence {
     /// and administrators: it holds the access decisions.
     pub fn open(dir: &Path) -> Result<Self, PersistError> {
         crate::private_dir::create_secret(dir).map_err(err)?;
-        let root: PathBuf = dir.join("data");
-        let scratch: PathBuf = dir.join("tmp");
-        std::fs::create_dir_all(&root).map_err(err)?;
-        std::fs::create_dir_all(&scratch).map_err(err)?;
-        Self::open_with(Config::Fs {
-            root,
-            atomic_write_dir: Some(scratch),
-        })
+        let fs = |name: &str| -> Result<Config, PersistError> {
+            let root: PathBuf = dir.join(name);
+            let scratch: PathBuf = dir.join(format!("{name}-tmp"));
+            std::fs::create_dir_all(&root).map_err(err)?;
+            std::fs::create_dir_all(&scratch).map_err(err)?;
+            Ok(Config::Fs {
+                root,
+                atomic_write_dir: Some(scratch),
+            })
+        };
+        Self::open_with_audit(fs("data")?, fs("audit")?)
     }
 
-    /// Open on any PersistAnt backend (tests use memory and fault-injecting fakes).
+    /// Open on any PersistAnt backend, the same kind for the state and (separately) the audit log
+    /// (tests use memory and fault-injecting fakes).
     pub fn open_with(config: Config) -> Result<Self, PersistError> {
-        let store = Store::open(config, needs()).map_err(err)?;
+        Self::open_with_audit(config.clone(), config)
+    }
+
+    /// Open with different backends for the state and the audit log.
+    pub fn open_with_audit(state: Config, audit: Config) -> Result<Self, PersistError> {
+        let store = Store::open(state, needs()).map_err(err)?;
+        let audit_store = Store::open(audit, needs()).map_err(err)?;
         let this = Persistence {
             store,
+            audit_store,
             next_seq: Mutex::new(0),
+            audit: Mutex::new((0, 0, DEFAULT_AUDIT_LIMIT)),
         };
         let next = this.keys("grants/")?.last().map_or(0, |k| seq_of(k) + 1);
         *this.next_seq.lock().unwrap_or_else(|e| e.into_inner()) = next;
+        let audit_keys = Self::keys_in(&this.audit_store, "audit/")?;
+        let first = audit_keys.first().map_or(0, |k| audit_seq_of(k));
+        let after_last = audit_keys.last().map_or(0, |k| audit_seq_of(k) + 1);
+        let mut a = this.audit.lock().unwrap_or_else(|e| e.into_inner());
+        a.0 = after_last;
+        a.1 = first;
+        drop(a);
         Ok(this)
     }
 
     fn keys(&self, prefix: &str) -> Result<Vec<String>, PersistError> {
+        Self::keys_in(&self.store, prefix)
+    }
+
+    fn keys_in(store: &Store, prefix: &str) -> Result<Vec<String>, PersistError> {
         let mut out = Vec::new();
         let mut after: Option<String> = None;
         loop {
-            let page = self
-                .store
+            let page = store
                 .list(prefix, after.as_deref(), NonZeroUsize::new(PAGE).unwrap())
                 .map_err(err)?;
             out.extend(page.entries.iter().map(|e| e.key.clone()));
@@ -207,6 +251,60 @@ impl Persistence {
         Ok(used)
     }
 
+    /// How many audit events to keep (the oldest are removed past this); at least 1.
+    pub fn set_audit_limit(&self, keep: u64) {
+        self.audit.lock().unwrap_or_else(|e| e.into_inner()).2 = keep.max(1);
+    }
+
+    /// Append an audit event; returns its sequence number once it is durable. Old events past the
+    /// limit are removed afterwards (a failure to remove one is harmless: the next append retries).
+    pub fn append_audit(&self, line: &str) -> Result<u64, PersistError> {
+        let ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let mut a = self.audit.lock().unwrap_or_else(|e| e.into_inner());
+        let seq = a.0;
+        self.audit_store
+            .put_record(
+                &format!("audit/{seq:020}"),
+                &AuditEvent {
+                    ts_ms,
+                    line: line.to_string(),
+                },
+            )
+            .map_err(err)?;
+        a.0 += 1;
+        let mut removed = 0;
+        while a.0 - a.1 > a.2 && removed < 8 {
+            if self.audit_store.delete(&format!("audit/{:020}", a.1)).is_err() {
+                break;
+            }
+            a.1 += 1;
+            removed += 1;
+        }
+        Ok(seq)
+    }
+
+    /// Stored audit events with a sequence number above `after` (all if `None`), oldest first, at
+    /// most `limit`.
+    pub fn load_audit(&self, after: Option<u64>, limit: usize) -> Result<Vec<(u64, AuditEvent)>, PersistError> {
+        let mut out = Vec::new();
+        for key in Self::keys_in(&self.audit_store, "audit/")? {
+            let seq = audit_seq_of(&key);
+            if after.is_some_and(|a| seq <= a) {
+                continue;
+            }
+            if let Some(e) = self.audit_store.get_record::<AuditEvent>(&key).map_err(err)? {
+                out.push((seq, e));
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Every stored grant operation, oldest first.
     pub fn load_grant_ops(&self) -> Result<Vec<GrantOp>, PersistError> {
         let mut out = Vec::new();
@@ -217,6 +315,10 @@ impl Persistence {
         }
         Ok(out)
     }
+}
+
+fn audit_seq_of(key: &str) -> u64 {
+    key.trim_start_matches("audit/").parse().unwrap_or(0)
 }
 
 fn seq_of(key: &str) -> u64 {
@@ -283,6 +385,66 @@ mod tests {
         p.put_service("a", &row(1)).unwrap();
         assert!(p.delete_service("a", "t", "svc1").is_err());
         assert_eq!(p.load_services().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn audit_events_are_stored_in_order_with_timestamps_and_the_sequence_continues_after_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let p = Persistence::open(dir.path()).unwrap();
+            assert_eq!(p.append_audit("one").unwrap(), 0);
+            assert_eq!(p.append_audit("two").unwrap(), 1);
+        }
+        let p = Persistence::open(dir.path()).unwrap();
+        assert_eq!(p.append_audit("three").unwrap(), 2, "the sequence continues");
+        let all = p.load_audit(None, 100).unwrap();
+        let lines: Vec<_> = all.iter().map(|(_, e)| e.line.as_str()).collect();
+        assert_eq!(lines, ["one", "two", "three"]);
+        assert!(all.windows(2).all(|w| w[0].1.ts_ms <= w[1].1.ts_ms), "timestamps do not go backwards");
+        assert!(all[0].1.ts_ms > 1_700_000_000_000, "a real clock reading");
+        let later = p.load_audit(Some(0), 100).unwrap();
+        assert_eq!(later.len(), 2, "after=0 skips the first");
+        assert_eq!(p.load_audit(None, 2).unwrap().len(), 2, "the limit applies");
+    }
+
+    #[test]
+    fn the_audit_log_keeps_only_the_newest_events_up_to_the_limit() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        p.set_audit_limit(5);
+        for i in 0..12 {
+            p.append_audit(&format!("e{i}")).unwrap();
+        }
+        let lines: Vec<_> = p.load_audit(None, 100).unwrap().into_iter().map(|(_, e)| e.line).collect();
+        assert_eq!(lines, ["e7", "e8", "e9", "e10", "e11"]);
+    }
+
+    #[test]
+    fn a_reopened_store_prunes_from_the_right_place() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let p = Persistence::open(dir.path()).unwrap();
+            p.set_audit_limit(3);
+            for i in 0..6 {
+                p.append_audit(&format!("a{i}")).unwrap();
+            }
+        }
+        let p = Persistence::open(dir.path()).unwrap();
+        p.set_audit_limit(3);
+        p.append_audit("a6").unwrap();
+        let lines: Vec<_> = p.load_audit(None, 100).unwrap().into_iter().map(|(_, e)| e.line).collect();
+        assert_eq!(lines, ["a4", "a5", "a6"]);
+    }
+
+    #[test]
+    fn more_than_a_page_of_audit_events_loads_in_order() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        let n = PAGE + 30;
+        for i in 0..n {
+            p.append_audit(&format!("{i:05}")).unwrap();
+        }
+        let all = p.load_audit(None, usize::MAX).unwrap();
+        assert_eq!(all.len(), n);
+        assert!(all.windows(2).all(|w| w[0].1.line < w[1].1.line));
     }
 
     #[test]

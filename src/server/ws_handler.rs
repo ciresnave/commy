@@ -6515,3 +6515,125 @@ mod wire_error_code_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod audit_log_tests {
+    use super::*;
+    use crate::persist::Persistence;
+    use serde_json::json;
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    fn tenant() -> String {
+        format!("au_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(t: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
+    }
+
+    async fn admin(server: &Arc<RwLock<Server>>, t: &str) -> ClientSession {
+        let mut s = ClientSession::new();
+        let r = call(server, &mut s, json!({"type":"Authenticate","data":{"tenant_id":t,"api_key":"x","client_id":"admin"}})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s
+    }
+
+    async fn create(server: &Arc<RwLock<Server>>, a: &mut ClientSession, t: &str, name: &str) -> String {
+        let r = call(server, a, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":name,"size":4096}})).await;
+        r["data"]["service_id"].as_str().unwrap().to_string()
+    }
+
+    fn lines(server: &Server) -> Vec<String> {
+        server.audit_history(None, usize::MAX).unwrap().into_iter().map(|(_, e)| e.line).collect()
+    }
+
+    #[tokio::test]
+    async fn admin_events_reach_the_durable_log_and_survive_a_restart() {
+        let t = tenant();
+        let state = tempfile::tempdir().unwrap();
+        {
+            let mut s = Server::with_dev_auth(true);
+            s.enable_persistence(state.path()).unwrap();
+            let server = Arc::new(RwLock::new(s));
+            let mut a = admin(&server, &t).await;
+            let id = create(&server, &mut a, &t, "svc").await;
+            call(&server, &mut a, json!({"type":"Grant","data":{"request_id":"g","client_id":"bob","service_id":id,"permissions":["service:read"]}})).await;
+            call(&server, &mut a, json!({"type":"SetLocalMapping","data":{"request_id":"m","service_id":id,"enabled":true}})).await;
+            call(&server, &mut a, json!({"type":"Revoke","data":{"request_id":"v","client_id":"bob","service_id":id}})).await;
+            call(&server, &mut a, json!({"type":"DeleteService","data":{"tenant_id":t,"service_name":"svc"}})).await;
+            let l = lines(&*server.read().await);
+            for want in ["server STARTED", "grant GRANTED", "local mapping OPENED", "grant REVOKED", "service DELETED"] {
+                assert!(l.iter().any(|x| x.contains(want)), "{want} missing from {l:#?}");
+            }
+        }
+        let mut s = Server::with_dev_auth(true);
+        s.enable_persistence(state.path()).unwrap();
+        let l = lines(&s);
+        assert!(l.iter().any(|x| x.contains("grant REVOKED") && x.contains("bob") && x.contains("admin")), "who and what are kept: {l:#?}");
+        assert_eq!(l.iter().filter(|x| x.contains("server STARTED")).count(), 2, "one per start: {l:#?}");
+        let hist = s.audit_history(None, usize::MAX).unwrap();
+        assert!(hist.windows(2).all(|w| w[0].0 < w[1].0 && w[0].1.ts_ms <= w[1].1.ts_ms));
+        cleanup(&t);
+    }
+
+    /// The audit log is best effort: its failure is counted and visible and never blocks the change.
+    #[tokio::test]
+    async fn a_failing_audit_store_is_counted_and_does_not_block_grant_or_revoke() {
+        let t = tenant();
+        let mut s = Server::with_dev_auth(true);
+        s.use_persistence(
+            Persistence::open_with_audit(
+                persistant::Config::Memory,
+                persistant::Config::Faulty {
+                    inner: Box::new(persistant::Config::Memory),
+                    faults: persistant::Faults::fail_writes_after(0),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(s.audit_failures() >= 1, "even the start-up entry could not be written");
+        let before = s.audit_failures();
+        let server = Arc::new(RwLock::new(s));
+        let mut a = admin(&server, &t).await;
+        let id = create(&server, &mut a, &t, "svc").await;
+        let g = call(&server, &mut a, json!({"type":"Grant","data":{"request_id":"g","client_id":"bob","service_id":id,"permissions":["service:read"]}})).await;
+        assert_eq!(g["type"], "GrantAck", "a grant is not blocked by a failing audit log: {g}");
+        assert!(server.read().await.grants.allows(&t, "bob", &id, crate::server::grants::Action::Read));
+        let v = call(&server, &mut a, json!({"type":"Revoke","data":{"request_id":"v","client_id":"bob","service_id":id}})).await;
+        assert_eq!(v["type"], "GrantAck", "a revoke is not blocked either: {v}");
+        assert!(!server.read().await.grants.allows(&t, "bob", &id, crate::server::grants::Action::Read));
+        let g = server.read().await;
+        assert!(g.audit_failures() > before, "every lost event is counted ({} -> {})", before, g.audit_failures());
+        assert!(g.audit_events().iter().any(|l| l.contains("grant REVOKED")), "the in-memory trail still has it");
+        assert!(g.audit_history(None, 10).unwrap().is_empty(), "nothing reached the failing store");
+        drop(g);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn the_durable_log_keeps_only_the_configured_number_of_newest_events() {
+        let t = tenant();
+        let mut s = Server::with_dev_auth(true);
+        s.use_persistence(Persistence::open_with(persistant::Config::Memory).unwrap()).unwrap();
+        s.set_audit_limit(5);
+        for i in 0..20 {
+            s.audit(&format!("event {i}"));
+        }
+        let l = lines(&s);
+        assert_eq!(l, ["event 15", "event 16", "event 17", "event 18", "event 19"]);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn without_persistence_there_is_no_durable_history_and_no_failures() {
+        let s = Server::with_dev_auth(true);
+        s.audit("something happened");
+        assert!(s.audit_history(None, 10).unwrap().is_empty());
+        assert_eq!(s.audit_failures(), 0);
+        assert!(s.audit_events().iter().any(|l| l == "something happened"));
+    }
+}
