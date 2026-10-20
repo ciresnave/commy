@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+- **R5: durable state** on PersistAnt 0.8.21. The service registry (service id, tenant, name, file path, `file_id`, generation, whether it is open to local mapping) is stored as one record per service; the grants as an append-only log of operations replayed at start-up; the creator's `service:admin` grant, `Grant`, `Revoke`, `SetLocalMapping` and every rotation commit are recorded. `COMMY_STATE_DIR` names the directory (default `./commy_state`, created private to the server and administrators; `off` disables it). A restart finds the same service ids, files, `file_id`s and grants. Sessions, nonces, rotations in flight and per-file sequence numbers are not stored (clients resynchronise).
+- **Fail closed.** The change is recorded first and refused (`INTERNAL_ERROR`, audited) if it cannot be: a revoke that was not recorded is not applied, so a restart cannot give the access back; closing local mapping, creating a service and a rotation commit follow the same rule.
+- New: `Server::enable_persistence`, `Server::use_persistence` (tests use PersistAnt's memory and fault-injecting fakes), `Server::grant` / `Server::revoke` (record-then-apply), `Server::set_trusted_local_recorded`, `StateReport`, `persist::{Persistence, ServiceRow, GrantOp}`, `private_dir::create_secret`. Handlers now use `Server::grant` / `revoke`.
+- Tests include a real kill of the `commy` process and a restart on the same state directory (`tests/restart.rs`).
+- Known: the operation log grows with every grant change and is not compacted; a stored service whose file is gone is skipped and counted, not deleted; `DeleteService` is still a stub that deletes nothing.
+
 ## 0.12.1
 - Docs only: `docs/RELEASE-PLAN.md`, the plan for the first coordinated release with the SDK(s) and the `commy-wire` freeze (gate, sequence, known gaps); `ROADMAP.md` R1 points to it.
 

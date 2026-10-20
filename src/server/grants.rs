@@ -56,6 +56,16 @@ impl Action {
     }
 }
 
+impl Spec {
+    /// The wire name (`service:read`, `tenant:admin`, ...).
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            Spec::Service(a) => a.wire_name(),
+            Spec::TenantAdmin => "tenant:admin",
+        }
+    }
+}
+
 /// A permission name from the wire, parsed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Spec {

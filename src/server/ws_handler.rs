@@ -1139,7 +1139,17 @@ async fn handle_local_mapping(
                 }
             }
             let mut guard = server.write().await;
-            guard.set_trusted_local(&req.service_id, req.enabled);
+            if let Err(e) = guard.set_trusted_local_recorded(&req.service_id, req.enabled) {
+                guard.audit(&format!(
+                    "local mapping REFUSED service={} enabled={} by={who}: cannot record it: {e}",
+                    req.service_id, req.enabled
+                ));
+                return Some(wire_error(
+                    ErrorCode::InternalError,
+                    "Could not record the change",
+                    rid,
+                ));
+            }
             guard.audit(&format!(
                 "local mapping {} service={} by={who}",
                 if req.enabled { "OPENED" } else { "CLOSED" },
@@ -1938,6 +1948,13 @@ fn switch_to_prepared(
     tenant
         .register_service(&service_name, new_path, size as usize)
         .map_err(|e| e.to_string())?;
+    // Record the new file before the switch counts: a restart must find the file the clients use.
+    if let Some(mut row) = g.row_of(service_id) {
+        row.path = new_path.to_string();
+        row.file_id = new_file_id;
+        row.generation += 1;
+        g.persist_row(service_id, &row).map_err(|e| e.to_string())?;
+    }
     let generation = {
         let r = g.service_registry.get_mut(service_id).ok_or("service vanished")?;
         r.file_path = new_path.to_string();
@@ -1983,6 +2000,15 @@ fn grant_refused(
 ) -> serde_json::Value {
     guard.audit(&format!("grant REFUSED {what} by={who}: {why}"));
     wire_error(code, why, Some(rid))
+}
+
+/// A grant error that is the server's fault (it could not record the change) is an internal error;
+/// anything else is the caller's.
+fn grant_error_code(e: &crate::server::grants::GrantError) -> commy_wire::ErrorCode {
+    match e {
+        crate::server::grants::GrantError::Backend(_) => commy_wire::ErrorCode::InternalError,
+        _ => commy_wire::ErrorCode::InvalidRequest,
+    }
 }
 
 /// Parse wire permission names into grant specs.
@@ -2075,8 +2101,8 @@ async fn handle_grants(
             if let Err(e) = authorise_grant_change(&guard, session, &tenant, &who, req.service_id.as_deref(), &specs) {
                 return grant_refused(&guard, &who, &what, e.0, e.1, &rid);
             }
-            if let Err(e) = guard.grants.grant(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
-                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e.to_string(), &rid);
+            if let Err(e) = guard.grant(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
+                return grant_refused(&guard, &who, &what, grant_error_code(&e), &e.to_string(), &rid);
             }
             guard.audit(&format!("grant GRANTED {what} by={who}"));
             wire_json(&ControlMessage::GrantAck(commy_wire::GrantAck { request_id: rid }))
@@ -2109,8 +2135,8 @@ async fn handle_grants(
                     .collect()
             };
             let before = reach(&guard);
-            if let Err(e) = guard.grants.revoke(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
-                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e.to_string(), &rid);
+            if let Err(e) = guard.revoke(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
+                return grant_refused(&guard, &who, &what, grant_error_code(&e), &e.to_string(), &rid);
             }
             let after = reach(&guard);
             guard.audit(&format!("grant REVOKED {what} by={who}"));
@@ -2413,7 +2439,7 @@ async fn handle_sdk_message(
             {
                 // The creator administers what it creates.
                 let creator = client_key(session);
-                if let Err(e) = server_guard.grants.grant(
+                if let Err(e) = server_guard.grant(
                     tenant_id,
                     &creator,
                     Some(&service_id),
@@ -2422,7 +2448,30 @@ async fn handle_sdk_message(
                     )],
                 ) {
                     eprintln!("[grants] cannot grant the creator admin: {e}");
+                    let _ = std::fs::remove_file(&file_path);
+                    return Some(serde_json::json!({
+                        "type": "Error",
+                        "data": { "code": "InternalError", "message": "Could not record the new service" }
+                    }));
                 }
+            }
+            if let Err(e) = server_guard.persist_row(
+                &service_id,
+                &crate::persist::ServiceRow {
+                    tenant: tenant_id.to_string(),
+                    name: service_name.to_string(),
+                    path: file_path.clone(),
+                    file_id,
+                    generation: 0,
+                    trusted_local: false,
+                },
+            ) {
+                eprintln!("[persist] cannot record the new service: {e}");
+                let _ = std::fs::remove_file(&file_path);
+                return Some(serde_json::json!({
+                    "type": "Error",
+                    "data": { "code": "InternalError", "message": "Could not record the new service" }
+                }));
             }
             server_guard.service_registry.insert(
                 service_id.clone(),
@@ -5719,6 +5768,274 @@ mod set_local_mapping_tests {
         assert!(r["data"].get("path").is_none(), "an open service still offers a path only to writers: {r}");
         let events = server.read().await.audit_events().join("\n");
         assert!(events.contains("local mapping OPENED"), "{events}");
+        cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use crate::persist::{GrantOp, OpKind, Persistence};
+    use crate::StateReport;
+    use serde_json::json;
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    fn tenant() -> String {
+        format!("pe_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(t: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
+    }
+
+    async fn login(server: &Arc<RwLock<Server>>, t: &str, id: &str, scopes: Option<serde_json::Value>) -> ClientSession {
+        let mut data = json!({"tenant_id": t, "api_key": "x", "client_id": id});
+        if let Some(sc) = scopes {
+            data["dev_scopes"] = sc;
+        }
+        let mut s = ClientSession::new();
+        let r = call(server, &mut s, json!({"type":"Authenticate","data":data})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s
+    }
+
+    fn get_path(id: &str) -> serde_json::Value {
+        json!({"type":"GetServiceFilePath","data":{"request_id":"p","service_id":id}})
+    }
+
+    /// A server whose state lives in `dir`.
+    fn server_on(dir: &std::path::Path) -> (Arc<RwLock<Server>>, StateReport) {
+        let mut s = Server::with_dev_auth(true);
+        let report = s.enable_persistence(dir).unwrap();
+        (Arc::new(RwLock::new(s)), report)
+    }
+
+    async fn create(server: &Arc<RwLock<Server>>, admin: &mut ClientSession, t: &str, name: &str) -> String {
+        let r = call(server, admin, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":name,"size":4096}})).await;
+        assert_eq!(r["type"], "Service", "{r}");
+        r["data"]["service_id"].as_str().unwrap().to_string()
+    }
+
+    async fn grant(server: &Arc<RwLock<Server>>, admin: &mut ClientSession, client: &str, svc: &str, perm: &str) {
+        let r = call(server, admin, json!({"type":"Grant","data":{"request_id":"g","client_id":client,"service_id":svc,"permissions":[perm]}})).await;
+        assert_eq!(r["type"], "GrantAck", "{r}");
+    }
+
+    #[tokio::test]
+    async fn services_and_grants_survive_a_restart_that_never_shut_down_cleanly() {
+        let t = tenant();
+        let state = tempfile::tempdir().unwrap();
+        let (id, file_id) = {
+            let (server, report) = server_on(state.path());
+            assert_eq!(report, StateReport::default(), "a fresh state directory loads nothing");
+            let mut admin = login(&server, &t, "admin", None).await;
+            let id = create(&server, &mut admin, &t, "svc").await;
+            grant(&server, &mut admin, "bob", &id, "service:write").await;
+            let ack = call(&server, &mut admin, json!({"type":"SetLocalMapping","data":{"request_id":"m","service_id":id,"enabled":true}})).await;
+            assert_eq!(ack["type"], "LocalMappingAck");
+            let file_id = server.read().await.service_registry[&id].file_id;
+            (id, file_id)
+            // `server` is dropped here: no shutdown hook runs, as in a power cut
+        };
+
+        let (server, report) = server_on(state.path());
+        assert_eq!((report.services_loaded, report.services_missing_file, report.grant_ops_skipped), (1, 0, 0), "{report:?}");
+        assert!(report.grant_ops_replayed >= 2, "{report:?}");
+        {
+            let g = server.read().await;
+            let rec = &g.service_registry[&id];
+            assert_eq!((rec.file_id, rec.trusted_local, rec.generation), (file_id, true, 0));
+            assert!(g.next_file_id > file_id, "new files never reuse an id");
+        }
+        // bob (no tenant-level permissions) still has exactly the grant he was given
+        let mut bob = login(&server, &t, "bob", Some(json!([]))).await;
+        let r = call(&server, &mut bob, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert!(r["data"]["path"].is_string(), "bob had write on an open service: {r}");
+        // and a stranger still has none
+        let mut eve = login(&server, &t, "eve", Some(json!([]))).await;
+        assert_eq!(call(&server, &mut eve, get_path(&id)).await["data"]["code"], "PERMISSION_DENIED");
+        // the creator is still its administrator
+        let mut admin = login(&server, &t, "admin", Some(json!([]))).await;
+        assert_eq!(call(&server, &mut admin, get_path(&id)).await["type"], "ServiceFilePath");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_revoke_is_still_in_force_after_a_restart() {
+        let t = tenant();
+        let state = tempfile::tempdir().unwrap();
+        let id = {
+            let (server, _) = server_on(state.path());
+            let mut admin = login(&server, &t, "admin", None).await;
+            let id = create(&server, &mut admin, &t, "svc").await;
+            grant(&server, &mut admin, "bob", &id, "service:read").await;
+            let r = call(&server, &mut admin, json!({"type":"Revoke","data":{"request_id":"v","client_id":"bob","service_id":id}})).await;
+            assert_eq!(r["type"], "GrantAck", "{r}");
+            id
+        };
+        let (server, _) = server_on(state.path());
+        let mut bob = login(&server, &t, "bob", Some(json!([]))).await;
+        assert_eq!(call(&server, &mut bob, get_path(&id)).await["data"]["code"], "PERMISSION_DENIED", "revoked access must not come back");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_rotation_is_what_the_restarted_server_serves() {
+        let t = tenant();
+        let state = tempfile::tempdir().unwrap();
+        let (id, old_path, new_path, new_fid) = {
+            let (server, _) = server_on(state.path());
+            let mut admin = login(&server, &t, "admin", None).await;
+            let id = create(&server, &mut admin, &t, "svc").await;
+            grant(&server, &mut admin, "bob", &id, "service:read").await;
+            let old_path = server.read().await.service_registry[&id].file_path.clone();
+            // revoking bob rotates the service
+            call(&server, &mut admin, json!({"type":"Revoke","data":{"request_id":"v","client_id":"bob","service_id":id}})).await;
+            for _ in 0..100 {
+                if server.read().await.service_registry[&id].generation == 1 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            }
+            let g = server.read().await;
+            let rec = &g.service_registry[&id];
+            assert_eq!(rec.generation, 1);
+            (id.clone(), old_path, rec.file_path.clone(), rec.file_id)
+        };
+        assert_ne!(old_path, new_path);
+        let (server, report) = server_on(state.path());
+        assert_eq!(report.services_loaded, 1, "{report:?}");
+        let g = server.read().await;
+        let rec = &g.service_registry[&id];
+        assert_eq!((rec.file_path.as_str(), rec.file_id, rec.generation), (new_path.as_str(), new_fid, 1));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_service_whose_file_vanished_is_skipped_and_counted() {
+        let t = tenant();
+        let state = tempfile::tempdir().unwrap();
+        let path = {
+            let (server, _) = server_on(state.path());
+            let mut admin = login(&server, &t, "admin", None).await;
+            let id = create(&server, &mut admin, &t, "svc").await;
+            let p = server.read().await.service_registry[&id].file_path.clone();
+            p
+        };
+        std::fs::remove_file(&path).unwrap();
+        let (server, report) = server_on(state.path());
+        assert_eq!((report.services_loaded, report.services_missing_file), (0, 1), "{report:?}");
+        assert!(server.read().await.service_registry.is_empty());
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_stored_grant_that_cannot_be_applied_is_skipped_not_fatal() {
+        let state = tempfile::tempdir().unwrap();
+        {
+            let p = Persistence::open(state.path()).unwrap();
+            p.append_grant_op(&GrantOp {
+                kind: OpKind::Grant,
+                tenant: "t".into(),
+                client: "bob".into(),
+                service: Some("svc".into()),
+                permissions: vec!["service:from-the-future".into()],
+            })
+            .unwrap();
+        }
+        let (_server, report) = server_on(state.path());
+        assert_eq!((report.grant_ops_replayed, report.grant_ops_skipped), (0, 1), "{report:?}");
+    }
+
+    /// Fail closed: a revoke the server cannot record is refused and NOT applied.
+    #[tokio::test]
+    async fn a_revoke_that_cannot_be_recorded_is_refused_and_changes_nothing() {
+        let t = tenant();
+        let mut s = Server::with_dev_auth(true);
+        // writes: 1 creator grant, 2 service row, 3 bob's grant; the 4th (the revoke) fails
+        s.use_persistence(
+            Persistence::open_with(persistant::Config::Faulty {
+                inner: Box::new(persistant::Config::Memory),
+                faults: persistant::Faults::fail_writes_after(3),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let server = Arc::new(RwLock::new(s));
+        let mut admin = login(&server, &t, "admin", None).await;
+        let id = create(&server, &mut admin, &t, "svc").await;
+        grant(&server, &mut admin, "bob", &id, "service:read").await;
+
+        let r = call(&server, &mut admin, json!({"type":"Revoke","data":{"request_id":"v","client_id":"bob","service_id":id}})).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "INTERNAL_ERROR", "{r}");
+        assert!(server.read().await.grants.allows(&t, "bob", &id, crate::server::grants::Action::Read), "the failed revoke must not take effect");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(server.read().await.service_registry[&id].generation, 0, "and must not rotate the file");
+        let events = server.read().await.audit_events().join("\\n");
+        assert!(events.contains("grant REFUSED"), "{events}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn closing_local_mapping_that_cannot_be_recorded_leaves_it_open_and_says_so() {
+        let t = tenant();
+        let mut s = Server::with_dev_auth(true);
+        // writes: 1 creator grant, 2 service row, 3 opening; closing (4th) fails
+        s.use_persistence(
+            Persistence::open_with(persistant::Config::Faulty {
+                inner: Box::new(persistant::Config::Memory),
+                faults: persistant::Faults::fail_writes_after(3),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let server = Arc::new(RwLock::new(s));
+        let mut admin = login(&server, &t, "admin", None).await;
+        let id = create(&server, &mut admin, &t, "svc").await;
+        let open = call(&server, &mut admin, json!({"type":"SetLocalMapping","data":{"request_id":"m","service_id":id,"enabled":true}})).await;
+        assert_eq!(open["type"], "LocalMappingAck", "{open}");
+        let close = call(&server, &mut admin, json!({"type":"SetLocalMapping","data":{"request_id":"m2","service_id":id,"enabled":false}})).await;
+        assert_eq!(close["type"], "Error", "{close}");
+        assert!(server.read().await.service_registry[&id].trusted_local, "the in-memory state matches what is stored");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_service_that_cannot_be_recorded_is_not_created() {
+        let t = tenant();
+        let mut s = Server::with_dev_auth(true);
+        // the first write (the creator's grant) fails
+        s.use_persistence(
+            Persistence::open_with(persistant::Config::Faulty {
+                inner: Box::new(persistant::Config::Memory),
+                faults: persistant::Faults::fail_writes_after(0),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let server = Arc::new(RwLock::new(s));
+        let mut admin = login(&server, &t, "admin", None).await;
+        let r = call(&server, &mut admin, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc","size":4096}})).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert!(server.read().await.service_registry.is_empty());
+        let leftovers = std::fs::read_dir(format!("tenant_{t}")).map(|d| d.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("service_")).count()).unwrap_or(0);
+        assert_eq!(leftovers, 0, "no orphan file");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn without_persistence_nothing_is_written_and_nothing_changes() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = login(&server, &t, "admin", None).await;
+        let id = create(&server, &mut admin, &t, "svc").await;
+        grant(&server, &mut admin, "bob", &id, "service:read").await;
+        assert!(server.read().await.grants.allows(&t, "bob", &id, crate::server::grants::Action::Read));
         cleanup(&t);
     }
 }

@@ -4,6 +4,7 @@ pub mod auth;
 pub mod auth_methods;
 pub mod clustering;
 pub mod liveness;
+pub mod persist;
 pub mod private_dir;
 pub mod protocol;
 pub mod revocation;
@@ -206,6 +207,22 @@ pub struct Server {
     pub rotation_min_interval: std::time::Duration,
     /// Rotation requests, grants and refusals, oldest first (capped).
     audit_log: std::sync::Mutex<Vec<String>>,
+    /// Durable state (service registry and grants), if enabled. Off for `Server::new()` unless
+    /// `enable_persistence` is called; the binary turns it on.
+    persistence: Option<persist::Persistence>,
+    /// Serialises "record a grant change, then apply it" so the log order is the applied order.
+    grant_lock: std::sync::Mutex<()>,
+}
+
+/// What loading the stored state found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StateReport {
+    pub services_loaded: usize,
+    /// Stored services whose file is gone; they are skipped, not deleted.
+    pub services_missing_file: usize,
+    pub grant_ops_replayed: usize,
+    /// Stored grant operations that could not be applied (skipped).
+    pub grant_ops_skipped: usize,
 }
 
 /// Page size service files are rounded up to.
@@ -283,6 +300,8 @@ impl Server {
                 .unwrap_or(std::time::Duration::from_secs(5)),
             rotation_min_interval: server::rotation::DEFAULT_MIN_INTERVAL,
             audit_log: std::sync::Mutex::new(Vec::new()),
+            persistence: None,
+            grant_lock: std::sync::Mutex::new(()),
             max_service_size: std::env::var(MAX_SERVICE_SIZE_ENV)
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -299,6 +318,151 @@ impl Server {
                 true
             }
             None => false,
+        }
+    }
+
+    /// As [`Server::set_trusted_local`], recording the change first and refusing it if it cannot be
+    /// recorded (a close that was not recorded would reopen the service after a restart).
+    pub fn set_trusted_local_recorded(&mut self, service_id: &str, trusted: bool) -> Result<bool, persist::PersistError> {
+        let Some(mut row) = self.row_of(service_id) else {
+            return Ok(false);
+        };
+        row.trusted_local = trusted;
+        self.persist_row(service_id, &row)?;
+        Ok(self.set_trusted_local(service_id, trusted))
+    }
+
+    /// Keep the service registry and the grants on disk under `dir` (created private), and load
+    /// what is already there. Call before serving.
+    pub fn enable_persistence(&mut self, dir: &std::path::Path) -> Result<StateReport, persist::PersistError> {
+        self.use_persistence(persist::Persistence::open(dir)?)
+    }
+
+    /// As [`Server::enable_persistence`] on a store you opened (tests use memory and fault fakes).
+    pub fn use_persistence(&mut self, p: persist::Persistence) -> Result<StateReport, persist::PersistError> {
+        let mut report = StateReport::default();
+        // Grants first: they do not depend on anything else.
+        for op in p.load_grant_ops()? {
+            let specs: Result<Vec<_>, _> = op
+                .permissions
+                .iter()
+                .map(|n| server::grants::parse_permission(n))
+                .collect();
+            let applied = specs.and_then(|specs| match op.kind {
+                persist::OpKind::Grant => self.grants.grant(&op.tenant, &op.client, op.service.as_deref(), &specs),
+                persist::OpKind::Revoke => self.grants.revoke(&op.tenant, &op.client, op.service.as_deref(), &specs),
+            });
+            match applied {
+                Ok(()) => report.grant_ops_replayed += 1,
+                Err(e) => {
+                    report.grant_ops_skipped += 1;
+                    self.audit(&format!("state: skipped a stored grant operation: {e}"));
+                }
+            }
+        }
+        for (id, row) in p.load_services()? {
+            let Ok(meta) = std::fs::metadata(&row.path) else {
+                report.services_missing_file += 1;
+                self.audit(&format!("state: service {id} skipped, file {} is gone", row.path));
+                continue;
+            };
+            let size = meta.len() as usize;
+            let tenant = self.get_tenant(&row.tenant);
+            if let Err(e) = tenant.register_service(&row.name, &row.path, size) {
+                report.services_missing_file += 1;
+                self.audit(&format!("state: service {id} skipped, cannot map {}: {e}", row.path));
+                continue;
+            }
+            self.next_file_id = self.next_file_id.max(row.file_id.wrapping_add(1).max(1));
+            self.service_registry.insert(
+                id,
+                ServiceRecord {
+                    tenant_name: row.tenant,
+                    service_name: row.name,
+                    file_path: row.path,
+                    file_id: row.file_id,
+                    trusted_local: row.trusted_local,
+                    seq: 0,
+                    generation: row.generation,
+                },
+            );
+            report.services_loaded += 1;
+        }
+        self.persistence = Some(p);
+        Ok(report)
+    }
+
+    /// Record a stored row for a service (no-op without persistence).
+    pub fn persist_row(&self, id: &str, row: &persist::ServiceRow) -> Result<(), persist::PersistError> {
+        match &self.persistence {
+            Some(p) => p.put_service(id, row),
+            None => Ok(()),
+        }
+    }
+
+    /// The stored form of a registered service.
+    pub fn row_of(&self, id: &str) -> Option<persist::ServiceRow> {
+        self.service_registry.get(id).map(|r| persist::ServiceRow {
+            tenant: r.tenant_name.clone(),
+            name: r.service_name.clone(),
+            path: r.file_path.clone(),
+            file_id: r.file_id,
+            generation: r.generation,
+            trusted_local: r.trusted_local,
+        })
+    }
+
+    /// Give `client` permissions. With persistence the change is recorded first and refused if it
+    /// cannot be, so a restart never loses it.
+    pub fn grant(
+        &self,
+        tenant: &str,
+        client: &str,
+        service: Option<&str>,
+        specs: &[server::grants::Spec],
+    ) -> Result<(), server::grants::GrantError> {
+        self.change_grants(persist::OpKind::Grant, tenant, client, service, specs)
+    }
+
+    /// Take permissions away; same recording rule as [`Server::grant`]. A revoke that cannot be
+    /// recorded is NOT applied: otherwise a restart would give the access back.
+    pub fn revoke(
+        &self,
+        tenant: &str,
+        client: &str,
+        service: Option<&str>,
+        specs: &[server::grants::Spec],
+    ) -> Result<(), server::grants::GrantError> {
+        self.change_grants(persist::OpKind::Revoke, tenant, client, service, specs)
+    }
+
+    fn change_grants(
+        &self,
+        kind: persist::OpKind,
+        tenant: &str,
+        client: &str,
+        service: Option<&str>,
+        specs: &[server::grants::Spec],
+    ) -> Result<(), server::grants::GrantError> {
+        use server::grants::{GrantError, Spec};
+        // Refuse what the store would refuse *before* recording it.
+        if service.is_some() && specs.iter().any(|s| matches!(s, Spec::TenantAdmin)) {
+            return Err(GrantError::WrongScope("tenant:admin".to_string()));
+        }
+        let _order = self.grant_lock.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(p) = &self.persistence {
+            p.append_grant_op(&persist::GrantOp {
+                kind,
+                tenant: tenant.to_string(),
+                client: client.to_string(),
+                service: service.map(str::to_string),
+                permissions: specs.iter().map(|s| s.wire_name().to_string()).collect(),
+            })
+            .map_err(|e| GrantError::Backend(e.to_string()))?;
+        }
+        match kind {
+            persist::OpKind::Grant => self.grants.grant(tenant, client, service, specs),
+            persist::OpKind::Revoke => self.grants.revoke(tenant, client, service, specs),
         }
     }
 
