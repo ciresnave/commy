@@ -4,6 +4,7 @@ pub mod auth;
 pub mod auth_methods;
 pub mod clustering;
 pub mod liveness;
+pub mod private_dir;
 pub mod protocol;
 pub mod revocation;
 pub mod server;

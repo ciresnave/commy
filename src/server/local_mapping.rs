@@ -45,6 +45,9 @@ pub fn create_nonce_file(tenant_dir: &Path) -> std::io::Result<PendingNonce> {
         options.mode(0o600);
     }
     let mut file = options.open(&path)?;
+    // Before the nonce is written: on Windows the new file would otherwise inherit the directory's
+    // grant to other accounts.
+    crate::private_dir::make_file_private(&path)?;
     file.write_all(nonce.as_bytes())?;
     file.sync_all()?;
     Ok(PendingNonce { nonce, path })
