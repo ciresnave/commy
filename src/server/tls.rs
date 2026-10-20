@@ -4,9 +4,8 @@
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
-use rustls_pemfile::{certs, pkcs8_private_keys};
-use std::fs::File;
-use std::io::{self, BufReader};
+use rustls::pki_types::pem::PemObject;
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -48,6 +47,15 @@ impl From<io::Error> for TlsError {
     }
 }
 
+/// Map a failure to open or start reading a PEM file to a [`TlsError`]: an I/O failure stays an I/O
+/// failure, anything else is a bad file of the kind `make` names.
+fn pem_error(e: rustls::pki_types::pem::Error, what: &str, make: fn(String) -> TlsError) -> TlsError {
+    match e {
+        rustls::pki_types::pem::Error::Io(io) => TlsError::IoError(io),
+        _ => make(format!("Failed to read PEM {what}")),
+    }
+}
+
 /// Loads and validates TLS certificates and keys
 pub struct TlsConfiguration {
     /// The loaded Rustls ServerConfig
@@ -81,10 +89,10 @@ impl TlsConfiguration {
             ));
         }
 
-        // Load certificate
-        let cert_file = File::open(cert_path)?;
-        let mut cert_reader = BufReader::new(cert_file);
-        let certificates: Vec<CertificateDer<'static>> = certs(&mut cert_reader)
+        // Load the certificate chain. (rustls-pki-types reads the PEM itself; rustls-pemfile is
+        // unmaintained, RUSTSEC-2025-0134.)
+        let certificates: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(cert_path)
+            .map_err(|e| pem_error(e, "certificates", TlsError::InvalidCertificate))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| {
                 TlsError::InvalidCertificate("Failed to parse PEM certificates".to_string())
@@ -96,23 +104,14 @@ impl TlsConfiguration {
             ));
         }
 
-        // Load private key
-        let key_file = File::open(key_path)?;
-        let mut key_reader = BufReader::new(key_file);
-        let mut keys: Vec<PrivateKeyDer<'static>> = pkcs8_private_keys(&mut key_reader)
-            .map(|r| r.map(PrivateKeyDer::from))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| {
-                TlsError::InvalidPrivateKey("Failed to parse PEM private keys".to_string())
-            })?;
-
-        if keys.is_empty() {
-            return Err(TlsError::InvalidPrivateKey(
-                "No private keys found in file".to_string(),
-            ));
-        }
-
-        let private_key = keys.remove(0);
+        // Load the private key: the first PKCS#8, PKCS#1 (RSA) or SEC1 (EC) key in the file.
+        let private_key = PrivateKeyDer::from_pem_file(key_path).map_err(|e| match e {
+            rustls::pki_types::pem::Error::NoItemsFound => {
+                TlsError::InvalidPrivateKey("No private keys found in file".to_string())
+            }
+            rustls::pki_types::pem::Error::Io(io) => TlsError::IoError(io),
+            _ => TlsError::InvalidPrivateKey("Failed to parse PEM private keys".to_string()),
+        })?;
 
         // Create ServerConfig with an explicit crypto provider. The dependency tree enables both the
         // aws-lc-rs and ring backends, so rustls cannot pick a process-level default on its own and
@@ -211,5 +210,65 @@ mod tests {
             }
             _ => panic!("Expected PemParseError from for_development()"),
         }
+    }
+
+    fn pems(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        let ck = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert = dir.join("cert.pem");
+        let key = dir.join("key.pem");
+        std::fs::write(&cert, ck.cert.pem()).unwrap();
+        std::fs::write(&key, ck.signing_key.serialize_pem()).unwrap();
+        (cert, key)
+    }
+
+    #[test]
+    fn a_real_certificate_and_key_build_a_server_config() {
+        let d = tempfile::tempdir().unwrap();
+        let (cert, key) = pems(d.path());
+        assert!(TlsConfiguration::from_files(&cert, &key).is_ok());
+    }
+
+    #[test]
+    fn a_certificate_file_with_no_certificate_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let (_, key) = pems(d.path());
+        let empty = d.path().join("empty.pem");
+        std::fs::write(&empty, "nothing to see
+").unwrap();
+        let e = TlsConfiguration::from_files(&empty, &key).err().unwrap();
+        assert!(matches!(e, TlsError::InvalidCertificate(_)), "{e}");
+    }
+
+    #[test]
+    fn a_key_file_with_no_key_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let (cert, _) = pems(d.path());
+        let nokey = d.path().join("nokey.pem");
+        std::fs::write(&nokey, "nothing to see
+").unwrap();
+        let e = TlsConfiguration::from_files(&cert, &nokey).err().unwrap();
+        assert!(matches!(e, TlsError::InvalidPrivateKey(_)), "{e}");
+    }
+
+    #[test]
+    fn a_corrupt_certificate_is_refused_not_a_panic() {
+        let d = tempfile::tempdir().unwrap();
+        let (_, key) = pems(d.path());
+        let bad = d.path().join("bad.pem");
+        std::fs::write(&bad, "-----BEGIN CERTIFICATE-----
+!!!not base64!!!
+-----END CERTIFICATE-----
+").unwrap();
+        let e = TlsConfiguration::from_files(&bad, &key).err().unwrap();
+        assert!(matches!(e, TlsError::InvalidCertificate(_)), "{e}");
+    }
+
+    #[test]
+    fn a_certificate_that_does_not_match_the_key_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let (cert, _) = pems(d.path());
+        let other = tempfile::tempdir().unwrap();
+        let (_, other_key) = pems(other.path());
+        assert!(TlsConfiguration::from_files(&cert, &other_key).is_err());
     }
 }
