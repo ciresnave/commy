@@ -141,7 +141,12 @@ impl ServiceSnapshot {
         use sha2::{Sha256, Digest};
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        // sha2 0.11 digests no longer implement LowerHex: hex-encode the bytes.
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
     }
 
     /// Update metadata

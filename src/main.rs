@@ -133,6 +133,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    // Credentials: with development authentication off (the default) clients must present an API key
+    // or JWT issued by auth-framework for their tenant. The server refuses to start without a master
+    // secret rather than fall back to something guessable.
+    if server_value.dev_auth {
+        println!("[Commy] COMMY_ALLOW_DEV_AUTH=1: development authentication ACCEPTS ANY CREDENTIALS");
+    } else {
+        let auth_dir = std::path::PathBuf::from(
+            env::var("COMMY_AUTH_DIR").unwrap_or_else(|_| "commy_state/auth".to_string()),
+        );
+        match commy::server::framework_verifier::FrameworkVerifier::from_env(&auth_dir) {
+            Ok(v) => {
+                println!("[Commy] Authentication: auth-framework, tenant databases in {}", auth_dir.display());
+                server_value = server_value.with_verifier(Arc::new(v));
+            }
+            Err(e) => {
+                eprintln!("[Commy] cannot start: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     let server = Arc::new(RwLock::new(server_value));
 
     // Set up tenants with authentication
