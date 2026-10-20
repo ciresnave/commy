@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.11.4
+- Documentation clean-up. Deleted 42 root-level Markdown files that described the removed design (named variables, the shared allocator, the containers, the nightly toolchain) or were status reports, phase reports, tutorials and WebSocket notes from earlier iterations; they remain in git history. Kept the Docker, clustering and authentication guides with a banner saying they predate 0.11.0. `.github/copilot-instructions.md` rewritten for the current design. New `ROADMAP.md`. No code changes.
+
 ## 0.11.3
 - Tenant directories (C8): a newly created `tenant_<id>` directory can be traversed by other accounts but listed only by the Commy server and administrators. Unix: mode `0711`. Windows: inheritance removed; SYSTEM, Administrators and the running account get full control (inherited); `Users` get traverse on the directory and modify on the files inside (inherit-only), via `icacls`. This keeps the plan's barrier (a long random file name in a directory others cannot list; a local client opens the file by its full path) without per-file permissions (Q9/Q10, deferred). An existing directory is left as the operator set it; if the restriction cannot be applied the directory is not used.
 - The local-mapping nonce file is now owner-only on Windows too (it used to inherit the directory's grant to other accounts); Unix was already `0600`.

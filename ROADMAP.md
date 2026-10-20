@@ -1,0 +1,27 @@
+# Roadmap
+
+Authoritative portfolio priorities live in the portfolio roadmap; this file records what is open in
+Commy itself. State is `main` at 0.11.x unless a row says otherwise.
+
+## Done (server side of plan v11)
+
+C1 service file path and same-machine proof, C2 whole-file resync, C3 range forwarding, C4 rotation
+(resize with prepare and commit, revocation), C5 required service size, C6/C9 named variables,
+allocator, containers and file header removed (stable Rust), C8 tenant directories, C10 service-scoped
+grants on role-system with the revocation rotation they trigger.
+
+## Open
+
+| Row | Item | State | Notes |
+|-----|------|-------|-------|
+| R1 | First coordinated release with the SDK(s) and the `commy-wire` layout freeze | open | Needs dirty-ranges 0.1.0 published and the Rust SDK's local mapping, trapping and rotation work merged. The wire layout stays unfrozen until then; any layout change is the next minor of `commy-wire`. |
+| R2 | Non-Linux write-trap tests | open (SDK / dirty-ranges lane) | The trapping default is gated per OS on the plan's uncovered-cases list; the README must name each OS and architecture TESTED or UNVERIFIED. Commy itself only carries the bytes. |
+| R3 | Local zero-copy sharing end to end | open | The server side exists (nonce handshake, `set_trusted_local`). Still missing: an administration message to open a service to local mapping (today only `Server::set_trusted_local`), and an SDK end-to-end run against the real binary. |
+| R4 | Real authentication | open | Only development authentication exists (`COMMY_ALLOW_DEV_AUTH=1`; any credential is accepted and the client claims its own id). No credential verifier is wired in. Client ids in grants are only as trustworthy as that verifier. |
+| R5 | Persistent grants | open | Grants live in role-system's in-memory storage and are lost on restart. role-system's database storage is the intended backing. |
+| R6 | Durable audit log | open | Rotation and grant events are kept in memory (last 10,000) and printed to stderr. |
+| R7 | Configuration file | open | The maximum service size, drain and fill timeouts are environment variables (`COMMY_MAX_SERVICE_SIZE`, `COMMY_DRAIN_TIMEOUT_MS`, `COMMY_FILL_TIMEOUT_MS`); the plan asks for a configuration file. |
+| R8 | Per-file permissions (Q9) and read-only local access (Q10) | deferred | A service file has no permissions of its own; the unlisted tenant directory and a long random name are the barrier. Anyone who learns a path on the server's machine can open the file read-write. |
+| R9 | Windows second-account check of the tenant directory ACL (C8) | open | Verified on Linux with a second account; on Windows only the ACL text and the owner's access were checked, not another real account and not antivirus. |
+| R10 | `[[bin]]`/docs hygiene | open | `CLUSTERING_DEPLOYMENT.md` and the Docker guides predate the redesign (they carry a banner); they need rewriting against the bare-bytes server. `src/server/clustering` replicates the old variable model and has not been reworked for range forwarding. |
+| R11 | Rust SDK parity and other SDKs | open (SDK lanes) | Every non-Rust SDK runs the `commy-wire` golden vectors in its own CI. |
