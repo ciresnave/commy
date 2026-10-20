@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.1
+- Dependency: `auth-framework` 0.4 to 0.6.0-rc97 (the newest on crates.io). The framework's own README says no release older than 0.6.0-rc85 should be used (earlier ones fall inside published security advisories), and the standing rule is the newest versions. No behaviour change and no source change were needed: Commy only re-exports a few of its types so far; the real use (credential verification) is the next change. The whole suite passes unchanged (489 library tests and every integration target).
+- Lockfile: `cargo update` to the newest compatible crates. With only the dependency bump, `cargo audit` still reported 8 vulnerabilities in the lockfile (`h2` 0.4.13 RUSTSEC-2026-0258; `postgres-protocol` 0.6.10 RUSTSEC-2026-0179 and -0180; `rustls` 0.23.37 RUSTSEC-2026-0285, -0346, -0348 and -0349; `tokio-postgres` 0.7.16 RUSTSEC-2026-0178); after the update it reports none. One allowed warning remains: `rustls-pemfile` 2.2.0 is unmaintained (RUSTSEC-2025-0134), used in `server/tls.rs`; moving to `rustls-pki-types` PEM parsing is a follow-up.
+
 ## 0.14.0
 - **R6: durable audit log** on PersistAnt. Every `Server::audit` event (rotation requests, grants and refusals, local-mapping changes, service deletions, start-up) is appended to a log of its own under the state directory (`<state dir>/audit/`, one file per event, key `audit/<20-digit sequence>`, JSON `{ts_ms, line}`), kept apart from the state so the two can be handled and fail separately. The newest `COMMY_AUDIT_MAX_EVENTS` (default 100,000) are kept; older ones are removed as new ones are written. A start-up event records what was loaded.
 - **Best effort.** A failed audit write is counted (`Server::audit_failures()`) and printed to stderr, and never blocks the operation it describes (the state changes themselves are recorded fail closed by R5). A test shows a failing audit store increments the counter and does not stop `Grant` or `Revoke`.
