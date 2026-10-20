@@ -283,3 +283,43 @@ async fn a_resize_drains_prepares_fills_and_commits_over_real_wss() {
 
     cleanup(&tenant);
 }
+
+/// What an SDK end-to-end run does against the real server: open a service to local mapping with
+/// the administration message (no code call), get the path and nonce file, confirm.
+#[tokio::test]
+async fn an_admin_opens_local_mapping_and_a_client_completes_the_handshake_over_real_wss() {
+    let tenant = format!("lo_{}", uuid::Uuid::new_v4().simple());
+    let (port, _server, certs) = start_server().await;
+    let mut c = connect(port, &certs).await;
+    say(&mut c, json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x","client_id":"admin"}})).await;
+    let r = next_text(&mut c).await;
+    assert_eq!(r["data"]["client_id"], "admin", "{r}");
+
+    say(&mut c, json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":4096}})).await;
+    let r = next_text(&mut c).await;
+    let service_id = r["data"]["service_id"].as_str().unwrap().to_string();
+
+    say(&mut c, json!({"type":"GetServiceFilePath","data":{"request_id":"a","service_id":service_id}})).await;
+    let closed = next_text(&mut c).await;
+    assert!(closed["data"].get("path").is_none(), "closed by default: {closed}");
+
+    say(&mut c, json!({"type":"SetLocalMapping","data":{"request_id":"s","service_id":service_id,"enabled":true}})).await;
+    let ack = next_text(&mut c).await;
+    assert_eq!(ack["type"], "LocalMappingAck", "{ack}");
+
+    say(&mut c, json!({"type":"GetServiceFilePath","data":{"request_id":"b","service_id":service_id}})).await;
+    let offer = next_text(&mut c).await;
+    let path = std::path::PathBuf::from(offer["data"]["path"].as_str().expect("a path is offered"));
+    let nonce_path = std::path::PathBuf::from(offer["data"]["nonce_path"].as_str().unwrap());
+    assert!(path.is_absolute() && path.exists());
+    let nonce = std::fs::read_to_string(&nonce_path).unwrap();
+    assert_eq!(nonce.len(), 64);
+    let file_id = offer["data"]["file_id"].as_u64().unwrap();
+
+    say(&mut c, json!({"type":"ConfirmLocal","data":{"request_id":"c","file_id":file_id,"nonce":nonce}})).await;
+    let done = next_text(&mut c).await;
+    assert_eq!(done["type"], "ConfirmLocalAck", "{done}");
+    assert!(!nonce_path.exists(), "the nonce file is deleted on first use");
+
+    cleanup(&tenant);
+}

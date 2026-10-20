@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.0
+- R3: an administrator opens a service to local mapping over the wire. New `SetLocalMapping{request_id, service_id, enabled}` (answered by `LocalMappingAck`) on `commy-wire` 0.3.2; needs `service:admin` on the service, is audited, and a refused request changes nothing. A service stays closed until opened, as before, so the binary now offers `path` and `nonce_path` (to a client with a write grant) without a code call to `Server::set_trusted_local`. Closing stops future offers.
+- New real-WSS test: open, get the path and nonce file, confirm, over TLS and WebSocket against the real server.
+
 ## 0.11.4
 - Documentation clean-up. Deleted 42 root-level Markdown files that described the removed design (named variables, the shared allocator, the containers, the nightly toolchain) or were status reports, phase reports, tutorials and WebSocket notes from earlier iterations; they remain in git history. Kept the Docker, clustering and authentication guides with a banner saying they predate 0.11.0. `.github/copilot-instructions.md` rewritten for the current design. New `ROADMAP.md`. No code changes.
 

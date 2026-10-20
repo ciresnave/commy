@@ -1111,6 +1111,48 @@ async fn handle_local_mapping(
             })))
         }
         ControlMessage::RotateRequest(req) => Some(handle_rotate(req, session, server).await),
+        ControlMessage::SetLocalMapping(req) => {
+            let rid = Some(req.request_id.as_str());
+            let who = client_key(session);
+            {
+                let guard = server.read().await;
+                let Some(record) = guard.service_registry.get(&req.service_id) else {
+                    return Some(wire_error(ErrorCode::NotFound, "Unknown service", rid));
+                };
+                if session.tenant_id.as_deref() != Some(record.tenant_name.as_str())
+                    || !session_allows(
+                        &guard,
+                        session,
+                        &req.service_id,
+                        crate::server::grants::Action::Admin,
+                    )
+                {
+                    guard.audit(&format!(
+                        "local mapping REFUSED service={} enabled={} by={who}",
+                        req.service_id, req.enabled
+                    ));
+                    return Some(wire_error(
+                        ErrorCode::PermissionDenied,
+                        "Needs service:admin on this service",
+                        rid,
+                    ));
+                }
+            }
+            let mut guard = server.write().await;
+            guard.set_trusted_local(&req.service_id, req.enabled);
+            guard.audit(&format!(
+                "local mapping {} service={} by={who}",
+                if req.enabled { "OPENED" } else { "CLOSED" },
+                req.service_id
+            ));
+            Some(wire_json(&ControlMessage::LocalMappingAck(
+                commy_wire::LocalMappingAck {
+                    request_id: req.request_id,
+                    service_id: req.service_id,
+                    enabled: req.enabled,
+                },
+            )))
+        }
         m @ (ControlMessage::Grant(_) | ControlMessage::Revoke(_) | ControlMessage::ListGrants(_)) => {
             Some(handle_grants(m, session, server).await)
         }
@@ -2657,7 +2699,7 @@ async fn handle_sdk_message(
             }))
         }
 
-        "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" | "RotateRequest" | "RotationDrained" | "RotationFilled" | "RotationAbort" | "Grant" | "Revoke" | "ListGrants" => {
+        "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" | "RotateRequest" | "RotationDrained" | "RotationFilled" | "RotationAbort" | "Grant" | "Revoke" | "ListGrants" | "SetLocalMapping" => {
             handle_local_mapping(message, session, &server).await
         }
 
@@ -5559,6 +5601,124 @@ mod dev_auth_identity_tests {
         let r = handle_message(bad, &mut s2, server).await;
         assert!(matches!(r, Some(WssMessage::AuthenticationResponse { success: false, .. })), "{r:?}");
         assert!(s2.token.is_none());
+        cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod set_local_mapping_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    fn tenant() -> String {
+        format!("sl_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(t: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
+    }
+
+    async fn login(server: &Arc<RwLock<Server>>, t: &str, id: &str, scopes: Option<serde_json::Value>) -> ClientSession {
+        let mut data = json!({"tenant_id": t, "api_key": "x", "client_id": id});
+        if let Some(sc) = scopes {
+            data["dev_scopes"] = sc;
+        }
+        let mut s = ClientSession::new();
+        let r = call(server, &mut s, json!({"type":"Authenticate","data":data})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s
+    }
+
+    fn set(id: &str, enabled: bool) -> serde_json::Value {
+        json!({"type":"SetLocalMapping","data":{"request_id":"m","service_id":id,"enabled":enabled}})
+    }
+
+    fn get_path(id: &str) -> serde_json::Value {
+        json!({"type":"GetServiceFilePath","data":{"request_id":"p","service_id":id}})
+    }
+
+    async fn setup() -> (Arc<RwLock<Server>>, String, ClientSession, String) {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = login(&server, &t, "admin", None).await;
+        let r = call(&server, &mut admin, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc","size":4096}})).await;
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        (server, t, admin, id)
+    }
+
+    #[tokio::test]
+    async fn a_service_starts_closed_and_an_admin_opens_it_over_the_wire() {
+        let (server, t, mut admin, id) = setup().await;
+        let r = call(&server, &mut admin, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert!(r["data"].get("path").is_none(), "closed by default, even for an administrator: {r}");
+
+        let ack = call(&server, &mut admin, set(&id, true)).await;
+        assert_eq!(ack["type"], "LocalMappingAck", "{ack}");
+        assert_eq!((ack["data"]["enabled"].as_bool(), ack["data"]["request_id"].as_str()), (Some(true), Some("m")));
+        let r = call(&server, &mut admin, get_path(&id)).await;
+        assert!(r["data"]["path"].is_string() && r["data"]["nonce_path"].is_string(), "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn closing_stops_the_offers() {
+        let (server, t, mut admin, id) = setup().await;
+        call(&server, &mut admin, set(&id, true)).await;
+        assert!(call(&server, &mut admin, get_path(&id)).await["data"]["path"].is_string());
+        let ack = call(&server, &mut admin, set(&id, false)).await;
+        assert_eq!(ack["data"]["enabled"], false, "{ack}");
+        assert!(call(&server, &mut admin, get_path(&id)).await["data"].get("path").is_none());
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn only_a_service_admin_may_change_it() {
+        let (server, t, mut admin, id) = setup().await;
+        call(&server, &mut admin, json!({"type":"Grant","data":{"request_id":"g","client_id":"writer","service_id":id,"permissions":["service:write"]}})).await;
+        let mut writer = login(&server, &t, "writer", Some(json!([]))).await;
+        let r = call(&server, &mut writer, set(&id, true)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        assert!(!server.read().await.service_registry[&id].trusted_local, "a refused request changes nothing");
+        // a client with no grant at all is stopped by the guard
+        let mut nobody = login(&server, &t, "nobody", Some(json!([]))).await;
+        let r = call(&server, &mut nobody, set(&id, true)).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        assert!(!server.read().await.service_registry[&id].trusted_local);
+        let events = server.read().await.audit_events().join("\n");
+        assert!(events.contains("local mapping REFUSED"), "{events}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn unknown_services_and_other_tenants_are_refused() {
+        let (server, t, mut admin, id) = setup().await;
+        let r = call(&server, &mut admin, set("no-such-service", true)).await;
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
+        let other = tenant();
+        let mut mallory = login(&server, &other, "mallory", None).await;
+        let r = call(&server, &mut mallory, set(&id, true)).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert!(!server.read().await.service_registry[&id].trusted_local);
+        cleanup(&t);
+        cleanup(&other);
+    }
+
+    #[tokio::test]
+    async fn opening_is_audited_and_the_offer_needs_a_write_grant_as_before() {
+        let (server, t, mut admin, id) = setup().await;
+        call(&server, &mut admin, set(&id, true)).await;
+        call(&server, &mut admin, json!({"type":"Grant","data":{"request_id":"g","client_id":"viewer","service_id":id,"permissions":["service:read"]}})).await;
+        let mut viewer = login(&server, &t, "viewer", Some(json!([]))).await;
+        let r = call(&server, &mut viewer, get_path(&id)).await;
+        assert_eq!(r["type"], "ServiceFilePath", "{r}");
+        assert!(r["data"].get("path").is_none(), "an open service still offers a path only to writers: {r}");
+        let events = server.read().await.audit_events().join("\n");
+        assert!(events.contains("local mapping OPENED"), "{events}");
         cleanup(&t);
     }
 }
