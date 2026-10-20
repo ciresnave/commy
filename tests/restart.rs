@@ -114,7 +114,7 @@ async fn ask(c: &mut Client, v: Value) -> Value {
 }
 
 async fn login(c: &mut Client, tenant: &str, id: &str, scopes: Option<Value>) {
-    let mut data = json!({"tenant_id": tenant, "api_key": "x", "client_id": id});
+    let mut data = json!({"tenant_id": tenant, "request_id":"a","protocol_version":1,"method":"api_key","key":"x", "client_id": id});
     if let Some(s) = scopes {
         data["dev_scopes"] = s;
     }

@@ -217,6 +217,9 @@ pub struct Server {
     /// Durable state (service registry and grants), if enabled. Off for `Server::new()` unless
     /// `enable_persistence` is called; the binary turns it on.
     persistence: Option<persist::Persistence>,
+    /// Verifies the credentials in `Authenticate` (production). `None` with `dev_auth` off means
+    /// nobody can authenticate. Development authentication ignores it.
+    pub verifier: Option<std::sync::Arc<dyn server::verify::CredentialVerifier>>,
     /// Serialises "record a grant change, then apply it" so the log order is the applied order.
     grant_lock: std::sync::Mutex<()>,
 }
@@ -309,6 +312,7 @@ impl Server {
             audit_log: std::sync::Mutex::new(Vec::new()),
             audit_failures: std::sync::atomic::AtomicU64::new(0),
             persistence: None,
+            verifier: None,
             grant_lock: std::sync::Mutex::new(()),
             max_service_size: std::env::var(MAX_SERVICE_SIZE_ENV)
                 .ok()
@@ -338,6 +342,12 @@ impl Server {
         row.trusted_local = trusted;
         self.persist_row(service_id, &row)?;
         Ok(self.set_trusted_local(service_id, trusted))
+    }
+
+    /// Verify credentials with `verifier` (see [`server::verify`]).
+    pub fn with_verifier(mut self, verifier: std::sync::Arc<dyn server::verify::CredentialVerifier>) -> Self {
+        self.verifier = Some(verifier);
+        self
     }
 
     /// Keep the service registry and the grants on disk under `dir` (created private), and load
