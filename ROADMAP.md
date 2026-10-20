@@ -14,7 +14,7 @@ grants on role-system with the revocation rotation they trigger.
 
 | Row | Item | State | Notes |
 |-----|------|-------|-------|
-| R1 | First coordinated release with the SDK(s) and the `commy-wire` layout freeze | open | Needs dirty-ranges 0.1.0 published and the Rust SDK's local mapping, trapping and rotation work merged. The wire layout stays unfrozen until then; any layout change is the next minor of `commy-wire`. |
+| R1 | First coordinated release with the SDK(s) and the `commy-wire` layout freeze | open | Plan: `docs/RELEASE-PLAN.md`. Needs dirty-ranges 0.1.0 published and the Rust SDK's local mapping, trapping and rotation work merged. The wire layout stays unfrozen until then; any layout change is the next minor of `commy-wire`. |
 | R2 | Non-Linux write-trap tests | open (SDK / dirty-ranges lane) | The trapping default is gated per OS on the plan's uncovered-cases list; the README must name each OS and architecture TESTED or UNVERIFIED. Commy itself only carries the bytes. |
 | R3 | Local zero-copy sharing end to end | open | The server side exists (nonce handshake, `set_trusted_local`). Still missing: an administration message to open a service to local mapping (today only `Server::set_trusted_local`), and an SDK end-to-end run against the real binary. |
 | R4 | Real authentication | open | Only development authentication exists (`COMMY_ALLOW_DEV_AUTH=1`; any credential is accepted and the client claims its own id). No credential verifier is wired in. Client ids in grants are only as trustworthy as that verifier. |
