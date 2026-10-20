@@ -253,10 +253,13 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_private_file_has_no_users_entry() {
+        // Inside a private directory a new file inherits `Users:(M)`; making it private must remove
+        // that, or the nonce would be readable by every other account.
         let (_d, p) = fresh();
-        std::fs::create_dir(&p).unwrap();
+        create_private(&p).unwrap();
         let f = p.join("n");
         std::fs::write(&f, b"x").unwrap();
+        assert!(acl(&f).contains("BUILTIN\\Users"), "precondition: the file inherits the Users grant: {}", acl(&f));
         make_file_private(&f).unwrap();
         let text = acl(&f);
         assert!(!text.contains("BUILTIN\\Users"), "{text}");
