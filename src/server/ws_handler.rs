@@ -2221,8 +2221,8 @@ fn authorise_grant_change(
     Ok(())
 }
 
-/// Handles one SDK-protocol message. An error reply echoes the request's `request_id` when it had one,
-/// so a client can match the reply to the request (`commy-wire`: every request carries a
+/// Handles one SDK-protocol message. An error reply, or the reply to a service or tenant request,
+/// echoes the request's `request_id` when it had one, so a client can match the reply to the request (`commy-wire`: every request carries a
 /// `request_id` that the reply echoes).
 async fn handle_sdk_message(
     message: serde_json::Value,
@@ -2236,9 +2236,15 @@ async fn handle_sdk_message(
         .map(str::to_string);
     let mut reply = handle_sdk_message_inner(message, session, server).await;
     if let (Some(rid), Some(r)) = (request_id, reply.as_mut()) {
-        if r.get("type").and_then(|t| t.as_str()) == Some("Error") {
+        // Errors and the legacy replies to the CRUD requests (a `Result` used to carry a fresh random
+        // id, which nothing can match) echo the request's id.
+        let echoes = matches!(
+            r.get("type").and_then(|t| t.as_str()),
+            Some("Error" | "Result" | "Service" | "TenantResult")
+        );
+        if echoes {
             if let Some(data) = r.get_mut("data").and_then(|d| d.as_object_mut()) {
-                data.entry("request_id").or_insert(serde_json::Value::String(rid));
+                data.insert("request_id".to_string(), serde_json::Value::String(rid));
             }
         }
     }
@@ -6533,6 +6539,34 @@ mod wire_error_code_tests {
         }
         let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
         let _ = std::fs::remove_dir_all(format!("tenant_{other_t}"));
+    }
+
+    /// A success reply to an SDK-protocol request that carried a `request_id` echoes it too (a
+    /// `Result` used to carry a fresh random id instead).
+    #[tokio::test]
+    async fn success_replies_echo_the_request_id() {
+        let t = format!("er_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = ClientSession::new();
+        call(&server, &mut admin, json!({"type":"Authenticate","data":{"tenant_id":t,"request_id":"a","protocol_version":1,"method":"api_key","key":"x","client_id":"admin"}})).await;
+        let steps = vec![
+            ("CreateService", "Service", json!({"type":"CreateService","data":{"request_id":"s1","tenant_id":t,"service_name":"svc","size":4096}})),
+            ("GetService", "Service", json!({"type":"GetService","data":{"request_id":"s2","tenant_id":t,"service_name":"svc"}})),
+            ("DeleteService", "Result", json!({"type":"DeleteService","data":{"request_id":"s3","tenant_id":t,"service_name":"svc"}})),
+            ("CreateTenant", "TenantResult", json!({"type":"CreateTenant","data":{"request_id":"s4","tenant_id":t,"tenant_name":"New"}})),
+            ("DeleteTenant", "Result", json!({"type":"DeleteTenant","data":{"request_id":"s5","tenant_id":t}})),
+            ("Disconnect", "Result", json!({"type":"Disconnect","data":{"request_id":"s6"}})),
+        ];
+        for (name, reply_type, msg) in steps {
+            let rid = msg["data"]["request_id"].as_str().unwrap().to_string();
+            let r = call(&server, &mut admin, msg).await;
+            assert_eq!(r["type"], reply_type, "{name}: {r}");
+            assert_eq!(r["data"]["request_id"], rid, "{name}: the request_id must be echoed: {r}");
+        }
+        // without a request_id nothing is invented for Service, and a Result keeps its own
+        let r = call(&server, &mut admin, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc2","size":4096}})).await;
+        assert!(r["data"].get("request_id").is_none(), "{r}");
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
     }
 
     #[tokio::test]

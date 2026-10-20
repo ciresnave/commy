@@ -5,17 +5,17 @@ One release number for Commy and every SDK, so a developer knows which versions 
 portfolio PM allocates the number. `commy-wire` takes the same number as the Commy release it
 belongs to, because it is Commy's contract.
 
-State below is as read on 2026-10-20 at Commy `main` 0.16.0 (`c1bf721`); the SDK and dirty-ranges rows are those lanes' to correct.
+State below is as read on 2026-10-20 at Commy `main` 0.18.2; the SDK and dirty-ranges rows are those lanes' to correct.
 
 ## What is in place
 
 | Piece | Version read | Where |
 |-------|--------------|-------|
-| Commy server | 0.16.0 on `main` (crates.io had 0.4.1 when last searched; the PM publishes) | this repo |
+| Commy server | 0.18.2 on `main` (crates.io had 0.4.1 when last searched; the PM publishes) | this repo |
 | `commy-wire` | 0.4.0 published (the server speaks it since Commy 0.15.0) | crates.io |
 | `dirty-ranges` | 0.1.2 published | crates.io |
 | `role-system` | 1.3.0 (used for grants) | crates.io |
-| `commy-sdk-rust` | 0.10.1 on `main` (0.10.2 in sdk#24) against `commy-wire` 0.3.2 and `dirty-ranges =0.1.2`, to be moved to wire 0.4.0; crates.io shows 0.1.0 | SDK repo |
+| `commy-sdk-rust` | 0.13.0 on `main` against `commy-wire` 0.4.0 and `dirty-ranges =0.1.2`, both from crates.io; crates.io shows 0.1.0 (SDK lane, 2026-10-20) | SDK repo |
 
 Server rows of the plan (C1 to C6, C8 to C10) are merged, with R3's administration message (`SetLocalMapping`), R4 authentication, R5 durable state and R6 the durable audit log.
 

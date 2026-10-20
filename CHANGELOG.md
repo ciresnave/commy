@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.18.2
+- A success reply to an SDK-protocol request that carried a `request_id` now echoes it (`Service`, `TenantResult` and `Result`, as errors already did since 0.13.3). The `Result` for `DeleteService`, `DeleteTenant` and `Disconnect` used to carry a fresh random id that nothing could match. Without a `request_id` in the request nothing is added.
+- Docs: `RELEASE-PLAN.md` SDK row and `ROADMAP.md` R3 corrected (SDK 0.13.0 on wire 0.4.0, SDK end-to-end job exists).
 ## 0.18.1
 - CI hardening (CodeRipper SUP-001, SUP-008, WSP-001): every action is pinned to a commit SHA (`actions/checkout`, `actions/cache`, `dtolnay/rust-toolchain`), the workflow's default token is read-only and only the release job gets `contents: write`, checkouts do not persist credentials, every `cargo test` / `cargo build` uses `--locked`, the cache key includes `Cargo.lock`, and `.github/CODEOWNERS` names the owner.
 - Test fix: `a_wrong_or_expired_api_key_is_rejected` flipped the last character of a random key to `x`, so it left the key unchanged (and valid) about 1 time in 62 and failed the first CI run of this change; it now picks a different character.
