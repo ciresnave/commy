@@ -1,7 +1,7 @@
 # Roadmap
 
 Authoritative portfolio priorities live in the portfolio roadmap; this file records what is open in
-Commy itself. State is `main` at 0.11.x unless a row says otherwise.
+Commy itself. State is `main` at 0.16.x unless a row says otherwise.
 
 ## Done (server side of plan v11)
 
@@ -16,7 +16,7 @@ grants on role-system with the revocation rotation they trigger.
 |-----|------|-------|-------|
 | R1 | First coordinated release with the SDK(s) and the `commy-wire` layout freeze | open | Plan: `docs/RELEASE-PLAN.md`. Needs dirty-ranges 0.1.0 published and the Rust SDK's local mapping, trapping and rotation work merged. The wire layout stays unfrozen until then; any layout change is the next minor of `commy-wire`. |
 | R2 | Non-Linux write-trap tests | open (SDK / dirty-ranges lane) | The trapping default is gated per OS on the plan's uncovered-cases list; the README must name each OS and architecture TESTED or UNVERIFIED. Commy itself only carries the bytes. |
-| R3 | Local zero-copy sharing end to end | open | The server side exists (nonce handshake, `set_trusted_local`). Still missing: an administration message to open a service to local mapping (today only `Server::set_trusted_local`), and an SDK end-to-end run against the real binary. |
+| R3 | Local zero-copy sharing end to end | server side done (0.12.0) | The nonce handshake and `SetLocalMapping` exist; the SDK lane confirmed the flow end to end. A full SDK end-to-end job against the real binary is gate 3 of the release plan. |
 | R4 | Real authentication | done in 0.16.0 (verifier trait + wire types in 0.15.0; auth-framework API key + JWT in 0.16.0) | `CredentialVerifier`, identity from the credential subject, `commy-wire` 0.4.0 `Authenticate` / `AuthenticationResult`. The binary installs `FrameworkVerifier` unless dev auth is on; see `docs/AUTHENTICATION.md`. mTLS later. Client provisioning is the framework's admin tooling, outside Commy. |
 | R12 | Remove the MessagePack protocol (`WssMessage`) | after the wire freeze | A second, older protocol with its own `Authenticate` (development-only, refused unless `COMMY_ALLOW_DEV_AUTH=1`). |
 | R5 | Persistent grants and service registry | done (0.13.0) | On PersistAnt: services as records, grants as an append-only operation log replayed at start-up; write-through and fail closed (a revoke or a close that cannot be recorded is refused and not applied); tested with a real kill and restart of the binary. Not stored: sessions, nonces, rotations in flight. The operation log is not compacted yet. |

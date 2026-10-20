@@ -5,19 +5,19 @@ One release number for Commy and every SDK, so a developer knows which versions 
 portfolio PM allocates the number. `commy-wire` takes the same number as the Commy release it
 belongs to, because it is Commy's contract.
 
-State below is as read on 2026-10-20; the SDK and dirty-ranges columns are those lanes' to correct.
+State below is as read on 2026-10-20 at Commy `main` 0.16.0 (`c1bf721`); the SDK and dirty-ranges rows are those lanes' to correct.
 
 ## What is in place
 
 | Piece | Version read | Where |
 |-------|--------------|-------|
-| Commy server | 0.12.0 on `main` (crates.io had 0.4.1 when last searched; the PM publishes) | this repo |
-| `commy-wire` | 0.3.2 published | crates.io |
+| Commy server | 0.16.0 on `main` (crates.io had 0.4.1 when last searched; the PM publishes) | this repo |
+| `commy-wire` | 0.4.0 published (the server speaks it since Commy 0.15.0) | crates.io |
 | `dirty-ranges` | 0.1.2 published | crates.io |
 | `role-system` | 1.3.0 (used for grants) | crates.io |
-| `commy-sdk-rust` | 0.10.0 on `main` against `commy-wire` 0.3.1 and `dirty-ranges =0.1.2`; crates.io shows 0.1.0 | SDK repo |
+| `commy-sdk-rust` | 0.10.1 on `main` (0.10.2 in sdk#24) against `commy-wire` 0.3.2 and `dirty-ranges =0.1.2`, to be moved to wire 0.4.0; crates.io shows 0.1.0 | SDK repo |
 
-Server rows of the plan (C1 to C6, C8 to C10) are merged. R3's administration message is merged.
+Server rows of the plan (C1 to C6, C8 to C10) are merged, with R3's administration message (`SetLocalMapping`), R4 authentication, R5 durable state and R6 the durable audit log.
 
 ## Gate: what must be true before the wire layout is frozen
 
@@ -50,9 +50,8 @@ Every step is its own PR with a version line; none merges before the previous on
 
 ## Known gaps to state in the release notes
 
-- Authentication is development-only (`COMMY_ALLOW_DEV_AUTH=1`); a client names itself. (R4)
-- Grants are in memory and lost on restart. (R5)
-- The audit trail is in memory and on stderr. (R6)
+- Authentication is API key or JWT checked by `auth-framework`, one database per tenant; creating tenants, users and keys is that framework's tooling, not Commy's (`docs/AUTHENTICATION.md`). Basic and custom credentials are refused, mTLS is later, and the old MessagePack protocol is development-only until it is removed (R12).
+- The grant operation log and the audit log are durable but not compacted, and the audit log is not tamper-evident.
 - Limits and timeouts are environment variables, not a configuration file. (R7)
 - Service files carry no per-file permissions; the unlisted tenant directory and a random name are the
   barrier on the server's machine. (R8)
