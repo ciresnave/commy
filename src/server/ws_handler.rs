@@ -2553,6 +2553,16 @@ async fn handle_sdk_message(
                 .find(|(_, r)| r.tenant_name == tenant_id && r.service_name == service_name)
                 .map(|(id, _)| id.clone());
 
+            // A service the client has no access to looks the same as one that does not exist.
+            let found = found.filter(|id| {
+                session_allows(
+                    &server_guard,
+                    session,
+                    id,
+                    crate::server::grants::Action::Read,
+                )
+            });
+
             match found {
                 Some(service_id) => {
                     println!(
@@ -2612,35 +2622,39 @@ async fn handle_sdk_message(
                 }));
             }
 
-            // Check delete_service permission
-            println!("[DeleteService] Checking permissions");
-            if let Some(perms) = &session.permissions {
-                if !perms.has_permission(&crate::auth::Permission::ServiceDelete) {
-                    return Some(serde_json::json!({
-                        "type": "Error",
-                        "data": {
-                            "code": "PERMISSION_DENIED",
-                            "message": "Permission denied: delete_service required"
-                        }
-                    }));
-                }
+            // Which service? It is named, not identified, in this message.
+            let server_guard = server.read().await;
+            let Some(service_id) = server_guard
+                .service_registry
+                .iter()
+                .find(|(_, r)| r.tenant_name == tenant_id && r.service_name == service_name)
+                .map(|(id, _)| id.clone())
+            else {
+                return Some(wire_error(
+                    commy_wire::ErrorCode::NotFound,
+                    &format!("Service '{}' not found in tenant '{}'", service_name, tenant_id),
+                    None,
+                ));
+            };
+            // Deleting a service takes service:admin on that service (a tenant admin has it too).
+            if !session_allows(
+                &server_guard,
+                session,
+                &service_id,
+                crate::server::grants::Action::Admin,
+            ) {
+                return Some(wire_error(
+                    commy_wire::ErrorCode::PermissionDenied,
+                    "Needs service:admin on this service",
+                    None,
+                ));
             }
 
-            // TODO: Actual service deletion deferred to rsqlx integration
-            // For now, just return success response immediately
-            println!(
-                "[DeleteService] Deleting service '{}' from tenant '{}'",
-                service_name, tenant_id
-            );
-
-            Some(serde_json::json!({
-                "type": "Result",
-                "data": {
-                    "request_id": uuid::Uuid::new_v4().to_string(),
-                    "success": true,
-                    "message": "Service deleted successfully"
-                }
-            }))
+            // Not built yet. Say so: answering "success" while deleting nothing is a lie on the wire.
+            Some(error_json(
+                "NOT_IMPLEMENTED",
+                "DeleteService is not implemented; the service was not deleted",
+            ))
         }
 
         "CreateTenant" => {
@@ -3107,23 +3121,20 @@ mod sdk_tests {
         cleanup_tenant(&tenant_id);
     }
 
-    // ── DeleteService success ──────────────────────────────────────────────────
+    // ── DeleteService (not implemented yet: it must say so) ────────────────────
 
     #[tokio::test]
-    async fn test_sdk_delete_service_success() {
+    async fn test_sdk_delete_service_says_it_is_not_implemented_and_deletes_nothing() {
         let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let _service_id =
+        let service_id =
             create_service(Arc::clone(&server), &mut session, &tenant_id, "doomed").await;
 
         let resp = handle_sdk_message(
             serde_json::json!({
                 "type": "DeleteService",
-                "data": {
-                    "tenant_id": tenant_id,
-                    "service_name": "doomed"
-                }
+                "data": { "tenant_id": tenant_id, "service_name": "doomed" }
             }),
             &mut session,
             Arc::clone(&server),
@@ -3131,14 +3142,102 @@ mod sdk_tests {
         .await
         .unwrap();
 
-        assert_eq!(
-            resp["type"], "Result",
-            "DeleteService must return Result: {resp}"
+        assert_eq!(resp["type"], "Error", "must not report success: {resp}");
+        assert_eq!(resp["data"]["code"], "NOT_IMPLEMENTED", "{resp}");
+        assert!(
+            server.read().await.service_registry.contains_key(&service_id),
+            "nothing was deleted, and the reply must not claim otherwise"
         );
-        assert_eq!(
-            resp["data"]["success"], true,
-            "DeleteService must report success: {resp}"
-        );
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_delete_service_needs_service_admin_on_that_service() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let service_id = create_service(Arc::clone(&server), &mut admin, &tenant_id, "svc").await;
+        // a second client of the tenant that holds only service:write on it
+        server
+            .read()
+            .await
+            .grants
+            .grant(
+                &tenant_id,
+                "writer",
+                Some(&service_id),
+                &[crate::server::grants::Spec::Service(crate::server::grants::Action::Write)],
+            )
+            .unwrap();
+        let mut writer = ClientSession::new();
+        let r = handle_sdk_message(
+            serde_json::json!({"type":"Authenticate","data":{"tenant_id":tenant_id,"api_key":"x","client_id":"writer","dev_scopes":[]}}),
+            &mut writer,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["data"]["success"], true, "{r}");
+        let resp = handle_sdk_message(
+            serde_json::json!({"type":"DeleteService","data":{"tenant_id":tenant_id,"service_name":"svc"}}),
+            &mut writer,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp["data"]["code"], "PERMISSION_DENIED", "{resp}");
+        cleanup_tenant(&tenant_id);
+    }
+
+    #[tokio::test]
+    async fn test_sdk_delete_service_of_an_unknown_name_is_not_found() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let resp = handle_sdk_message(
+            serde_json::json!({"type":"DeleteService","data":{"tenant_id":tenant_id,"service_name":"nope"}}),
+            &mut session,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp["data"]["code"], "NOT_FOUND", "{resp}");
+        cleanup_tenant(&tenant_id);
+    }
+
+    // GetService names a service by name: it must not hand out the id of one the client cannot reach.
+    #[tokio::test]
+    async fn test_sdk_get_service_hides_services_the_client_has_no_access_to() {
+        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = make_authed_session(Arc::clone(&server), &tenant_id).await;
+        let _id = create_service(Arc::clone(&server), &mut admin, &tenant_id, "secret").await;
+        let mut reader = ClientSession::new();
+        // tenant-level read, but this client's access to "secret" was never granted... and is denied
+        let r = handle_sdk_message(
+            serde_json::json!({"type":"Authenticate","data":{"tenant_id":tenant_id,"api_key":"x","client_id":"nosy","dev_scopes":["service:read"]}}),
+            &mut reader,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["data"]["success"], true, "{r}");
+        let sid = server.read().await.service_registry.keys().next().unwrap().clone();
+        server
+            .read()
+            .await
+            .grants
+            .revoke(&tenant_id, "nosy", Some(&sid), &[])
+            .unwrap();
+        let resp = handle_sdk_message(
+            serde_json::json!({"type":"GetService","data":{"tenant_id":tenant_id,"service_name":"secret"}}),
+            &mut reader,
+            Arc::clone(&server),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp["type"], "Error", "the id must not be handed out: {resp}");
+        assert!(resp["data"].get("service_id").is_none(), "{resp}");
         cleanup_tenant(&tenant_id);
     }
 

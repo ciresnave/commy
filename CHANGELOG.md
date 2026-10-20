@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1
+- **`DeleteService` no longer lies.** It answered `{"type":"Result","success":true,"message":"Service deleted successfully"}` while deleting nothing. It now resolves the service, needs `service:admin` on it (`PERMISSION_DENIED` otherwise, `NOT_FOUND` for an unknown name) and answers `NOT_IMPLEMENTED` ("the service was not deleted"). The old tenant-level `ServiceDelete` permission check is gone: service-scoped admin replaces it. The real deletion follows.
+- `GetService` (by name) only returns the id of a service the client can read; one it cannot reach looks like one that does not exist (it used to check only a tenant-level `ServiceRead`, so a client denied on one service could still learn its id).
+
 ## 0.13.0
 - **R5: durable state** on PersistAnt 0.8.21. The service registry (service id, tenant, name, file path, `file_id`, generation, whether it is open to local mapping) is stored as one record per service; the grants as an append-only log of operations replayed at start-up; the creator's `service:admin` grant, `Grant`, `Revoke`, `SetLocalMapping` and every rotation commit are recorded. `COMMY_STATE_DIR` names the directory (default `./commy_state`, created private to the server and administrators; `off` disables it). A restart finds the same service ids, files, `file_id`s and grants. Sessions, nonces, rotations in flight and per-file sequence numbers are not stored (clients resynchronise).
 - **Fail closed.** The change is recorded first and refused (`INTERNAL_ERROR`, audited) if it cannot be: a revoke that was not recorded is not applied, so a restart cannot give the access back; closing local mapping, creating a service and a rotation commit follow the same rule.
