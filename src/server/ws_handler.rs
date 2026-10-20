@@ -2650,11 +2650,86 @@ async fn handle_sdk_message(
                 ));
             }
 
-            // Not built yet. Say so: answering "success" while deleting nothing is a lie on the wire.
-            Some(error_json(
-                "NOT_IMPLEMENTED",
-                "DeleteService is not implemented; the service was not deleted",
-            ))
+            // A service in the middle of a rotation cannot be deleted from under it.
+            if server_guard.rotations.active(&service_id).is_some() {
+                return Some(wire_error(
+                    commy_wire::ErrorCode::RateLimited,
+                    "A rotation of this service is running; try again when it has finished",
+                    None,
+                ));
+            }
+            drop(server_guard);
+
+            let who = client_key(session);
+            let mut guard = server.write().await;
+            // Record the deletion first and refuse if that fails: a service that was removed but
+            // is still stored would come back, with its file gone, after a restart.
+            if let Err(e) = guard.forget_row(&service_id) {
+                guard.audit(&format!(
+                    "service delete REFUSED service={service_id} by={who}: cannot record it: {e}"
+                ));
+                return Some(wire_error(
+                    commy_wire::ErrorCode::InternalError,
+                    "Could not record the deletion",
+                    None,
+                ));
+            }
+            let Some(record) = guard.service_registry.remove(&service_id) else {
+                return Some(wire_error(commy_wire::ErrorCode::NotFound, "Unknown service", None));
+            };
+            if let Some(tenant) = guard.tenants.get_mut(tenant_id) {
+                tenant.remove_service(&record.service_name);
+            }
+            guard.retired_files.insert(record.file_id);
+            // The grants named this service id, which is never reused; drop them so nothing
+            // lingers in the grant list (and the log, so a replay does not resurrect them).
+            let mut clients: Vec<String> = guard
+                .grants
+                .list(tenant_id, None, Some(&service_id))
+                .into_iter()
+                .filter(|e| e.service_id.as_deref() == Some(service_id.as_str()))
+                .map(|e| e.client_id)
+                .collect();
+            clients.sort();
+            clients.dedup();
+            for client in clients {
+                if let Err(e) = guard.revoke(tenant_id, &client, Some(&service_id), &[]) {
+                    guard.audit(&format!(
+                        "service delete: could not drop {client}'s grants on {service_id}: {e}"
+                    ));
+                }
+            }
+            // Everyone on the file is told and dropped; unflushed writes are lost, not replayed.
+            let members = guard.forwarder.take_file(record.file_id);
+            guard.audit(&format!(
+                "service DELETED service={service_id} name={} tenant={tenant_id} by={who}",
+                record.service_name
+            ));
+            for m in members {
+                let _ = m.tx.send(crate::server::forwarding::Outbound::Text(wire_json(
+                    &commy_wire::ControlMessage::Loss(commy_wire::Loss {
+                        service_id: service_id.clone(),
+                        file_id: record.file_id,
+                        kind: commy_wire::LossKind::Revoked,
+                        ranges: Vec::new(),
+                    }),
+                )));
+            }
+            // Best effort: a local client may still have the file mapped (Windows then refuses).
+            if let Err(e) = std::fs::remove_file(&record.file_path) {
+                guard.audit(&format!(
+                    "service delete: could not remove {}: {e}",
+                    record.file_path
+                ));
+            }
+            Some(serde_json::json!({
+                "type": "Result",
+                "data": {
+                    "request_id": uuid::Uuid::new_v4().to_string(),
+                    "success": true,
+                    "message": "Service deleted"
+                }
+            }))
         }
 
         "CreateTenant" => {
@@ -3121,35 +3196,7 @@ mod sdk_tests {
         cleanup_tenant(&tenant_id);
     }
 
-    // ── DeleteService (not implemented yet: it must say so) ────────────────────
-
-    #[tokio::test]
-    async fn test_sdk_delete_service_says_it_is_not_implemented_and_deletes_nothing() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "doomed").await;
-
-        let resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "DeleteService",
-                "data": { "tenant_id": tenant_id, "service_name": "doomed" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(resp["type"], "Error", "must not report success: {resp}");
-        assert_eq!(resp["data"]["code"], "NOT_IMPLEMENTED", "{resp}");
-        assert!(
-            server.read().await.service_registry.contains_key(&service_id),
-            "nothing was deleted, and the reply must not claim otherwise"
-        );
-        cleanup_tenant(&tenant_id);
-    }
+    // ── DeleteService (permission and lookup; the deletion itself is in delete_service_tests) ──
 
     #[tokio::test]
     async fn test_sdk_delete_service_needs_service_admin_on_that_service() {
@@ -6135,6 +6182,224 @@ mod persistence_tests {
         let id = create(&server, &mut admin, &t, "svc").await;
         grant(&server, &mut admin, "bob", &id, "service:read").await;
         assert!(server.read().await.grants.allows(&t, "bob", &id, crate::server::grants::Action::Read));
+        cleanup(&t);
+    }
+}
+
+#[cfg(test)]
+mod delete_service_tests {
+    use super::*;
+    use crate::persist::Persistence;
+    use crate::server::forwarding::Outbound;
+    use serde_json::json;
+    use std::time::Duration;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
+    struct Peer {
+        s: ClientSession,
+        rx: UnboundedReceiver<Outbound>,
+    }
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    fn tenant() -> String {
+        format!("ds_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn cleanup(t: &str) {
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
+    }
+
+    async fn peer(server: &Arc<RwLock<Server>>, t: &str, id: &str, scopes: Option<serde_json::Value>) -> Peer {
+        let mut data = json!({"tenant_id": t, "api_key": "x", "client_id": id});
+        if let Some(sc) = scopes {
+            data["dev_scopes"] = sc;
+        }
+        let mut s = ClientSession::new();
+        let r = call(server, &mut s, json!({"type":"Authenticate","data":data})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        let (tx, rx) = unbounded_channel();
+        s.outbound = Some(tx);
+        Peer { s, rx }
+    }
+
+    async fn create(server: &Arc<RwLock<Server>>, p: &mut Peer, t: &str, name: &str) -> (String, u32, String) {
+        let r = call(server, &mut p.s, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":name,"size":4096}})).await;
+        assert_eq!(r["type"], "Service", "{r}");
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        let g = server.read().await;
+        let rec = &g.service_registry[&id];
+        (id.clone(), rec.file_id, rec.file_path.clone())
+    }
+
+    fn delete(t: &str, name: &str) -> serde_json::Value {
+        json!({"type":"DeleteService","data":{"tenant_id":t,"service_name":name}})
+    }
+
+    async fn join_remote(server: &Arc<RwLock<Server>>, p: &mut Peer, file_id: u32) {
+        let r = call(server, &mut p.s, json!({"type":"Resync","data":{"request_id":"rs","file_id":file_id}})).await;
+        assert_eq!(r["type"], "ResyncDone", "{r}");
+        p.s.outbound_frames.clear();
+    }
+
+    #[tokio::test]
+    async fn deleting_a_service_removes_it_everywhere_and_says_so_truthfully() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", None).await;
+        let (id, fid, path) = create(&server, &mut admin, &t, "doomed").await;
+        call(&server, &mut admin.s, json!({"type":"Grant","data":{"request_id":"g","client_id":"bob","service_id":id,"permissions":["service:read"]}})).await;
+        assert!(std::path::Path::new(&path).exists());
+
+        let r = call(&server, &mut admin.s, delete(&t, "doomed")).await;
+        assert_eq!(r["type"], "Result", "{r}");
+        assert_eq!(r["data"]["success"], true, "{r}");
+
+        let g = server.read().await;
+        assert!(!g.service_registry.contains_key(&id), "gone from the registry");
+        assert!(g.tenants[&t].get_service_by_name("doomed").is_none(), "gone from the tenant");
+        assert!(g.retired_files.contains(&fid), "its file id is retired");
+        assert!(!std::path::Path::new(&path).exists(), "its file is removed");
+        assert!(g.grants.list(&t, None, Some(&id)).iter().all(|e| e.service_id.is_none()), "its grants are dropped");
+        drop(g);
+        // and the wire agrees
+        let r = call(&server, &mut admin.s, json!({"type":"GetService","data":{"tenant_id":t,"service_name":"doomed"}})).await;
+        assert_eq!(r["data"]["code"], "NotFound", "{r}");
+        let r = call(&server, &mut admin.s, json!({"type":"GetServiceFilePath","data":{"request_id":"p","service_id":id}})).await;
+        assert_eq!(r["data"]["code"], "NOT_FOUND", "{r}");
+        let r = call(&server, &mut admin.s, json!({"type":"Resync","data":{"request_id":"r","file_id":fid}})).await;
+        assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn members_of_a_deleted_service_are_told_and_dropped() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", None).await;
+        let (_id, fid, _p) = create(&server, &mut admin, &t, "svc").await;
+        join_remote(&server, &mut admin, fid).await;
+        call(&server, &mut admin.s, delete(&t, "svc")).await;
+        let m = tokio::time::timeout(Duration::from_secs(2), admin.rx.recv()).await;
+        let Ok(Some(Outbound::Text(v))) = m else { panic!("expected a Loss, got {m:?}") };
+        assert_eq!((v["type"].as_str(), v["data"]["kind"].as_str()), (Some("Loss"), Some("REVOKED")), "{v}");
+        assert_eq!(v["data"]["file_id"], fid);
+        assert_eq!(server.read().await.forwarder.member_count(fid), 0);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn only_a_service_admin_may_delete_and_only_that_service() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", None).await;
+        let (a, _, _) = create(&server, &mut admin, &t, "a").await;
+        let (b, _, _) = create(&server, &mut admin, &t, "b").await;
+        for (who, svc, perm) in [("writer", &a, "service:write"), ("adminb", &b, "service:admin")] {
+            call(&server, &mut admin.s, json!({"type":"Grant","data":{"request_id":"g","client_id":who,"service_id":svc,"permissions":[perm]}})).await;
+        }
+        let mut writer = peer(&server, &t, "writer", Some(json!([]))).await;
+        assert_eq!(call(&server, &mut writer.s, delete(&t, "a")).await["data"]["code"], "PERMISSION_DENIED");
+        let mut adminb = peer(&server, &t, "adminb", Some(json!([]))).await;
+        assert_eq!(call(&server, &mut adminb.s, delete(&t, "a")).await["data"]["code"], "PERMISSION_DENIED", "admin of b cannot delete a");
+        assert_eq!(call(&server, &mut adminb.s, delete(&t, "b")).await["type"], "Result", "admin of b deletes b");
+        let g = server.read().await;
+        assert!(g.service_registry.contains_key(&a) && !g.service_registry.contains_key(&b));
+        drop(g);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn deleting_one_service_leaves_the_others_and_tenant_wide_grants() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", None).await;
+        let (a, _, _) = create(&server, &mut admin, &t, "a").await;
+        let (b, _, _) = create(&server, &mut admin, &t, "b").await;
+        call(&server, &mut admin.s, json!({"type":"Grant","data":{"request_id":"g","client_id":"bob","permissions":["service:read"]}})).await;
+        call(&server, &mut admin.s, json!({"type":"Grant","data":{"request_id":"g","client_id":"bob","service_id":a,"permissions":["service:write"]}})).await;
+        call(&server, &mut admin.s, delete(&t, "a")).await;
+        let g = server.read().await;
+        assert!(g.service_registry.contains_key(&b));
+        assert!(g.grants.allows(&t, "bob", &b, crate::server::grants::Action::Read), "tenant-wide grant remains");
+        assert!(g.grants.allows(&t, "admin", &b, crate::server::grants::Action::Admin), "other services keep their admin");
+        drop(g);
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn deleting_twice_or_an_unknown_name_is_not_found() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = peer(&server, &t, "admin", None).await;
+        create(&server, &mut admin, &t, "svc").await;
+        assert_eq!(call(&server, &mut admin.s, delete(&t, "svc")).await["type"], "Result");
+        assert_eq!(call(&server, &mut admin.s, delete(&t, "svc")).await["data"]["code"], "NOT_FOUND");
+        assert_eq!(call(&server, &mut admin.s, delete(&t, "never")).await["data"]["code"], "NOT_FOUND");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_service_in_the_middle_of_a_rotation_is_not_deleted() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(
+            Server::with_dev_auth(true).with_drain_timeout(Duration::from_secs(5)).with_rotation_min_interval(Duration::ZERO),
+        ));
+        let mut admin = peer(&server, &t, "admin", None).await;
+        let (id, fid, _p) = create(&server, &mut admin, &t, "svc").await;
+        join_remote(&server, &mut admin, fid).await;
+        let acc = call(&server, &mut admin.s, json!({"type":"RotateRequest","data":{"request_id":"q","service_id":id,"reason":"RESIZE","new_size":8192}})).await;
+        assert_eq!(acc["type"], "RotationAccepted", "{acc}");
+        let r = call(&server, &mut admin.s, delete(&t, "svc")).await;
+        assert_eq!(r["data"]["code"], "RATE_LIMITED", "{r}");
+        assert!(server.read().await.service_registry.contains_key(&id));
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_deletion_survives_a_restart() {
+        let t = tenant();
+        let state = tempfile::tempdir().unwrap();
+        {
+            let mut s = Server::with_dev_auth(true);
+            s.enable_persistence(state.path()).unwrap();
+            let server = Arc::new(RwLock::new(s));
+            let mut admin = peer(&server, &t, "admin", None).await;
+            create(&server, &mut admin, &t, "keep").await;
+            create(&server, &mut admin, &t, "doomed").await;
+            assert_eq!(call(&server, &mut admin.s, delete(&t, "doomed")).await["type"], "Result");
+        }
+        let mut s = Server::with_dev_auth(true);
+        let report = s.enable_persistence(state.path()).unwrap();
+        assert_eq!(report.services_loaded, 1, "only the surviving service comes back: {report:?}");
+        assert!(s.service_registry.values().all(|r| r.service_name == "keep"));
+        cleanup(&t);
+    }
+
+    /// Fail closed: a deletion that cannot be recorded is refused and the service stays usable.
+    #[tokio::test]
+    async fn a_deletion_that_cannot_be_recorded_is_refused_and_changes_nothing() {
+        let t = tenant();
+        let mut s = Server::with_dev_auth(true);
+        // writes: 1 creator grant, 2 service row; the deletion (3rd) fails
+        s.use_persistence(
+            Persistence::open_with(persistant::Config::Faulty {
+                inner: Box::new(persistant::Config::Memory),
+                faults: persistant::Faults::fail_writes_after(2),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let server = Arc::new(RwLock::new(s));
+        let mut admin = peer(&server, &t, "admin", None).await;
+        let (id, _fid, path) = create(&server, &mut admin, &t, "svc").await;
+        let r = call(&server, &mut admin.s, delete(&t, "svc")).await;
+        assert_eq!(r["type"], "Error", "{r}");
+        assert_eq!(r["data"]["code"], "INTERNAL_ERROR", "{r}");
+        assert!(server.read().await.service_registry.contains_key(&id));
+        assert!(std::path::Path::new(&path).exists(), "the file is still there");
         cleanup(&t);
     }
 }

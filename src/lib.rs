@@ -137,6 +137,11 @@ impl Tenant {
         Ok(())
     }
 
+    /// Forget a registered service (its mapping is dropped). Returns whether it existed.
+    pub fn remove_service(&mut self, service_name: &str) -> bool {
+        self.services.remove(service_name).is_some()
+    }
+
     /// Get an immutable reference to a registered service by its logical name.
     pub fn get_service_by_name(&self, service_name: &str) -> Option<&Service> {
         self.services.get(service_name)
@@ -397,6 +402,14 @@ impl Server {
         match &self.persistence {
             Some(p) => p.put_service(id, row),
             None => Ok(()),
+        }
+    }
+
+    /// Forget the stored row of a service (no-op without persistence).
+    pub fn forget_row(&self, id: &str) -> Result<(), persist::PersistError> {
+        match (&self.persistence, self.service_registry.get(id)) {
+            (Some(p), Some(r)) => p.delete_service(id, &r.tenant_name, &r.service_name),
+            _ => Ok(()),
         }
     }
 

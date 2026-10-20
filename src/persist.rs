@@ -56,6 +56,19 @@ pub struct GrantOp {
     pub permissions: Vec<String>,
 }
 
+/// Marks a service as deleted. A write (atomic replace), so recording a deletion is as durable and as
+/// testable as recording anything else; the service row is removed afterwards, best effort.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tombstone {
+    pub tenant: String,
+    pub name: String,
+}
+
+impl Record for Tombstone {
+    const KIND: &'static str = "commy-service-tombstone";
+    const SCHEMA: u32 = 1;
+}
+
 impl Record for GrantOp {
     const KIND: &'static str = "commy-grant-op";
     const SCHEMA: u32 = 1;
@@ -147,16 +160,35 @@ impl Persistence {
             .map_err(err)
     }
 
-    /// Forget a service.
-    pub fn delete_service(&self, id: &str) -> Result<(), PersistError> {
-        self.store.delete(&format!("services/{id}")).map_err(err)
+    /// Forget a service. The tombstone is written first (so a failure leaves the service in place);
+    /// the row is then removed, and a failure to remove it is harmless because the tombstone wins.
+    pub fn delete_service(&self, id: &str, tenant: &str, name: &str) -> Result<(), PersistError> {
+        self.store
+            .put_record(
+                &format!("deleted/{id}"),
+                &Tombstone {
+                    tenant: tenant.to_string(),
+                    name: name.to_string(),
+                },
+            )
+            .map_err(err)?;
+        let _ = self.store.delete(&format!("services/{id}"));
+        Ok(())
     }
 
-    /// Every stored service, with its id.
+    /// Every stored service, with its id, except the deleted ones.
     pub fn load_services(&self) -> Result<Vec<(String, ServiceRow)>, PersistError> {
         let mut out = Vec::new();
+        let deleted: std::collections::HashSet<String> = self
+            .keys("deleted/")?
+            .into_iter()
+            .map(|k| k.trim_start_matches("deleted/").to_string())
+            .collect();
         for key in self.keys("services/")? {
             let id = key.trim_start_matches("services/").to_string();
+            if deleted.contains(&id) {
+                continue;
+            }
             if let Some(row) = self.store.get_record::<ServiceRow>(&key).map_err(err)? {
                 out.push((id, row));
             }
@@ -225,9 +257,32 @@ mod tests {
         changed.generation = 3;
         changed.trusted_local = true;
         p.put_service("a", &changed).unwrap();
-        p.delete_service("b").unwrap();
+        p.delete_service("b", "t", "svc2").unwrap();
         let all = p.load_services().unwrap();
         assert_eq!(all, vec![("a".to_string(), changed)]);
+    }
+
+    #[test]
+    fn a_deleted_service_stays_deleted_even_if_its_row_comes_back() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        p.put_service("a", &row(1)).unwrap();
+        p.delete_service("a", "t", "svc1").unwrap();
+        assert!(p.load_services().unwrap().is_empty());
+        // a row written again under the same id (a stale copy) is still ignored: the tombstone wins
+        p.put_service("a", &row(1)).unwrap();
+        assert!(p.load_services().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_deletion_that_cannot_be_recorded_leaves_the_service_stored() {
+        let p = Persistence::open_with(Config::Faulty {
+            inner: Box::new(Config::Memory),
+            faults: persistant::Faults::fail_writes_after(1),
+        })
+        .unwrap();
+        p.put_service("a", &row(1)).unwrap();
+        assert!(p.delete_service("a", "t", "svc1").is_err());
+        assert_eq!(p.load_services().unwrap().len(), 1);
     }
 
     #[test]
