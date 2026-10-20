@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.3
+- Tenant directories (C8): a newly created `tenant_<id>` directory can be traversed by other accounts but listed only by the Commy server and administrators. Unix: mode `0711`. Windows: inheritance removed; SYSTEM, Administrators and the running account get full control (inherited); `Users` get traverse on the directory and modify on the files inside (inherit-only), via `icacls`. This keeps the plan's barrier (a long random file name in a directory others cannot list; a local client opens the file by its full path) without per-file permissions (Q9/Q10, deferred). An existing directory is left as the operator set it; if the restriction cannot be applied the directory is not used.
+- The local-mapping nonce file is now owner-only on Windows too (it used to inherit the directory's grant to other accounts); Unix was already `0600`.
+- Verified: ACL text and mode in tests on Windows and Linux; on Linux also by hand with a second account (`nobody` could open a file by its full path and could not list the directory). **Not verified on Windows with a second real account** (the plan's spike already noted this), nor with antivirus.
+
 ## 0.11.2
 - Fix (dev authentication identity): `Authenticate` never set `client_id`, so grants were filed under the session id, which no client ever learned: a grant could not target a client over the wire and a client holding no grant could not exist. Now `Authenticate` honours `client_id` (1 to 128 characters of letters, digits and `_ - . @ :`; anything else is refused), falls back to the session id when none is given, and returns the id in `AuthenticationResult.client_id`. The MessagePack `Authenticate` sets it too. Development authentication still trusts the claim, so any dev client can claim any id; it is development only.
 - New, development authentication only: `dev_scopes` in `Authenticate` (a list of scopes such as `["read"]`, or `[]` for none) gives exactly those permissions instead of administrator, so a test client can be a client that holds no grant. Absent means administrator, as before.

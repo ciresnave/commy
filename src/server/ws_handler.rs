@@ -2341,7 +2341,7 @@ async fn handle_sdk_message(
             };
             let file_path = format!("{}/service_{}.mem", tenant_dir, service_id);
 
-            if let Err(e) = std::fs::create_dir_all(&tenant_dir) {
+            if let Err(e) = crate::private_dir::create_private(std::path::Path::new(&tenant_dir)) {
                 return Some(serde_json::json!({
                     "type": "Error",
                     "data": { "code": "InternalError", "message": format!("Failed to create tenant directory: {}", e) }
