@@ -38,62 +38,6 @@ pub enum WssMessage {
         expires_in_seconds: Option<u64>,
     },
 
-    /// Client->Server: Request to read variables from a service
-    GetVariables {
-        session_id: ClientSessionId,
-        tenant_id: String,
-        service_name: String,
-        variable_names: Vec<String>,
-    },
-
-    /// Server->Client: Variable data response
-    VariablesData {
-        tenant_id: String,
-        service_name: String,
-        variables: std::collections::HashMap<String, Vec<u8>>,
-        timestamp: String,
-    },
-
-    /// Client->Server: Write variables to a service
-    SetVariables {
-        session_id: ClientSessionId,
-        tenant_id: String,
-        service_name: String,
-        variables: std::collections::HashMap<String, Vec<u8>>,
-    },
-
-    /// Server->Client: Variable write acknowledgment
-    VariablesUpdated {
-        success: bool,
-        message: String,
-        service_name: String,
-    },
-
-    /// Server->Client: Broadcast when other clients modify variables
-    VariableChanged {
-        tenant_id: String,
-        service_name: String,
-        variable_name: String,
-        new_value: Vec<u8>,
-        changed_by_client: Option<String>,
-        timestamp: String,
-    },
-
-    /// Client->Server: Subscribe to variable changes
-    Subscribe {
-        session_id: ClientSessionId,
-        tenant_id: String,
-        service_name: String,
-        variable_names: Vec<String>,
-    },
-
-    /// Server->Client: Subscription acknowledgment
-    SubscriptionAck {
-        success: bool,
-        message: String,
-        service_name: String,
-    },
-
     /// Client->Server: Heartbeat/keepalive
     Heartbeat { session_id: ClientSessionId },
 
@@ -179,13 +123,6 @@ impl WssMessage {
         match self {
             WssMessage::Authenticate { .. } => "Authenticate",
             WssMessage::AuthenticationResponse { .. } => "AuthenticationResponse",
-            WssMessage::GetVariables { .. } => "GetVariables",
-            WssMessage::VariablesData { .. } => "VariablesData",
-            WssMessage::SetVariables { .. } => "SetVariables",
-            WssMessage::VariablesUpdated { .. } => "VariablesUpdated",
-            WssMessage::VariableChanged { .. } => "VariableChanged",
-            WssMessage::Subscribe { .. } => "Subscribe",
-            WssMessage::SubscriptionAck { .. } => "SubscriptionAck",
             WssMessage::Heartbeat { .. } => "Heartbeat",
             WssMessage::HeartbeatAck { .. } => "HeartbeatAck",
             WssMessage::PermissionRevoked { .. } => "PermissionRevoked",
@@ -363,130 +300,6 @@ mod tests {
         assert!(!session.is_healthy(30)); // Queue growing without heartbeat ack
     }
 
-    #[test]
-    fn test_all_message_type_names() {
-        let cases: &[(&WssMessage, &str)] = &[
-            (&WssMessage::AuthenticationResponse {
-                success: true,
-                message: String::new(),
-                server_version: String::new(),
-                token: None,
-                expires_in_seconds: None,
-            }, "AuthenticationResponse"),
-            (&WssMessage::GetVariables {
-                session_id: String::new(),
-                tenant_id: String::new(),
-                service_name: String::new(),
-                variable_names: vec![],
-            }, "GetVariables"),
-            (&WssMessage::VariablesData {
-                tenant_id: String::new(),
-                service_name: String::new(),
-                variables: Default::default(),
-                timestamp: String::new(),
-            }, "VariablesData"),
-            (&WssMessage::SetVariables {
-                session_id: String::new(),
-                tenant_id: String::new(),
-                service_name: String::new(),
-                variables: Default::default(),
-            }, "SetVariables"),
-            (&WssMessage::VariablesUpdated {
-                success: true,
-                message: String::new(),
-                service_name: String::new(),
-            }, "VariablesUpdated"),
-            (&WssMessage::VariableChanged {
-                tenant_id: String::new(),
-                service_name: String::new(),
-                variable_name: String::new(),
-                new_value: vec![],
-                changed_by_client: None,
-                timestamp: String::new(),
-            }, "VariableChanged"),
-            (&WssMessage::Subscribe {
-                session_id: String::new(),
-                tenant_id: String::new(),
-                service_name: String::new(),
-                variable_names: vec![],
-            }, "Subscribe"),
-            (&WssMessage::SubscriptionAck {
-                success: true,
-                message: String::new(),
-                service_name: String::new(),
-            }, "SubscriptionAck"),
-            (&WssMessage::HeartbeatAck {
-                timestamp: String::new(),
-            }, "HeartbeatAck"),
-            (&WssMessage::PermissionRevoked {
-                reason: String::new(),
-                detail: String::new(),
-            }, "PermissionRevoked"),
-            (&WssMessage::FileMigration {
-                old_service_path: String::new(),
-                new_service_path: String::new(),
-                service_name: String::new(),
-                reason: String::new(),
-            }, "FileMigration"),
-            (&WssMessage::MigrationAck {
-                success: true,
-                service_name: String::new(),
-            }, "MigrationAck"),
-            (&WssMessage::CheckPermission {
-                session_id: String::new(),
-                tenant_id: String::new(),
-                permission: String::new(),
-            }, "CheckPermission"),
-            (&WssMessage::PermissionResponse {
-                has_permission: true,
-            }, "PermissionResponse"),
-            (&WssMessage::TokenSync {
-                client_id: String::new(),
-                token: String::new(),
-                tenant_id: String::new(),
-                permissions: String::new(),
-                expires_at: String::new(),
-            }, "TokenSync"),
-            (&WssMessage::ClusterPing {
-                node_id: String::new(),
-                timestamp: String::new(),
-            }, "ClusterPing"),
-            (&WssMessage::ClusterPingResponse {
-                node_id: String::new(),
-                timestamp: String::new(),
-            }, "ClusterPingResponse"),
-            (&WssMessage::Error {
-                code: String::new(),
-                message: String::new(),
-                details: None,
-            }, "Error"),
-            (&WssMessage::Ack {
-                message_id: String::new(),
-            }, "Ack"),
-            (&WssMessage::Logout {
-                session_id: String::new(),
-                token: String::new(),
-            }, "Logout"),
-            (&WssMessage::LogoutResponse {
-                success: true,
-                message: String::new(),
-            }, "LogoutResponse"),
-            (&WssMessage::RefreshToken {
-                session_id: String::new(),
-                current_token: String::new(),
-            }, "RefreshToken"),
-            (&WssMessage::TokenRefreshResponse {
-                success: true,
-                message: String::new(),
-                token: None,
-                expires_in_seconds: None,
-            }, "TokenRefreshResponse"),
-        ];
-
-        for (msg, expected) in cases {
-            assert_eq!(msg.message_type(), *expected, "Wrong type name for {}", expected);
-        }
-    }
 
     #[test]
     fn test_is_healthy_queue_with_recent_heartbeat_ack_true() {
@@ -568,5 +381,103 @@ mod tests {
         assert_eq!(session.client_id, Some("cli_42".to_string()));
         assert_eq!(session.tenant_id, Some("tenant_x".to_string()));
         assert_eq!(session.state, ClientState::Active);
+    }
+
+    #[test]
+    fn test_all_message_type_names() {
+        let cases: &[(&WssMessage, &str)] = &[
+            (&WssMessage::AuthenticationResponse {
+                success: true,
+                message: String::new(),
+                server_version: String::new(),
+                token: None,
+                expires_in_seconds: None,
+            }, "AuthenticationResponse"),
+            (&WssMessage::HeartbeatAck {
+                timestamp: String::new(),
+            }, "HeartbeatAck"),
+            (&WssMessage::PermissionRevoked {
+                reason: String::new(),
+                detail: String::new(),
+            }, "PermissionRevoked"),
+            (&WssMessage::FileMigration {
+                old_service_path: String::new(),
+                new_service_path: String::new(),
+                service_name: String::new(),
+                reason: String::new(),
+            }, "FileMigration"),
+            (&WssMessage::MigrationAck {
+                success: true,
+                service_name: String::new(),
+            }, "MigrationAck"),
+            (&WssMessage::CheckPermission {
+                session_id: String::new(),
+                tenant_id: String::new(),
+                permission: String::new(),
+            }, "CheckPermission"),
+            (&WssMessage::PermissionResponse {
+                has_permission: true,
+            }, "PermissionResponse"),
+            (&WssMessage::TokenSync {
+                client_id: String::new(),
+                token: String::new(),
+                tenant_id: String::new(),
+                permissions: String::new(),
+                expires_at: String::new(),
+            }, "TokenSync"),
+            (&WssMessage::ClusterPing {
+                node_id: String::new(),
+                timestamp: String::new(),
+            }, "ClusterPing"),
+            (&WssMessage::ClusterPingResponse {
+                node_id: String::new(),
+                timestamp: String::new(),
+            }, "ClusterPingResponse"),
+            (&WssMessage::Error {
+                code: String::new(),
+                message: String::new(),
+                details: None,
+            }, "Error"),
+            (&WssMessage::Ack {
+                message_id: String::new(),
+            }, "Ack"),
+            (&WssMessage::Logout {
+                session_id: String::new(),
+                token: String::new(),
+            }, "Logout"),
+            (&WssMessage::LogoutResponse {
+                success: true,
+                message: String::new(),
+            }, "LogoutResponse"),
+            (&WssMessage::RefreshToken {
+                session_id: String::new(),
+                current_token: String::new(),
+            }, "RefreshToken"),
+            (&WssMessage::TokenRefreshResponse {
+                success: true,
+                message: String::new(),
+                token: None,
+                expires_in_seconds: None,
+            }, "TokenRefreshResponse"),
+        ];
+
+        for (msg, expected) in cases {
+            assert_eq!(msg.message_type(), *expected, "Wrong type name for {}", expected);
+        }
+    }
+
+    #[test]
+    fn the_named_variable_messages_no_longer_exist_on_the_wire() {
+        // Plan C6: a client that still sends one gets a decode error, not a handler.
+        for name in [
+            "GetVariables", "VariablesData", "SetVariables", "VariablesUpdated",
+            "VariableChanged", "Subscribe", "SubscriptionAck",
+        ] {
+            let json = serde_json::json!({ "type": name, "data": {} });
+            assert!(
+                serde_json::from_value::<WssMessage>(json).is_err(),
+                "{name} must not decode"
+            );
+        }
     }
 }

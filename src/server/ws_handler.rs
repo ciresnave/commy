@@ -267,29 +267,6 @@ pub async fn handle_connection(
     Ok(())
 }
 
-/// Check if session has required permission
-fn check_permission(
-    session: &ClientSession,
-    permission: crate::auth::Permission,
-) -> Result<(), String> {
-    // Check authentication
-    if session.token.is_none() {
-        return Err("Not authenticated".to_string());
-    }
-
-    // Check permission
-    let permissions = session
-        .permissions
-        .as_ref()
-        .ok_or_else(|| "No permissions found".to_string())?;
-
-    if !permissions.has_permission(&permission) {
-        return Err(format!("Permission denied: missing {:?}", permission));
-    }
-
-    Ok(())
-}
-
 /// Handles an incoming WssMessage and returns optional response
 async fn handle_message(
     message: WssMessage,
@@ -379,144 +356,6 @@ async fn handle_message(
                 server_version: env!("CARGO_PKG_VERSION").to_string(),
                 token: Some(token_str),
                 expires_in_seconds: Some(3600),
-            })
-        }
-
-        GetVariables {
-            tenant_id,
-            service_name,
-            variable_names,
-            ..
-        } => {
-            println!(
-                "GetVariables request: {}/{}",
-                service_name,
-                variable_names.len()
-            );
-
-            // Cross-tenant check: session must be authenticated to the requested tenant
-            if session.tenant_id.as_deref() != Some(&*tenant_id) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: format!("Not authenticated to tenant '{}'", tenant_id),
-                    details: Some("Cross-tenant access denied".to_string()),
-                });
-            }
-
-            // Check permissions: ServiceRead AND VariableRead
-            if let Err(reason) = check_permission(session, crate::auth::Permission::ServiceRead) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: reason,
-                    details: Some("ServiceRead permission required".to_string()),
-                });
-            }
-
-            if let Err(reason) = check_permission(session, crate::auth::Permission::VariableRead) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: reason,
-                    details: Some("VariableRead permission required".to_string()),
-                });
-            }
-
-            // In production: Fetch variables from service
-            let mut variables = std::collections::HashMap::new();
-            for var_name in variable_names {
-                variables.insert(var_name, vec![]);
-            }
-
-            Some(VariablesData {
-                tenant_id,
-                service_name,
-                variables,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            })
-        }
-
-        SetVariables {
-            tenant_id,
-            service_name,
-            variables,
-            ..
-        } => {
-            println!("SetVariables request: {}/{}", service_name, variables.len());
-
-            // Cross-tenant check: session must be authenticated to the requested tenant
-            if session.tenant_id.as_deref() != Some(&*tenant_id) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: format!("Not authenticated to tenant '{}'", tenant_id),
-                    details: Some("Cross-tenant access denied".to_string()),
-                });
-            }
-
-            // Check permissions: ServiceWrite AND VariableWrite
-            if let Err(reason) = check_permission(session, crate::auth::Permission::ServiceWrite) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: reason,
-                    details: Some("ServiceWrite permission required".to_string()),
-                });
-            }
-
-            if let Err(reason) = check_permission(session, crate::auth::Permission::VariableWrite) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: reason,
-                    details: Some("VariableWrite permission required".to_string()),
-                });
-            }
-
-            // In production: Update variables in service
-            Some(VariablesUpdated {
-                success: true,
-                message: "Variables updated".to_string(),
-                service_name,
-            })
-        }
-
-        Subscribe {
-            tenant_id,
-            service_name,
-            variable_names,
-            ..
-        } => {
-            println!(
-                "Subscribe request: {}/{}",
-                service_name,
-                variable_names.len()
-            );
-
-            // Cross-tenant check: session must be authenticated to the requested tenant
-            if session.tenant_id.as_deref() != Some(&*tenant_id) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: format!("Not authenticated to tenant '{}'", tenant_id),
-                    details: Some("Cross-tenant subscription denied".to_string()),
-                });
-            }
-
-            // Check permissions: ServiceRead required for subscriptions
-            if let Err(reason) = check_permission(session, crate::auth::Permission::ServiceRead) {
-                return Some(Error {
-                    code: "PERMISSION_DENIED".to_string(),
-                    message: reason,
-                    details: Some("ServiceRead permission required for subscriptions".to_string()),
-                });
-            }
-
-            // Register subscription
-            for var in variable_names {
-                session
-                    .subscriptions
-                    .insert(format!("{}/{}", service_name, var));
-            }
-
-            Some(SubscriptionAck {
-                success: true,
-                message: "Subscribed to variables".to_string(),
-                service_name,
             })
         }
 
@@ -632,120 +471,9 @@ mod tests {
         assert!(session.subscriptions.contains("service_a/var1"));
     }
 
-    #[tokio::test]
-    async fn test_get_variables_without_permission() {
-        let message = WssMessage::GetVariables {
-            session_id: "test_session".to_string(),
-            tenant_id: "test_tenant".to_string(),
-            service_name: "test_service".to_string(),
-            variable_names: vec!["var1".to_string()],
-        };
 
-        // Session without permissions
-        let mut session = ClientSession::new();
-        session.token = Some("fake_token".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-        session.permissions = Some(crate::auth::PermissionSet::new()); // Empty permissions
 
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let response = handle_message(message, &mut session, server).await;
 
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::Error { code, .. } => {
-                assert_eq!(code, "PERMISSION_DENIED");
-            }
-            _ => panic!("Expected Error response for missing permission"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_get_variables_with_permission() {
-        let message = WssMessage::GetVariables {
-            session_id: "test_session".to_string(),
-            tenant_id: "test_tenant".to_string(),
-            service_name: "test_service".to_string(),
-            variable_names: vec!["var1".to_string()],
-        };
-
-        // Session with proper permissions
-        let mut session = ClientSession::new();
-        session.token = Some("fake_token".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-
-        let mut permissions = crate::auth::PermissionSet::new();
-        permissions.grant(crate::auth::Permission::ServiceRead);
-        permissions.grant(crate::auth::Permission::VariableRead);
-        session.permissions = Some(permissions);
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::VariablesData { .. } => (),
-            _ => panic!("Expected VariablesData response with proper permissions"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_set_variables_without_permission() {
-        let message = WssMessage::SetVariables {
-            session_id: "test_session".to_string(),
-            tenant_id: "test_tenant".to_string(),
-            service_name: "test_service".to_string(),
-            variables: std::collections::HashMap::new(),
-        };
-
-        // Session with read-only permissions
-        let mut session = ClientSession::new();
-        session.token = Some("fake_token".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-
-        let mut permissions = crate::auth::PermissionSet::new();
-        permissions.grant(crate::auth::Permission::ServiceRead);
-        permissions.grant(crate::auth::Permission::VariableRead);
-        // Missing ServiceWrite and VariableWrite
-        session.permissions = Some(permissions);
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::Error { code, .. } => {
-                assert_eq!(code, "PERMISSION_DENIED");
-            }
-            _ => panic!("Expected Error response for missing write permission"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_subscribe_without_permission() {
-        let message = WssMessage::Subscribe {
-            session_id: "test_session".to_string(),
-            tenant_id: "test_tenant".to_string(),
-            service_name: "test_service".to_string(),
-            variable_names: vec!["var1".to_string()],
-        };
-
-        // Session without ServiceRead permission
-        let mut session = ClientSession::new();
-        session.token = Some("fake_token".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-        session.permissions = Some(crate::auth::PermissionSet::new()); // Empty permissions
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::Error { code, .. } => {
-                assert_eq!(code, "PERMISSION_DENIED");
-            }
-            _ => panic!("Expected Error response for missing permission"),
-        }
-    }
 
     #[tokio::test]
     async fn test_logout() {
@@ -876,107 +604,11 @@ mod tests {
 
     /// #2: token == None is the un-authenticated path — should be rejected even
     /// if the request carries a valid-looking tenant_id.
-    #[tokio::test]
-    async fn test_get_variables_unauthenticated_session_rejected() {
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-
-        let mut session = ClientSession::new();
-        // Default session has token == None
-        assert!(session.token.is_none());
-
-        let message = WssMessage::GetVariables {
-            session_id: session.session_id.clone(),
-            tenant_id: "any_tenant".to_string(),
-            service_name: "svc".to_string(),
-            variable_names: vec!["x".to_string()],
-        };
-
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::Error { code, message, .. } => {
-                assert_eq!(code, "PERMISSION_DENIED");
-                assert!(
-                    message.to_lowercase().contains("not authenticated"),
-                    "Error should indicate 'Not authenticated', got: {}",
-                    message
-                );
-            }
-            other => panic!(
-                "Expected PERMISSION_DENIED error for unauthenticated session, got {:?}",
-                other
-            ),
-        }
-    }
 
     /// #1: client authenticated to tenant_a requests GetVariables for tenant_b.
     /// The cross-tenant guard added to handle_message must reject this.
-    #[tokio::test]
-    async fn test_get_variables_cross_tenant_rejected() {
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-
-        let mut session = ClientSession::new();
-        session.token = Some("token_abc".to_string());
-        session.tenant_id = Some("tenant_a".to_string());
-        let mut perms = crate::auth::PermissionSet::new();
-        perms.grant(crate::auth::Permission::ServiceRead);
-        perms.grant(crate::auth::Permission::VariableRead);
-        session.permissions = Some(perms);
-
-        // Request data from a DIFFERENT tenant
-        let message = WssMessage::GetVariables {
-            session_id: session.session_id.clone(),
-            tenant_id: "tenant_b".to_string(), // ← not the session's tenant
-            service_name: "svc".to_string(),
-            variable_names: vec!["x".to_string()],
-        };
-
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::Error { code, .. } => {
-                assert_eq!(code, "PERMISSION_DENIED");
-            }
-            other => panic!(
-                "Expected PERMISSION_DENIED for cross-tenant GetVariables, got {:?}",
-                other
-            ),
-        }
-    }
 
     /// #1: same cross-tenant guard must apply to SetVariables.
-    #[tokio::test]
-    async fn test_set_variables_cross_tenant_rejected() {
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-
-        let mut session = ClientSession::new();
-        session.token = Some("token_abc".to_string());
-        session.tenant_id = Some("tenant_a".to_string());
-        let mut perms = crate::auth::PermissionSet::admin();
-        session.permissions = Some(perms);
-
-        let message = WssMessage::SetVariables {
-            session_id: session.session_id.clone(),
-            tenant_id: "tenant_b".to_string(), // ← cross-tenant
-            service_name: "svc".to_string(),
-            variables: std::collections::HashMap::new(),
-        };
-
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::Error { code, .. } => {
-                assert_eq!(code, "PERMISSION_DENIED");
-            }
-            other => panic!(
-                "Expected PERMISSION_DENIED for cross-tenant SetVariables, got {:?}",
-                other
-            ),
-        }
-    }
 
     /// #8: Authenticate to a tenant that has not been registered in the Server.
     #[tokio::test]
@@ -1016,212 +648,11 @@ mod tests {
 
     /// #7: after Logout the session token is cleared; a subsequent GetVariables
     /// must be rejected and subscriptions must be empty.
-    #[tokio::test]
-    async fn test_logout_then_get_variables_rejected_and_subscriptions_cleared() {
-        unsafe {
-            std::env::set_var("ENVIRONMENT", "development");
-        }
-        let mut server = Server::with_dev_auth(true);
-        let _t = server.get_tenant("tenant_x");
-        let server_arc = Arc::new(RwLock::new(server));
 
-        // Fully authenticated session
-        let mut session = ClientSession::new();
-        session.token = Some("tok_xyz".to_string());
-        session.tenant_id = Some("tenant_x".to_string());
-        session.state = ClientState::Active;
-        session.permissions = Some(PermissionSet::admin());
-        session.subscriptions.insert("svc/var1".to_string());
 
-        // Logout
-        let logout = WssMessage::Logout {
-            session_id: session.session_id.clone(),
-            token: "tok_xyz".to_string(),
-        };
-        let resp = handle_message(logout, &mut session, Arc::clone(&server_arc)).await;
-        assert!(matches!(
-            resp,
-            Some(WssMessage::LogoutResponse { success: true, .. })
-        ));
 
-        // Token cleared
-        assert!(session.token.is_none(), "token must be None after logout");
-        assert!(
-            session.subscriptions.is_empty(),
-            "subscriptions must be cleared on logout"
-        );
 
-        // GetVariables should now fail with PERMISSION_DENIED (not authenticated)
-        let gv = WssMessage::GetVariables {
-            session_id: session.session_id.clone(),
-            tenant_id: "tenant_x".to_string(),
-            service_name: "svc".to_string(),
-            variable_names: vec!["var1".to_string()],
-        };
-        let resp = handle_message(gv, &mut session, Arc::clone(&server_arc)).await;
-        assert!(
-            resp.is_some(),
-            "GetVariables after logout must return a response"
-        );
-        match resp.unwrap() {
-            WssMessage::Error { code, .. } => assert_eq!(code, "PERMISSION_DENIED"),
-            other => panic!("Expected PERMISSION_DENIED after logout, got {:?}", other),
-        }
-    }
 
-    #[tokio::test]
-    async fn test_subscribe_cross_tenant_rejected() {
-        // A session authenticated to tenant_a MUST NOT subscribe to tenant_b
-        let mut session = ClientSession::new();
-        session.authenticate("client_1".to_string(), "tenant_a".to_string());
-        session.token = Some("tok".to_string());
-        session.permissions = Some(PermissionSet::admin());
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let msg = WssMessage::Subscribe {
-            session_id: session.session_id.clone(),
-            tenant_id: "tenant_b".to_string(), // different tenant!
-            service_name: "svc".to_string(),
-            variable_names: vec!["var1".to_string()],
-        };
-        let resp = handle_message(msg, &mut session, server).await;
-        assert!(
-            resp.is_some(),
-            "Subscribe to wrong tenant must return a response"
-        );
-        match resp.unwrap() {
-            WssMessage::Error { code, .. } => {
-                assert_eq!(
-                    code, "PERMISSION_DENIED",
-                    "Cross-tenant Subscribe must be rejected with PERMISSION_DENIED"
-                );
-            }
-            other => panic!("Expected Error PERMISSION_DENIED, got {:?}", other),
-        }
-        // Subscription must NOT have been registered
-        assert!(
-            session.subscriptions.is_empty(),
-            "Cross-tenant subscribe must not populate session.subscriptions"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_server_only_message_sent_by_client_returns_none() {
-        // VariablesData is a server-only message; clients sending it must get None (no response)
-        let mut session = ClientSession::new();
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let msg = WssMessage::VariablesData {
-            tenant_id: "t".to_string(),
-            service_name: "svc".to_string(),
-            variables: Default::default(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-        };
-        let resp = handle_message(msg, &mut session, server).await;
-        assert!(
-            resp.is_none(),
-            "Server-only message sent by client must return None (no response)"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_token_exists_but_no_permissions_returns_permission_denied() {
-        // token is Some but permissions is None → check_permission must return
-        // PERMISSION_DENIED (not a panic or wrong error)
-        let mut session = ClientSession::new();
-        session.token = Some("valid-token".to_string()); // has token
-        session.permissions = None; // but no permissions
-        session.tenant_id = Some("tenant_a".to_string());
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let msg = WssMessage::GetVariables {
-            session_id: session.session_id.clone(),
-            tenant_id: "tenant_a".to_string(),
-            service_name: "svc".to_string(),
-            variable_names: vec!["v1".to_string()],
-        };
-        let resp = handle_message(msg, &mut session, server).await;
-        assert!(resp.is_some());
-        match resp.unwrap() {
-            WssMessage::Error { code, .. } => {
-                assert_eq!(
-                    code, "PERMISSION_DENIED",
-                    "token=Some, permissions=None must yield PERMISSION_DENIED"
-                );
-            }
-            other => panic!("Expected PERMISSION_DENIED, got {:?}", other),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_set_variables_with_permission_returns_variables_updated() {
-        let message = WssMessage::SetVariables {
-            session_id: "test_session".to_string(),
-            tenant_id: "test_tenant".to_string(),
-            service_name: "test_service".to_string(),
-            variables: std::collections::HashMap::new(),
-        };
-
-        let mut session = ClientSession::new();
-        session.token = Some("fake_token".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-        let mut permissions = crate::auth::PermissionSet::new();
-        permissions.grant(crate::auth::Permission::ServiceWrite);
-        permissions.grant(crate::auth::Permission::VariableWrite);
-        session.permissions = Some(permissions);
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some(), "SetVariables must return a response");
-        match response.unwrap() {
-            WssMessage::VariablesUpdated { success, .. } => {
-                assert!(success, "SetVariables with write permission must succeed");
-            }
-            other => panic!("Expected VariablesUpdated, got {:?}", other),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_subscribe_with_permission_returns_subscription_ack() {
-        let message = WssMessage::Subscribe {
-            session_id: "test_session".to_string(),
-            tenant_id: "test_tenant".to_string(),
-            service_name: "test_service".to_string(),
-            variable_names: vec!["var1".to_string(), "var2".to_string()],
-        };
-
-        let mut session = ClientSession::new();
-        session.token = Some("fake_token".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-        let mut permissions = crate::auth::PermissionSet::new();
-        permissions.grant(crate::auth::Permission::ServiceRead);
-        session.permissions = Some(permissions);
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some(), "Subscribe must return a response");
-        match response.unwrap() {
-            WssMessage::SubscriptionAck {
-                success,
-                service_name,
-                ..
-            } => {
-                assert!(success, "Subscribe with ServiceRead must succeed");
-                assert_eq!(service_name, "test_service");
-            }
-            other => panic!("Expected SubscriptionAck, got {:?}", other),
-        }
-        // Session must have registered the subscriptions
-        assert!(
-            session.subscriptions.contains("test_service/var1"),
-            "var1 must be in session subscriptions"
-        );
-        assert!(
-            session.subscriptions.contains("test_service/var2"),
-            "var2 must be in session subscriptions"
-        );
-    }
 
     /// Authenticate to a tenant that EXISTS in the server must succeed and must
     /// fully populate the session (tenant_id, token, state, admin permissions).
@@ -1281,6 +712,53 @@ mod tests {
         assert!(
             session.permissions.is_some(),
             "Session permissions must be set after successful auth"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_logout_clears_the_token_and_subscriptions() {
+        unsafe {
+            std::env::set_var("ENVIRONMENT", "development");
+        }
+        let mut server = Server::with_dev_auth(true);
+        let _t = server.get_tenant("tenant_x");
+        let server_arc = Arc::new(RwLock::new(server));
+
+        let mut session = ClientSession::new();
+        session.token = Some("tok_xyz".to_string());
+        session.tenant_id = Some("tenant_x".to_string());
+        session.state = ClientState::Active;
+        session.permissions = Some(crate::auth::PermissionSet::admin());
+        session.subscriptions.insert("svc/var1".to_string());
+
+        let logout = WssMessage::Logout {
+            session_id: session.session_id.clone(),
+            token: "tok_xyz".to_string(),
+        };
+        let resp = handle_message(logout, &mut session, Arc::clone(&server_arc)).await;
+        assert!(matches!(
+            resp,
+            Some(WssMessage::LogoutResponse { success: true, .. })
+        ));
+        assert!(session.token.is_none(), "token must be None after logout");
+        assert!(
+            session.subscriptions.is_empty(),
+            "subscriptions must be cleared on logout"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_server_only_message_sent_by_client_returns_none() {
+        // HeartbeatAck is a server-only message; a client sending it gets no response.
+        let mut session = ClientSession::new();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let msg = WssMessage::HeartbeatAck {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        let resp = handle_message(msg, &mut session, server).await;
+        assert!(
+            resp.is_none(),
+            "Server-only message sent by client must return None (no response)"
         );
     }
 }
@@ -3109,397 +2587,8 @@ async fn handle_sdk_message(
             }))
         }
 
-        "AllocateVariable" => {
-            let service_id = data
-                .and_then(|d| d.get("service_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let variable_name = data
-                .and_then(|d| d.get("variable_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let initial_data: Vec<u8> = data
-                .and_then(|d| d.get("initial_data"))
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            if service_id.is_empty() || variable_name.is_empty() {
-                return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "InvalidRequest", "message": "service_id and variable_name are required" }
-                }));
-            }
-
-            let mut server_guard = server.write().await;
-            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
-                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => {
-                    return Some(serde_json::json!({
-                        "type": "Error",
-                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                    }))
-                }
-            };
-
-            let svc = match server_guard
-                .tenants
-                .get_mut(&tenant_name)
-                .and_then(|t| t.get_service_mut_by_name(&svc_name))
-            {
-                Some(s) => s,
-                None => {
-                    return Some(serde_json::json!({
-                        "type": "Error",
-                        "data": { "code": "NotFound", "message": "Service not found in tenant" }
-                    }))
-                }
-            };
-
-            let size = if initial_data.is_empty() {
-                8
-            } else {
-                initial_data.len()
-            };
-            match svc.allocate_variable(variable_name.to_string(), size) {
-                Some(slot) => {
-                    let copy_len = slot.len().min(initial_data.len());
-                    if copy_len > 0 {
-                        slot[..copy_len].copy_from_slice(&initial_data[..copy_len]);
-                    }
-                    println!(
-                        "[AllocateVariable] service={} var={} size={}",
-                        service_id, variable_name, size
-                    );
-                    Some(serde_json::json!({
-                        "type": "Result",
-                        "data": {
-                            "request_id": uuid::Uuid::new_v4().to_string(),
-                            "success": true,
-                            "message": format!("Variable '{}' allocated ({} bytes)", variable_name, size)
-                        }
-                    }))
-                }
-                None => Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "InternalError", "message": "Allocation failed (service file may be full)" }
-                })),
-            }
-        }
-
-        "ReadVariable" => {
-            let service_id = data
-                .and_then(|d| d.get("service_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let variable_name = data
-                .and_then(|d| d.get("variable_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            let server_guard = server.read().await;
-            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
-                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => {
-                    return Some(serde_json::json!({
-                        "type": "Error",
-                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                    }))
-                }
-            };
-
-            let data_copy = server_guard
-                .tenants
-                .get(&tenant_name)
-                .and_then(|t| t.get_service_by_name(&svc_name))
-                .and_then(|svc| svc.get_variable(variable_name))
-                .map(|bytes| bytes.to_vec());
-
-            match data_copy {
-                Some(var_data) => Some(serde_json::json!({
-                    "type": "VariableData",
-                    "data": {
-                        "service_id": service_id,
-                        "variable_name": variable_name,
-                        "data": var_data,
-                        "version": 1
-                    }
-                })),
-                None => Some(serde_json::json!({
-                    "type": "Error",
-                    "data": {
-                        "code": "NotFound",
-                        "message": format!("Variable '{}' not found in service '{}'", variable_name, service_id)
-                    }
-                })),
-            }
-        }
-
-        "WriteVariable" => {
-            let service_id = data
-                .and_then(|d| d.get("service_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let variable_name = data
-                .and_then(|d| d.get("variable_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let new_data: Vec<u8> = data
-                .and_then(|d| d.get("data"))
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            if service_id.is_empty() || variable_name.is_empty() {
-                return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "InvalidRequest", "message": "service_id and variable_name are required" }
-                }));
-            }
-
-            let mut server_guard = server.write().await;
-            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
-                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => {
-                    return Some(serde_json::json!({
-                        "type": "Error",
-                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                    }))
-                }
-            };
-
-            let svc = match server_guard
-                .tenants
-                .get_mut(&tenant_name)
-                .and_then(|t| t.get_service_mut_by_name(&svc_name))
-            {
-                Some(s) => s,
-                None => {
-                    return Some(serde_json::json!({
-                        "type": "Error",
-                        "data": { "code": "NotFound", "message": "Service not found in tenant" }
-                    }))
-                }
-            };
-
-            // Existing size determines whether we write in-place, resize, or auto-allocate
-            let existing_size = svc.get_variable(variable_name).map(|d| d.len());
-            let ok = match existing_size {
-                Some(size) if size == new_data.len() => {
-                    // Same size: write directly into the mmap slot
-                    svc.get_variable_mut(variable_name)
-                        .map(|slot| slot.copy_from_slice(&new_data))
-                        .is_some()
-                }
-                Some(_) => {
-                    // Size changed: deallocate old slot and re-allocate
-                    svc.deallocate_variable(variable_name);
-                    svc.allocate_variable(variable_name.to_string(), new_data.len())
-                        .map(|slot| slot.copy_from_slice(&new_data))
-                        .is_some()
-                }
-                None => {
-                    // Variable not yet allocated: auto-allocate
-                    svc.allocate_variable(variable_name.to_string(), new_data.len())
-                        .map(|slot| slot.copy_from_slice(&new_data))
-                        .is_some()
-                }
-            };
-
-            if ok {
-                println!(
-                    "[WriteVariable] service={} var={} bytes={}",
-                    service_id,
-                    variable_name,
-                    new_data.len()
-                );
-                Some(serde_json::json!({
-                    "type": "Result",
-                    "data": {
-                        "request_id": uuid::Uuid::new_v4().to_string(),
-                        "success": true,
-                        "message": "Variable written"
-                    }
-                }))
-            } else {
-                Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "InternalError", "message": "Write failed (service file may be full)" }
-                }))
-            }
-        }
-
-        "DeallocateVariable" => {
-            let service_id = data
-                .and_then(|d| d.get("service_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let variable_name = data
-                .and_then(|d| d.get("variable_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            let mut server_guard = server.write().await;
-            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
-                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => {
-                    return Some(serde_json::json!({
-                        "type": "Error",
-                        "data": { "code": "NotFound", "message": format!("Service '{}' not found", service_id) }
-                    }))
-                }
-            };
-
-            let removed = server_guard
-                .tenants
-                .get_mut(&tenant_name)
-                .and_then(|t| t.get_service_mut_by_name(&svc_name))
-                .map(|svc| svc.deallocate_variable(variable_name))
-                .unwrap_or(false);
-
-            Some(serde_json::json!({
-                "type": "Result",
-                "data": {
-                    "request_id": uuid::Uuid::new_v4().to_string(),
-                    "success": removed,
-                    "message": if removed {
-                        format!("Variable '{}' deallocated", variable_name)
-                    } else {
-                        format!("Variable '{}' not found", variable_name)
-                    }
-                }
-            }))
-        }
-
-        "Subscribe" => {
-            let service_id = data
-                .and_then(|d| d.get("service_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let variable_name = data
-                .and_then(|d| d.get("variable_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            if service_id.is_empty() || variable_name.is_empty() {
-                return Some(serde_json::json!({
-                    "type": "Error",
-                    "data": { "code": "InvalidRequest", "message": "service_id and variable_name are required" }
-                }));
-            }
-
-            let key = format!("{}/{}", service_id, variable_name);
-            session.subscriptions.insert(key.clone());
-
-            println!(
-                "[Subscribe] session={} subscribed to {}",
-                session.session_id, key
-            );
-            Some(serde_json::json!({
-                "type": "Result",
-                "data": {
-                    "request_id": uuid::Uuid::new_v4().to_string(),
-                    "success": true,
-                    "message": format!("Subscribed to '{}'", key)
-                }
-            }))
-        }
-
-        "Unsubscribe" => {
-            let service_id = data
-                .and_then(|d| d.get("service_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let variable_name = data
-                .and_then(|d| d.get("variable_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            let key = format!("{}/{}", service_id, variable_name);
-            let removed = session.subscriptions.remove(&key);
-
-            Some(serde_json::json!({
-                "type": "Result",
-                "data": {
-                    "request_id": uuid::Uuid::new_v4().to_string(),
-                    "success": removed,
-                    "message": if removed {
-                        format!("Unsubscribed from '{}'", key)
-                    } else {
-                        format!("Not subscribed to '{}'", key)
-                    }
-                }
-            }))
-        }
-
         "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" | "RotateRequest" | "RotationDrained" | "RotationFilled" | "RotationAbort" | "Grant" | "Revoke" | "ListGrants" => {
             handle_local_mapping(message, session, &server).await
-        }
-
-        "ReportVariableChanges" => {
-            let service_id = data
-                .and_then(|d| d.get("service_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let changed_variables: Vec<String> = data
-                .and_then(|d| d.get("changed_variables"))
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-            let new_values: Vec<(String, Vec<u8>)> = data
-                .and_then(|d| d.get("new_values"))
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            let mut server_guard = server.write().await;
-            let (tenant_name, svc_name) = match server_guard.service_registry.get(service_id) {
-                Some(r) => (r.tenant_name.clone(), r.service_name.clone()),
-                None => {
-                    // Service not found — still acknowledge so the client can proceed
-                    return Some(serde_json::json!({
-                        "type": "VariableChangesAcknowledged",
-                        "data": { "service_id": service_id, "changed_variables": changed_variables }
-                    }));
-                }
-            };
-
-            if let Some(svc) = server_guard
-                .tenants
-                .get_mut(&tenant_name)
-                .and_then(|t| t.get_service_mut_by_name(&svc_name))
-            {
-                for (var_name, var_data) in new_values {
-                    let existing_size = svc.get_variable(&var_name).map(|d| d.len());
-                    match existing_size {
-                        Some(size) if size == var_data.len() => {
-                            if let Some(slot) = svc.get_variable_mut(&var_name) {
-                                slot.copy_from_slice(&var_data);
-                            }
-                        }
-                        Some(_) => {
-                            svc.deallocate_variable(&var_name);
-                            if let Some(slot) = svc.allocate_variable(var_name, var_data.len()) {
-                                slot.copy_from_slice(&var_data);
-                            }
-                        }
-                        None => {
-                            if let Some(slot) = svc.allocate_variable(var_name, var_data.len()) {
-                                slot.copy_from_slice(&var_data);
-                            }
-                        }
-                    }
-                }
-            }
-
-            println!(
-                "[ReportVariableChanges] service={} changes={}",
-                service_id,
-                changed_variables.len()
-            );
-            Some(serde_json::json!({
-                "type": "VariableChangesAcknowledged",
-                "data": {
-                    "service_id": service_id,
-                    "changed_variables": changed_variables
-                }
-            }))
         }
 
         "Disconnect" => {
@@ -3674,291 +2763,17 @@ mod sdk_tests {
 
     // ── variable round-trip (the test that would have caught the original bug) ─
 
-    #[tokio::test]
-    async fn test_sdk_write_then_read_variable_roundtrip() {
-        // This is the regression test for the bug reported by the external LLM:
-        // WriteVariable and ReadVariable returned "Operation not implemented on server".
-        // It also catches the *second* bug where the fix used an in-memory HashMap
-        // instead of the mmap-backed Service: a write followed by a read must return
-        // the EXACT bytes that were written.
 
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "store").await;
 
-        let payload: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x42];
 
-        // Write
-        let write_msg = serde_json::json!({
-            "type": "WriteVariable",
-            "data": {
-                "service_id": service_id,
-                "variable_name": "counter",
-                "data": payload
-            }
-        });
-        let write_resp = handle_sdk_message(write_msg, &mut session, Arc::clone(&server))
-            .await
-            .unwrap();
-        assert_eq!(
-            write_resp["type"], "Result",
-            "WriteVariable must return Result, got: {write_resp}"
-        );
-        assert_eq!(write_resp["data"]["success"], true);
-
-        // Read back
-        let read_msg = serde_json::json!({
-            "type": "ReadVariable",
-            "data": { "service_id": service_id, "variable_name": "counter" }
-        });
-        let read_resp = handle_sdk_message(read_msg, &mut session, Arc::clone(&server))
-            .await
-            .unwrap();
-        assert_eq!(
-            read_resp["type"], "VariableData",
-            "ReadVariable must return VariableData, got: {read_resp}"
-        );
-
-        // The bytes must round-trip exactly
-        let returned: Vec<u8> = serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
-        assert_eq!(
-            returned, payload,
-            "Read must return the exact bytes that were written"
-        );
-        cleanup_tenant(&tenant_id);
-    }
-
-    #[tokio::test]
-    async fn test_sdk_write_variable_overwrites_previous_value() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "store").await;
-
-        for (i, val) in [vec![1u8, 2, 3], vec![9u8, 8, 7]].iter().enumerate() {
-            let write_msg = serde_json::json!({
-                "type": "WriteVariable",
-                "data": { "service_id": service_id, "variable_name": "x", "data": val }
-            });
-            handle_sdk_message(write_msg, &mut session, Arc::clone(&server))
-                .await
-                .unwrap();
-
-            let read_resp = handle_sdk_message(
-                serde_json::json!({
-                    "type": "ReadVariable",
-                    "data": { "service_id": service_id, "variable_name": "x" }
-                }),
-                &mut session,
-                Arc::clone(&server),
-            )
-            .await
-            .unwrap();
-            let returned: Vec<u8> =
-                serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
-            assert_eq!(&returned, val, "Write #{i} did not persist correctly");
-        }
-        cleanup_tenant(&tenant_id);
-    }
-
-    #[tokio::test]
-    async fn test_sdk_write_variable_to_unknown_service_returns_not_found() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-
-        let msg = serde_json::json!({
-            "type": "WriteVariable",
-            "data": {
-                "service_id": "00000000-0000-0000-0000-000000000000",
-                "variable_name": "x",
-                "data": [1u8, 2, 3]
-            }
-        });
-        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
-            .await
-            .unwrap();
-        assert_eq!(resp["type"], "Error");
-        assert_eq!(resp["data"]["code"], "NotFound");
-        cleanup_tenant(&tenant_id);
-    }
-
-    #[tokio::test]
-    async fn test_sdk_read_unallocated_variable_returns_not_found() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
-
-        let msg = serde_json::json!({
-            "type": "ReadVariable",
-            "data": { "service_id": service_id, "variable_name": "ghost" }
-        });
-        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
-            .await
-            .unwrap();
-        assert_eq!(resp["type"], "Error");
-        assert_eq!(resp["data"]["code"], "NotFound");
-        cleanup_tenant(&tenant_id);
-    }
 
     // ── allocate / deallocate ──────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn test_sdk_allocate_then_read_initial_data() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
-        let init: Vec<u8> = vec![10, 20, 30, 40];
-        let alloc_msg = serde_json::json!({
-            "type": "AllocateVariable",
-            "data": {
-                "service_id": service_id,
-                "variable_name": "init_var",
-                "initial_data": init
-            }
-        });
-        let alloc_resp = handle_sdk_message(alloc_msg, &mut session, Arc::clone(&server))
-            .await
-            .unwrap();
-        assert_eq!(alloc_resp["type"], "Result");
-        assert_eq!(alloc_resp["data"]["success"], true);
-
-        let read_resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReadVariable",
-                "data": { "service_id": service_id, "variable_name": "init_var" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(read_resp["type"], "VariableData");
-        let returned: Vec<u8> = serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
-        assert_eq!(returned, init);
-        cleanup_tenant(&tenant_id);
-    }
-
-    #[tokio::test]
-    async fn test_sdk_deallocate_variable_makes_it_unreadable() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
-
-        // Write it first so the variable exists
-        handle_sdk_message(
-            serde_json::json!({
-                "type": "WriteVariable",
-                "data": { "service_id": service_id, "variable_name": "tmp", "data": [1u8] }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-
-        // Deallocate
-        let dealloc_resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "DeallocateVariable",
-                "data": { "service_id": service_id, "variable_name": "tmp" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(dealloc_resp["data"]["success"], true);
-
-        // Now reading must return NotFound
-        let read_resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReadVariable",
-                "data": { "service_id": service_id, "variable_name": "tmp" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(read_resp["type"], "Error");
-        assert_eq!(read_resp["data"]["code"], "NotFound");
-        cleanup_tenant(&tenant_id);
-    }
 
     // ── subscribe / unsubscribe ────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn test_sdk_subscribe_registers_in_session() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
 
-        let msg = serde_json::json!({
-            "type": "Subscribe",
-            "data": { "service_id": service_id, "variable_name": "v1" }
-        });
-        let resp = handle_sdk_message(msg, &mut session, Arc::clone(&server))
-            .await
-            .unwrap();
-        assert_eq!(resp["type"], "Result");
-        assert_eq!(resp["data"]["success"], true);
-
-        let key = format!("{}/v1", service_id);
-        assert!(
-            session.subscriptions.contains(&key),
-            "Subscribe must register the key in session.subscriptions"
-        );
-        cleanup_tenant(&tenant_id);
-    }
-
-    #[tokio::test]
-    async fn test_sdk_unsubscribe_removes_from_session() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id = create_service(Arc::clone(&server), &mut session, &tenant_id, "svc").await;
-
-        // Subscribe first
-        handle_sdk_message(
-            serde_json::json!({
-                "type": "Subscribe",
-                "data": { "service_id": service_id, "variable_name": "v1" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-
-        // Then unsubscribe
-        let resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "Unsubscribe",
-                "data": { "service_id": service_id, "variable_name": "v1" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(resp["data"]["success"], true);
-
-        let key = format!("{}/v1", service_id);
-        assert!(
-            !session.subscriptions.contains(&key),
-            "Unsubscribe must remove the key from session.subscriptions"
-        );
-        cleanup_tenant(&tenant_id);
-    }
 
     // ── regression guards ─────────────────────────────────────────────────────
 
@@ -4013,106 +2828,6 @@ mod sdk_tests {
 
     // ── full lifecycle ─────────────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn test_sdk_full_variable_lifecycle() {
-        // Complete flow that mirrors what the external LLM client does:
-        // Authenticate → CreateService → WriteVariable → ReadVariable → DeallocateVariable
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "app_state").await;
-
-        let data_v1 = b"hello world".to_vec();
-        let data_v2 = b"updated".to_vec();
-
-        // Write v1
-        let r = handle_sdk_message(
-            serde_json::json!({
-                "type": "WriteVariable",
-                "data": { "service_id": service_id, "variable_name": "msg", "data": data_v1 }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(r["data"]["success"], true, "Write v1 failed");
-
-        // Read v1
-        let r = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReadVariable",
-                "data": { "service_id": service_id, "variable_name": "msg" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            serde_json::from_value::<Vec<u8>>(r["data"]["data"].clone()).unwrap(),
-            data_v1
-        );
-
-        // Overwrite with v2
-        handle_sdk_message(
-            serde_json::json!({
-                "type": "WriteVariable",
-                "data": { "service_id": service_id, "variable_name": "msg", "data": data_v2 }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-
-        // Read v2
-        let r = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReadVariable",
-                "data": { "service_id": service_id, "variable_name": "msg" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            serde_json::from_value::<Vec<u8>>(r["data"]["data"].clone()).unwrap(),
-            data_v2,
-            "Read after overwrite must return the new value"
-        );
-
-        // Deallocate
-        let r = handle_sdk_message(
-            serde_json::json!({
-                "type": "DeallocateVariable",
-                "data": { "service_id": service_id, "variable_name": "msg" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(r["data"]["success"], true);
-
-        // Must be gone
-        let r = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReadVariable",
-                "data": { "service_id": service_id, "variable_name": "msg" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(r["type"], "Error");
-        assert_eq!(r["data"]["code"], "NotFound");
-
-        cleanup_tenant(&tenant_id);
-    }
 
     // ── CreateTenant validation ────────────────────────────────────────────────
 
@@ -4156,36 +2871,6 @@ mod sdk_tests {
 
     // ── AllocateVariable to non-existent service ───────────────────────────────
 
-    #[tokio::test]
-    async fn test_sdk_allocate_to_unknown_service_returns_not_found() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-
-        let resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "AllocateVariable",
-                "data": {
-                    "service_id": "service-that-does-not-exist",
-                    "variable_name": "v"
-                }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            resp["type"], "Error",
-            "unknown service_id must return Error: {resp}"
-        );
-        assert_eq!(
-            resp["data"]["code"], "NotFound",
-            "unknown service must yield NotFound, got: {}",
-            resp["data"]["code"]
-        );
-        cleanup_tenant(&tenant_id);
-    }
 
     // ── DeleteService cross-tenant ─────────────────────────────────────────────
 
@@ -4221,94 +2906,7 @@ mod sdk_tests {
 
     // ── ReportVariableChanges ──────────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn test_sdk_report_variable_changes_unknown_service_returns_ack() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
-        let resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReportVariableChanges",
-                "data": {
-                    "service_id": "non-existent-service",
-                    "changed_variables": ["x"],
-                    "new_values": []
-                }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            resp["type"], "VariableChangesAcknowledged",
-            "unknown service must still return VariableChangesAcknowledged: {resp}"
-        );
-        assert_eq!(
-            resp["data"]["service_id"], "non-existent-service",
-            "ack must echo back the service_id: {resp}"
-        );
-        cleanup_tenant(&tenant_id);
-    }
-
-    #[tokio::test]
-    async fn test_sdk_report_variable_changes_known_service_writes_data() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
-        let service_id =
-            create_service(Arc::clone(&server), &mut session, &tenant_id, "my_svc").await;
-
-        let payload: Vec<u8> = vec![10, 20, 30];
-
-        let resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReportVariableChanges",
-                "data": {
-                    "service_id": service_id,
-                    "changed_variables": ["sensor"],
-                    "new_values": [["sensor", payload]]
-                }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            resp["type"], "VariableChangesAcknowledged",
-            "known service must return VariableChangesAcknowledged: {resp}"
-        );
-        assert_eq!(
-            resp["data"]["service_id"], service_id,
-            "ack must echo back the service_id: {resp}"
-        );
-
-        // The data must have been written — a subsequent ReadVariable must return it
-        let read_resp = handle_sdk_message(
-            serde_json::json!({
-                "type": "ReadVariable",
-                "data": { "service_id": service_id, "variable_name": "sensor" }
-            }),
-            &mut session,
-            Arc::clone(&server),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            read_resp["type"], "VariableData",
-            "ReadVariable after ReportVariableChanges must succeed: {read_resp}"
-        );
-        let returned: Vec<u8> = serde_json::from_value(read_resp["data"]["data"].clone()).unwrap();
-        assert_eq!(
-            returned, payload,
-            "ReportVariableChanges must persist the variable data"
-        );
-        cleanup_tenant(&tenant_id);
-    }
 
     // ── CreateTenant success ───────────────────────────────────────────────────
 
@@ -4556,31 +3154,6 @@ mod audit_tests {
         assert!(!server.read().await.tenants.contains_key("ctl_tenant"));
     }
 
-    #[tokio::test]
-    async fn d_unauthenticated_variable_ops_on_someone_elses_service_are_refused() {
-        let tenant = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let mut owner = authed(&server, &tenant).await;
-        let sid = make_service(&server, &mut owner, &tenant).await;
-        let w = send(&server, &mut owner, serde_json::json!({"type":"WriteVariable","data":{"service_id":sid,"variable_name":"secret","data":[1,2,3]}})).await;
-        assert_eq!(w["data"]["success"], true, "setup: {w}");
-
-        let mut anon = ClientSession::new();
-        let mut results = Vec::new();
-        for (name, msg) in [
-            ("ReadVariable", serde_json::json!({"type":"ReadVariable","data":{"service_id":sid,"variable_name":"secret"}})),
-            ("WriteVariable", serde_json::json!({"type":"WriteVariable","data":{"service_id":sid,"variable_name":"secret","data":[9]}})),
-            ("AllocateVariable", serde_json::json!({"type":"AllocateVariable","data":{"service_id":sid,"variable_name":"new","initial_data":[1]}})),
-            ("DeallocateVariable", serde_json::json!({"type":"DeallocateVariable","data":{"service_id":sid,"variable_name":"secret"}})),
-            ("ReportVariableChanges", serde_json::json!({"type":"ReportVariableChanges","data":{"service_id":sid,"changes":[]}})),
-        ] {
-            let r = send(&server, &mut anon, msg).await;
-            results.push((name, r["type"].as_str().unwrap_or("?").to_string()));
-        }
-        eprintln!("unauthenticated results: {results:?}");
-        let allowed: Vec<_> = results.iter().filter(|(_, t)| t != "Error").collect();
-        assert!(allowed.is_empty(), "unauthenticated session was allowed: {allowed:?}");
-    }
 
     #[tokio::test]
     async fn e_other_tenant_cannot_use_a_service_it_does_not_own() {
@@ -4589,10 +3162,9 @@ mod audit_tests {
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut a = authed(&server, &ta).await;
         let sid = make_service(&server, &mut a, &ta).await;
-        let _ = send(&server, &mut a, serde_json::json!({"type":"WriteVariable","data":{"service_id":sid,"variable_name":"secret","data":[1,2,3]}})).await;
         let mut b = authed(&server, &tb).await;
-        let r = send(&server, &mut b, serde_json::json!({"type":"ReadVariable","data":{"service_id":sid,"variable_name":"secret"}})).await;
-        assert_eq!(r["type"], "Error", "tenant B read tenant A's variable: {r}");
+        let r = send(&server, &mut b, serde_json::json!({"type":"GetServiceFilePath","data":{"request_id":"r","service_id":sid}})).await;
+        assert_eq!(r["type"], "Error", "tenant B reached tenant A's service: {r}");
     }
 
     #[tokio::test]
@@ -4650,7 +3222,7 @@ mod dev_auth_off_tests {
     async fn unauthenticated_session_cannot_do_anything_but_heartbeat() {
         let server = Arc::new(RwLock::new(Server::with_dev_auth(false)));
         let mut s = ClientSession::new();
-        for t in ["CreateService", "GetService", "Subscribe", "WriteVariable", "CreateTenant", "SomethingNew"] {
+        for t in ["CreateService", "GetService", "GetServiceFilePath", "Resync", "CreateTenant", "SomethingNew"] {
             let r = handle_sdk_message(
                 serde_json::json!({"type": t, "data": {"tenant_id": "t", "service_id": "x", "tenant_name": "n", "service_name": "s"}}),
                 &mut s,
@@ -4681,6 +3253,73 @@ mod dev_auth_off_tests {
             assert_eq!(r["type"], "Error", "{bad:?}: {r}");
             assert!(s.tenant_id.is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod removed_variable_support_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
+        handle_sdk_message(v, s, Arc::clone(server)).await.unwrap()
+    }
+
+    async fn authed(server: &Arc<RwLock<Server>>, t: &str) -> ClientSession {
+        let mut s = ClientSession::new();
+        let r = call(server, &mut s, json!({"type":"Authenticate","data":{"tenant_id":t,"api_key":"x"}})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        s
+    }
+
+    /// Plan C6: named variables are gone. Each old message is now just an unknown type, even for
+    /// an authenticated admin on a service it owns.
+    #[tokio::test]
+    async fn the_named_variable_messages_are_gone() {
+        let t = format!("rv_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = authed(&server, &t).await;
+        let r = call(&server, &mut a, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc","size":4096}})).await;
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        for ty in [
+            "AllocateVariable",
+            "ReadVariable",
+            "WriteVariable",
+            "DeallocateVariable",
+            "Subscribe",
+            "Unsubscribe",
+            "ReportVariableChanges",
+        ] {
+            let r = call(&server, &mut a, json!({"type":ty,"data":{"service_id":id,"variable_name":"x","size":4}})).await;
+            assert_eq!(r["type"], "Error", "{ty}: {r}");
+            let msg = r["data"]["message"].as_str().unwrap_or("").to_lowercase();
+            assert!(msg.contains("unknown"), "{ty} must be an unknown message type: {r}");
+        }
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
+    }
+
+    /// Plan C6: named variables are gone. Each old message is now just an unknown type, even for
+    /// an authenticated admin on a service it owns.
+
+    /// The guard still refuses any message that names a service the client has no access to,
+    /// whatever its type, before a handler sees it.
+    #[tokio::test]
+    async fn the_guard_refuses_any_message_naming_a_service_without_access() {
+        let t = format!("rv_{}", uuid::Uuid::new_v4().simple());
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut admin = authed(&server, &t).await;
+        admin.client_id = Some("admin".into());
+        let r = call(&server, &mut admin, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc","size":4096}})).await;
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        let mut bob = authed(&server, &t).await;
+        bob.client_id = Some("bob".into());
+        bob.permissions = Some(crate::auth::PermissionSet::new());
+        let r = call(&server, &mut bob, json!({"type":"SomeFutureMessage","data":{"service_id":id}})).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        // the admin gets past the guard (and hits the unknown-type error instead)
+        let r = call(&server, &mut admin, json!({"type":"SomeFutureMessage","data":{"service_id":id}})).await;
+        assert_ne!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        let _ = std::fs::remove_dir_all(format!("tenant_{t}"));
     }
 }
 
@@ -6384,25 +5023,6 @@ mod scoped_access_tests {
         cleanup(&other);
     }
 
-    #[tokio::test]
-    async fn the_guard_closes_the_older_handlers_too() {
-        let t = tenant();
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let (mut admin, (one, _f), _two) = two_services(&server, &t).await;
-        let mut bob = bare_client(&server, &t, "bob").await;
-        for msg in [
-            json!({"type":"ReadVariable","data":{"service_id":one,"variable_name":"x"}}),
-            json!({"type":"WriteVariable","data":{"service_id":one,"variable_name":"x","value":[1]}}),
-            json!({"type":"AllocateVariable","data":{"service_id":one,"variable_name":"x","size":4}}),
-        ] {
-            let r = call(&server, &mut bob, msg.clone()).await;
-            assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{msg}: {r}");
-        }
-        // the admin is not stopped by the guard (the handler may still say the variable is unknown)
-        let r = call(&server, &mut admin, json!({"type":"ReadVariable","data":{"service_id":one,"variable_name":"x"}})).await;
-        assert_ne!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
-        cleanup(&t);
-    }
 }
 
 #[cfg(test)]

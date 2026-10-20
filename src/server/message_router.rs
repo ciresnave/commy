@@ -38,19 +38,8 @@ impl MessageRouter {
             Authenticate { .. } => RoutingDecision::AuthenticationHandler,
 
             // Service operations
-            GetVariables { service_name, .. } => {
-                RoutingDecision::ServiceOperation(format!("GetVariables({})", service_name))
-            }
-            SetVariables { service_name, .. } => {
-                RoutingDecision::ServiceOperation(format!("SetVariables({})", service_name))
-            }
-            VariablesUpdated { .. } => RoutingDecision::Terminal, // Response only
-            VariablesData { .. } => RoutingDecision::Terminal,    // Response only
 
             // Subscription messages
-            Subscribe { .. } => RoutingDecision::SubscriptionManager,
-            SubscriptionAck { .. } => RoutingDecision::Terminal, // Response only
-            VariableChanged { .. } => RoutingDecision::Terminal, // Broadcast only
 
             // Health/heartbeat messages
             Heartbeat { .. } => RoutingDecision::HealthCheck,
@@ -123,25 +112,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_route_get_variables() {
-        let router = MessageRouter::new();
-        let msg = WssMessage::GetVariables {
-            session_id: "sess1".to_string(),
-            tenant_id: "tenant_a".to_string(),
-            service_name: "service_x".to_string(),
-            variable_names: vec!["var1".to_string()],
-        };
-
-        let decision = router.route(&msg);
-        match decision {
-            RoutingDecision::ServiceOperation(desc) => {
-                assert!(desc.contains("GetVariables"));
-                assert!(desc.contains("service_x"));
-            }
-            _ => panic!("Expected ServiceOperation"),
-        }
-    }
 
     #[test]
     fn test_route_heartbeat() {
@@ -157,32 +127,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_routing_description() {
-        let router = MessageRouter::new();
-        let decision = RoutingDecision::ServiceOperation("SetVariables(config)".to_string());
 
-        let desc = router.describe(&decision);
-        assert!(desc.contains("Service operation"));
-        assert!(desc.contains("config"));
-    }
-
-    #[test]
-    fn test_route_subscribe() {
-        let router = MessageRouter::new();
-        let msg = WssMessage::Subscribe {
-            session_id: "sess1".to_string(),
-            tenant_id: "tenant_a".to_string(),
-            service_name: "service_x".to_string(),
-            variable_names: vec!["var1".to_string()],
-        };
-
-        let decision = router.route(&msg);
-        match decision {
-            RoutingDecision::SubscriptionManager => (),
-            _ => panic!("Expected SubscriptionManager"),
-        }
-    }
 
     #[test]
     fn test_routing_description_all_variants() {
@@ -225,32 +170,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_route_set_variables() {
-        let router = MessageRouter::new();
-        let msg = WssMessage::SetVariables {
-            session_id: "sess1".to_string(),
-            tenant_id: "tenant_a".to_string(),
-            service_name: "config_svc".to_string(),
-            variables: std::collections::HashMap::new(),
-        };
-        let decision = router.route(&msg);
-        match decision {
-            RoutingDecision::ServiceOperation(desc) => {
-                assert!(
-                    desc.contains("SetVariables"),
-                    "desc should contain SetVariables, got: {}",
-                    desc
-                );
-                assert!(
-                    desc.contains("config_svc"),
-                    "desc should contain service name, got: {}",
-                    desc
-                );
-            }
-            _ => panic!("Expected ServiceOperation for SetVariables"),
-        }
-    }
 
     #[test]
     fn test_route_refresh_token() {
@@ -281,14 +200,19 @@ mod tests {
     }
 
     #[test]
+    fn test_routing_description() {
+        let router = MessageRouter::new();
+        let decision = RoutingDecision::ServiceOperation("config".to_string());
+
+        let desc = router.describe(&decision);
+        assert!(desc.contains("Service operation"));
+        assert!(desc.contains("config"));
+    }
+
+    #[test]
     fn test_route_response_only_messages_are_terminal() {
         let router = MessageRouter::new();
         let terminal_msgs: Vec<WssMessage> = vec![
-            WssMessage::VariablesUpdated {
-                success: true,
-                message: "ok".to_string(),
-                service_name: "svc".to_string(),
-            },
             WssMessage::HeartbeatAck {
                 timestamp: "2025-01-01T00:00:00Z".to_string(),
             },
@@ -314,25 +238,6 @@ mod tests {
     fn test_route_remaining_terminal_variants() {
         let router = MessageRouter::new();
         let terminal_msgs: Vec<WssMessage> = vec![
-            WssMessage::VariablesData {
-                tenant_id: "t".to_string(),
-                service_name: "s".to_string(),
-                variables: std::collections::HashMap::new(),
-                timestamp: "2025-01-01T00:00:00Z".to_string(),
-            },
-            WssMessage::SubscriptionAck {
-                success: true,
-                message: "ok".to_string(),
-                service_name: "s".to_string(),
-            },
-            WssMessage::VariableChanged {
-                tenant_id: "t".to_string(),
-                service_name: "s".to_string(),
-                variable_name: "v".to_string(),
-                new_value: vec![],
-                changed_by_client: None,
-                timestamp: "2025-01-01T00:00:00Z".to_string(),
-            },
             WssMessage::FileMigration {
                 old_service_path: "old".to_string(),
                 new_service_path: "new".to_string(),

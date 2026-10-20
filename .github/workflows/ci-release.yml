@@ -21,7 +21,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: stable
 
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v4
@@ -53,7 +53,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: stable
 
       - name: Run all tests
         run: cargo test --all
@@ -104,7 +104,7 @@ jobs:
         if: steps.check_release.outputs.release_exists == 'false'
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: stable
 
       - name: Cache Cargo registry and build artifacts
         if: steps.check_release.outputs.release_exists == 'false'
