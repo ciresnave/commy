@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.17.1
+- Docs (R10 part 1): the stale `CLUSTERING_DEPLOYMENT.md`, `DOCKER_DEPLOYMENT.md`, `DOCKER_INTEGRATION.md`, `DOCKER_QUICK_REF.md`, `AUTHENTICATION_SETUP.md` and `docker-compose.cluster.yml` are removed; `docs/DEPLOYMENT.md` (settings, production start, Docker) and `docs/CLUSTERING.md` (experimental, unused, not deployable) replace them, and the README's run section and known limits are corrected (authentication is no longer development-only).
+- `Dockerfile`: builds with the lock file (`--locked`), listens on 8443, keeps state in a `/var/lib/commy` volume, and its health check is a TCP connect (the old one fetched `/health`, which the server does not serve, so a container was never healthy). Build tested from a clean `git archive`.
 ## 0.17.0
 - **R7: configuration file.** Every setting the binary reads can now be given in a TOML file, `COMMY_CONFIG` or `./commy.toml` (example: `commy.example.toml`). Precedence: environment variable, then file, then default, so existing deployments are unchanged. Keys are the variable names without `COMMY_`, lower case (`server_id`, `listen_addr`, `listen_port`, `tls_cert_path`, `tls_key_path`, `state_dir`, `auth_dir`, `max_service_size`, `drain_timeout_ms`, `fill_timeout_ms`, `audit_max_events`, `cluster_enabled`, `cluster_nodes`).
 - An unknown key, bad TOML, a value that is not a string, integer or boolean, or an unreadable `COMMY_CONFIG` file stops the start-up with a message (a misspelt setting is never silently ignored). `auth_master_secret`, `database_url` and `allow_dev_auth` are refused in a file, with a reason that does not echo the value: secrets and the insecure switch stay in the environment.

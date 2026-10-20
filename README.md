@@ -39,29 +39,23 @@ It is **not frozen** until the first coordinated release.
 
 ## Running the server
 
-| Variable | Meaning |
-|----------|---------|
-| `COMMY_TLS_CERT_PATH`, `COMMY_TLS_KEY_PATH` | PEM certificate and PKCS#8 key; both are needed for WSS. |
-| `COMMY_LISTEN_ADDR`, `COMMY_LISTEN_PORT` | Where to listen (see the startup log for the defaults). |
-| `COMMY_ALLOW_DEV_AUTH=1` | Accept any credential as admin. Development only; never on a reachable server. Without it nobody can authenticate yet: no real credential verifier is wired in. |
-| `COMMY_MAX_SERVICE_SIZE` | Largest service file in bytes a client may request (default 10 MiB). |
-| `COMMY_DRAIN_TIMEOUT_MS` | How long a resize waits for every client to drain (default 5000). |
-| `COMMY_FILL_TIMEOUT_MS` | How long a resize requester has to fill the new file (default 30000). |
-| `COMMY_STATE_DIR` | Directory for durable state: the service registry and the grants (default `./commy_state`, created private to the server and administrators). `off` keeps everything in memory, lost at exit. Sessions, nonces and rotations in flight are not stored; clients resynchronise after a restart. |
-| `COMMY_AUDIT_MAX_EVENTS` | How many audit events the durable audit log keeps (default 100000). When the log is full the oldest event is removed as each new one is written. |
-| `DATABASE_URL` | Backing store for tenant authentication data. **If unset the binary sets it to `postgresql://postgres:postgres@127.0.0.1:5432/commy`**, so a bare run expects a PostgreSQL there. Any value that is not `postgresql://` or `mysql://` (for example `memory`) selects in-memory storage, which needs no database. |
-
-Service files live under `tenant_<id>/` in the server's working directory.
+`docs/DEPLOYMENT.md` has the settings (environment variables or a TOML file), a minimal production
+start and Docker. In short: with `COMMY_ALLOW_DEV_AUTH` unset the server refuses to start without
+`COMMY_AUTH_MASTER_SECRET`, and clients authenticate with an API key or JWT issued by
+`auth-framework` for their tenant (`docs/AUTHENTICATION.md`). Service files live under `tenant_<id>/`
+in the working directory.
 
 ## Known limits
 
-- Authentication is development-only (`COMMY_ALLOW_DEV_AUTH`).
-- Service files carry no per-file operating-system permissions; a long random name inside a tenant
-  directory is the only barrier on the server's machine.
-- The audit log is durable but best effort: events are appended under `<state dir>/audit/` (one file per event, `audit/<sequence>`, JSON with a millisecond timestamp and the text), the newest `COMMY_AUDIT_MAX_EVENTS` (default 100,000) are kept and older ones are removed as new ones arrive. A write that fails is counted (`Server::audit_failures`) and printed, and never blocks the operation it describes; the changes themselves (grants, services, deletions) are recorded fail closed by the state store. Nothing signs or chains the events, so it is evidence, not tamper-proof.
-  permission); it needs a real implementation.
-- Many of the Markdown files in this repository predate the redesign and describe named variables,
-  the shared allocator and the containers, which were removed in 0.11.0. Trust this README and
+- One server only: the clustering code is experimental and unused (`docs/CLUSTERING.md`).
+- Service files carry no per-file operating-system permissions; a long random name inside an
+  unlisted tenant directory is the only barrier on the server's machine.
+- The audit log is durable but best effort and not tamper-evident (events are appended under
+  `<state dir>/audit/`; a write that fails is counted in `Server::audit_failures` and never blocks the
+  operation it describes). The grant operation log is not compacted.
+- Basic and custom credentials are refused; mTLS is later work.
+- Markdown files outside `README.md`, `ROADMAP.md`, `CHANGELOG.md` and `docs/` may still describe the
+  removed variable model (`tests/README.md` is about the storage-backend tests). Trust this README and
   `CHANGELOG.md`.
 
 ## Building and testing
