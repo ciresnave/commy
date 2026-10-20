@@ -1,9 +1,7 @@
-use commy::server::clustering::config::ClusteringConfig;
 use commy::{
     server::{WssServer, WssServerConfig},
     Server,
 };
-use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -76,26 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let use_tls = cert_path.is_some() && key_path.is_some();
 
-    // Configure PostgreSQL backend for auth-framework
-    // If not set, defaults to local PostgreSQL container
-    let _database_url = if let Ok(url) = env::var("DATABASE_URL") {
-        println!(
-            "[Commy] DATABASE_URL environment variable found: {}",
-            url.replace(":test_password@", ":***@")
-        );
-        url
-    } else {
-        let default_url = "postgresql://postgres:postgres@127.0.0.1:5432/commy".to_string();
-        unsafe {
-            env::set_var("DATABASE_URL", &default_url);
-        }
-        println!(
-            "[Commy] DATABASE_URL not set, using default: {}",
-            default_url.replace(":postgres@", ":***@")
-        );
-        default_url
-    };
-
     println!("[Commy] ════════════════════════════════════════════");
     println!("[Commy] Initializing Commy Server");
     println!("[Commy] ════════════════════════════════════════════");
@@ -109,20 +87,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("[Commy] TLS cert: {:?}", cert_path);
         println!("[Commy] TLS key: {:?}", key_path);
     }
-    println!("[Commy] Clustering enabled: {}", cluster_enabled);
-
-    if cluster_enabled {
-        let cluster_nodes = settings
-            .get("COMMY_CLUSTER_NODES")
-            .unwrap_or_else(|| "node-1:9000,node-2:9000,node-3:9000".to_string());
-        println!("[Commy] Cluster nodes: {}", cluster_nodes);
-    }
     println!("[Commy] ════════════════════════════════════════════");
 
-    // Initialize clustering configuration if enabled
+    // Clustering is experimental and does nothing in the server (docs/CLUSTERING.md).
     if cluster_enabled {
-        let _config = ClusteringConfig::new(server_id.clone());
-        println!("[Commy] ✓ Clustering configuration initialized");
+        eprintln!("[Commy] cluster_enabled is set but Commy has no supported multi-server mode: it is ignored");
     }
 
     // Create the core Commy server
@@ -171,35 +140,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let server = Arc::new(RwLock::new(server_value));
-
-    // Set up tenants with authentication
-    {
-        let mut srv = server.write().await;
-
-        // Get the DATABASE_URL that auth-framework will use
-        let db_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgresql://postgres:postgres@127.0.0.1:5432/commy".to_string());
-
-        println!("[Commy] Configuring authentication:");
-        println!("[Commy]   Backend: PostgreSQL");
-        println!(
-            "[Commy]   Database: {}",
-            db_url.replace(":postgres@", ":***@")
-        );
-
-        // Create "my_tenant"
-        let _tenant = srv.get_tenant("my_tenant");
-
-        println!("[Commy] ✓ Tenant created: my_tenant");
-        println!(
-            "[Commy] ✓ Authenticat ion configured (development mode: all credentials accepted)"
-        );
-        // Skip test credential display for now - focus on getting service operations working
-        // println!("[Commy] ✓ Displaying test API keys available in PostgreSQL...");
-        // let db_url = env::var("DATABASE_URL")
-        //     .unwrap_or_else(|_| "postgresql://postgres:postgres@127.0.0.1:5432/commy".to_string());
-        // register_test_credentials(&db_url).await;
-    }
 
     // Configure WSS server
     let wss_config = WssServerConfig {

@@ -24,8 +24,8 @@ refused in the file.
 | `COMMY_AUDIT_MAX_EVENTS` (`audit_max_events`) | Audit events kept | 100000 |
 | `COMMY_SERVER_ID` (`server_id`) | A name printed in the log | `node-1` |
 
-`COMMY_CLUSTER_ENABLED` and `COMMY_CLUSTER_NODES` are read and printed but do nothing: the server
-does not replicate (`docs/CLUSTERING.md`).
+`COMMY_CLUSTER_ENABLED` is read and only produces a warning: the server does not replicate
+(`docs/CLUSTERING.md`).
 
 ## A minimal production start
 

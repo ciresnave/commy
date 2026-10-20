@@ -1,3 +1,4 @@
+#![cfg(feature = "clustering")]
 //! Integration tests for consistency management in multi-server scenarios
 
 #[cfg(test)]

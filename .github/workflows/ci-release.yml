@@ -38,6 +38,9 @@ jobs:
       - name: Run all tests
         run: cargo test --all
 
+      - name: Run the experimental clustering tests
+        run: cargo test --all --features clustering
+
   test-unix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

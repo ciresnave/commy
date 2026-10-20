@@ -5,9 +5,11 @@
 was written for the original variable-based design and has not been reworked for the bare-bytes
 design (range frames, rotation, grants). The server's request path does not call it:
 
-- `COMMY_CLUSTER_ENABLED=true` makes the binary build a `ClusteringConfig` and print it. Nothing
-  connects to the nodes in `COMMY_CLUSTER_NODES`, nothing is replicated, and a second server shares no
-  state with the first.
+- `COMMY_CLUSTER_ENABLED=true` only makes the binary print a warning. Nothing connects to other
+  nodes, nothing is replicated, and a second server shares no state with the first.
+- Since 0.18.0 the cluster code is compiled only with the Cargo feature `clustering`, which is off by
+  default and not part of the published API of a default build (`cargo test --features clustering` keeps
+  it compiling and its tests running).
 - Services, grants, sessions and rotations live in the process (and its state directory) only.
 
 Do not deploy several Commy servers expecting high availability or shared services: clients of
@@ -21,5 +23,5 @@ server restores its services and grants; clients resynchronise.
 ## Status
 
 The scope of a future design is not decided and is held until the FAM to Synapse merge settles what
-replication belongs where. The code is kept for reference; `ROADMAP.md` row R10 tracks it, and a
-later release may put it behind a Cargo feature that is off by default.
+replication belongs where. The code is kept for reference behind the `clustering` feature;
+`ROADMAP.md` row R10 tracks it.

@@ -17,6 +17,8 @@
 //! - **MessageRouter**: Routes incoming WssMessages to appropriate handlers
 //! - **WsHandler**: Per-connection task managing individual client communication
 
+/// Experimental, unused by the server; build with `--features clustering` (see `docs/CLUSTERING.md`).
+#[cfg(feature = "clustering")]
 pub mod clustering;
 pub mod forwarding;
 pub mod framework_verifier;
