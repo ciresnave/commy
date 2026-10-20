@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.16.1
+- Docs only: `docs/RELEASE-PLAN.md` and `ROADMAP.md` brought up to date (versions read at `main` 0.16.0, known gaps without the authentication, durable-state and audit items that are done, R3 status).
+
 ## 0.16.0 (breaking)
 - **R4 PR3: the production verifier.** New `server::framework_verifier::FrameworkVerifier` checks API keys and JWTs with `auth-framework` 0.6.0-rc97, one framework instance per tenant with its own SQLite database (`<COMMY_AUTH_DIR>/<tenant>.sqlite`, default `commy_state/auth/`) and its own JWT secret. The binary now installs it whenever development authentication is off. A login attempt never creates a database: an unknown tenant is refused.
 - **Breaking for operators:** with `COMMY_ALLOW_DEV_AUTH` unset, the server exits at start-up unless `COMMY_AUTH_MASTER_SECRET` (at least 32 bytes) is set. There is no default secret.
