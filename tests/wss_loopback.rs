@@ -123,7 +123,7 @@ async fn next_binary(c: &mut Client) -> Vec<u8> {
 }
 
 async fn authenticate(c: &mut Client, tenant: &str) {
-    say(c, json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x"}})).await;
+    say(c, json!({"type":"Authenticate","data":{"tenant_id":tenant,"request_id":"a","protocol_version":1,"method":"api_key","key":"x"}})).await;
     let r = next_text(c).await;
     assert_eq!(r["data"]["success"], true, "{r}");
 }
@@ -291,7 +291,7 @@ async fn an_admin_opens_local_mapping_and_a_client_completes_the_handshake_over_
     let tenant = format!("lo_{}", uuid::Uuid::new_v4().simple());
     let (port, _server, certs) = start_server().await;
     let mut c = connect(port, &certs).await;
-    say(&mut c, json!({"type":"Authenticate","data":{"tenant_id":tenant,"api_key":"x","client_id":"admin"}})).await;
+    say(&mut c, json!({"type":"Authenticate","data":{"tenant_id":tenant,"request_id":"a","protocol_version":1,"method":"api_key","key":"x","client_id":"admin"}})).await;
     let r = next_text(&mut c).await;
     assert_eq!(r["data"]["client_id"], "admin", "{r}");
 

@@ -25,6 +25,7 @@ pub mod rotation;
 pub mod message_router;
 pub mod session_manager;
 pub mod tls;
+pub mod verify;
 pub mod ws_handler;
 
 use crate::Server;
