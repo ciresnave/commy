@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.12.1
+- Docs only: `docs/RELEASE-PLAN.md`, the plan for the first coordinated release with the SDK(s) and the `commy-wire` freeze (gate, sequence, known gaps); `ROADMAP.md` R1 points to it.
+
 ## 0.12.0
 - R3: an administrator opens a service to local mapping over the wire. New `SetLocalMapping{request_id, service_id, enabled}` (answered by `LocalMappingAck`) on `commy-wire` 0.3.2; needs `service:admin` on the service, is audited, and a refused request changes nothing. A service stays closed until opened, as before, so the binary now offers `path` and `nonce_path` (to a client with a write grant) without a code call to `Server::set_trusted_local`. Closing stops future offers.
 - New real-WSS test: open, get the path and nonce file, confirm, over TLS and WebSocket against the real server.
