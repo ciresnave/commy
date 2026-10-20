@@ -1,44 +1,40 @@
 # Build stage
-FROM rust:latest AS builder
+FROM rust:bookworm AS builder
 
 WORKDIR /build
 
-# Install build dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy source code
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
-# Build the binary
-RUN cargo build --release
+RUN cargo build --release --locked --bin commy
 
 # Runtime stage
 FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary from builder
 COPY --from=builder /build/target/release/commy /usr/local/bin/commy
 
-# Create directories for data and config
+# Durable state (services, grants, audit log, tenant auth databases) lives under /var/lib/commy;
+# mount a volume there. Service files are created under tenant_<id>/ in the working directory.
 RUN mkdir -p /var/lib/commy /etc/commy
+ENV COMMY_STATE_DIR=/var/lib/commy
+VOLUME ["/var/lib/commy"]
 
-# Expose ports
-EXPOSE 8000 8001 8002 8003 9000 9001 9002 9003
+EXPOSE 8443
 
-# Health check
+# The server has no HTTP health endpoint; healthy means the WSS port accepts a TCP connection.
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${COMMY_LISTEN_PORT:-8443}"]
 
-# Default command
 CMD ["commy"]
