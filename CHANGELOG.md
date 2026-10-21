@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.19.0
+- First coordinated release (R1): Commy 0.19.0, `commy-wire` 0.4.0 (unchanged), SDK 0.14.0. Gate 4 is closed by the owner (board 235): `ServiceFilePath` carries no generation (the new `file_id` is the handle), and the 1 MiB frame and 1024-range limits stay. No code change.
+- Known gaps for the release notes are listed in `docs/RELEASE-PLAN.md`.
 ## 0.18.2
 - A success reply to an SDK-protocol request that carried a `request_id` now echoes it (`Service`, `TenantResult` and `Result`, as errors already did since 0.13.3). The `Result` for `DeleteService`, `DeleteTenant` and `Disconnect` used to carry a fresh random id that nothing could match. Without a `request_id` in the request nothing is added.
 - Docs: `RELEASE-PLAN.md` SDK row and `ROADMAP.md` R3 corrected (SDK 0.13.0 on wire 0.4.0, SDK end-to-end job exists).

@@ -5,7 +5,7 @@ One release number for Commy and every SDK, so a developer knows which versions 
 portfolio PM allocates the number. `commy-wire` takes the same number as the Commy release it
 belongs to, because it is Commy's contract.
 
-State below is as read on 2026-10-20 at Commy `main` 0.18.2; the SDK and dirty-ranges rows are those lanes' to correct.
+State below is as read on 2026-10-20 at Commy `main` 0.18.2 (this release: 0.19.0); the SDK and dirty-ranges rows are those lanes' to correct.
 
 ## What is in place
 
@@ -30,10 +30,9 @@ Server rows of the plan (C1 to C6, C8 to C10) are merged, with R3's administrati
 3. **An end-to-end run against the real binary** covers: remote mirror, local mapping with the nonce,
    a resize with a remote fill and with a local fill, a straggler, a revocation by `Revoke`, and an
    abort. The server's `tests/wss_loopback.rs` is the server-side start; the SDK's e2e job is the other half.
-4. **No open layout question.** Today's known ones: whether `ServiceFilePath` should carry the
-   generation (currently the new `file_id` is the handle), the maximum frame and range-list sizes
-   (1 MiB and 1024), and the error-code list. Each is either answered in `spec/` or listed as a decision for
-   the owner.
+4. **No open layout question: closed, board 235.** `ServiceFilePath` carries no generation (the new
+   `file_id` is the handle; which format a service uses is the service's to say, not Commy's), and the
+   maximum frame (1 MiB) and range-list (1024) sizes stay. The wire is unchanged (`commy-wire` 0.4.0).
 5. **Write detection per OS** (R2): the README of the SDK / `dirty-ranges` names every OS and architecture
    as TESTED or UNVERIFIED, and trapping is the default only where TESTED. Commy itself carries bytes and
    does not depend on this, but the release notes must say it.
