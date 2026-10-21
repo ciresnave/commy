@@ -12,7 +12,7 @@ State below is as read on 2026-10-20 at Commy `main` 0.18.2 (this release: 0.19.
 | Piece | Version read | Where |
 |-------|--------------|-------|
 | Commy server | 0.18.2 on `main` (crates.io had 0.4.1 when last searched; the PM publishes) | this repo |
-| `commy-wire` | 0.4.0 published (the server speaks it since Commy 0.15.0) | crates.io |
+| `commy-wire` | 0.4.0 published; 0.5.0 (drops `RotationCommit.generation`) is what this release speaks, published by the PM first | crates.io |
 | `dirty-ranges` | 0.1.2 published | crates.io |
 | `role-system` | 1.3.0 (used for grants) | crates.io |
 | `commy-sdk-rust` | 0.13.0 on `main` against `commy-wire` 0.4.0 and `dirty-ranges =0.1.2`, both from crates.io; crates.io shows 0.1.0 (SDK lane, 2026-10-20) | SDK repo |
@@ -32,7 +32,8 @@ Server rows of the plan (C1 to C6, C8 to C10) are merged, with R3's administrati
    abort. The server's `tests/wss_loopback.rs` is the server-side start; the SDK's e2e job is the other half.
 4. **No open layout question: closed, board 235.** `ServiceFilePath` carries no generation (the new
    `file_id` is the handle; which format a service uses is the service's to say, not Commy's), and the
-   maximum frame (1 MiB) and range-list (1024) sizes stay. The wire is unchanged (`commy-wire` 0.4.0).
+   maximum frame (1 MiB) and range-list (1024) sizes stay. The owner also ruled that Commy does not track a
+   rotation count at all, so `RotationCommit.generation` is removed (`commy-wire` 0.5.0).
 5. **Write detection per OS** (R2): the README of the SDK / `dirty-ranges` names every OS and architecture
    as TESTED or UNVERIFIED, and trapping is the default only where TESTED. Commy itself carries bytes and
    does not depend on this, but the release notes must say it.

@@ -4,7 +4,7 @@
 //! is stored:
 //!
 //! - one record per service, `services/<service_id>` (tenant, name, file path, `file_id`,
-//!   generation, whether it is open to local mapping), replaced atomically on every change;
+//!   whether it is open to local mapping), replaced atomically on every change;
 //! - the grants as an append-only log of operations, `grants/<seq>`, replayed in order at start-up.
 //!
 //! Not stored, on purpose: sessions, nonces, rotations in flight, per-file sequence numbers (clients
@@ -28,7 +28,6 @@ pub struct ServiceRow {
     pub name: String,
     pub path: String,
     pub file_id: u32,
-    pub generation: u64,
     pub trusted_local: bool,
 }
 
@@ -335,7 +334,6 @@ mod tests {
             name: format!("svc{n}"),
             path: format!("tenant_t/service_{n}.mem"),
             file_id: n,
-            generation: 0,
             trusted_local: false,
         }
     }
@@ -356,12 +354,49 @@ mod tests {
         p.put_service("a", &row(1)).unwrap();
         p.put_service("b", &row(2)).unwrap();
         let mut changed = row(1);
-        changed.generation = 3;
+        changed.file_id = 3;
         changed.trusted_local = true;
         p.put_service("a", &changed).unwrap();
         p.delete_service("b", "t", "svc2").unwrap();
         let all = p.load_services().unwrap();
         assert_eq!(all, vec![("a".to_string(), changed)]);
+    }
+
+    /// A row as 0.18.x wrote it: it still has `generation`. State directories made before the field
+    /// was removed (commy-wire 0.5.0) must load.
+    #[derive(Serialize, Deserialize)]
+    struct RowWithGeneration {
+        tenant: String,
+        name: String,
+        path: String,
+        file_id: u32,
+        generation: u64,
+        trusted_local: bool,
+    }
+
+    impl Record for RowWithGeneration {
+        const KIND: &'static str = "commy-service";
+        const SCHEMA: u32 = 1;
+    }
+
+    #[test]
+    fn a_row_written_with_a_generation_still_loads() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        let old = RowWithGeneration {
+            tenant: "t".into(),
+            name: "svc9".into(),
+            path: "tenant_t/service_9.mem".into(),
+            file_id: 9,
+            generation: 4,
+            trusted_local: true,
+        };
+        p.store.put_record("services/old", &old).unwrap();
+        let all = p.load_services().unwrap();
+        let mut want = row(9);
+        want.name = "svc9".into();
+        want.path = "tenant_t/service_9.mem".into();
+        want.trusted_local = true;
+        assert_eq!(all, vec![("old".to_string(), want)]);
     }
 
     #[test]

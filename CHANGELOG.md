@@ -1,7 +1,8 @@
 # Changelog
 
 ## 0.19.0
-- First coordinated release (R1): Commy 0.19.0, `commy-wire` 0.4.0 (unchanged), SDK 0.14.0. Gate 4 is closed by the owner (board 235): `ServiceFilePath` carries no generation (the new `file_id` is the handle), and the 1 MiB frame and 1024-range limits stay. No code change.
+- First coordinated release (R1): Commy 0.19.0 on `commy-wire` 0.5.0, SDK 0.14.0. Gate 4 is closed by the owner (board 235): `ServiceFilePath` carries no generation (the new `file_id` is the handle), and the 1 MiB frame and 1024-range limits stay.
+- **Breaking: the rotation counter is gone** (owner: "We don't care how many times a service has been rotated to a new file."). `RotationCommit` no longer has `generation` (`commy-wire` 0.5.0); `ServiceRecord.generation` and `ServiceRow.generation` are removed and the audit line for a rotation no longer prints it. A state directory written by 0.18.x still loads: the stored `generation` is ignored (test `a_row_written_with_a_generation_still_loads`). A client that waited for `generation` to change should compare `new_file_id` with `old_file_id`.
 - Known gaps for the release notes are listed in `docs/RELEASE-PLAN.md`.
 ## 0.18.2
 - A success reply to an SDK-protocol request that carried a `request_id` now echoes it (`Service`, `TenantResult` and `Result`, as errors already did since 0.13.3). The `Result` for `DeleteService`, `DeleteTenant` and `Disconnect` used to carry a fresh random id that nothing could match. Without a `request_id` in the request nothing is added.

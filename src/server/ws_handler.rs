@@ -1774,8 +1774,8 @@ async fn run_rotation(
         g.rotations.finish(&service_id);
         match &result {
             Ok(sw) => g.audit(&format!(
-                "rotation COMMITTED rotation_id={} service={} old_file={} new_file={} generation={} size={}",
-                active.rotation_id, service_id, sw.old_file_id, sw.new_file_id, sw.generation, sw.size
+                "rotation COMMITTED rotation_id={} service={} old_file={} new_file={} size={}",
+                active.rotation_id, service_id, sw.old_file_id, sw.new_file_id, sw.size
             )),
             Err(e) => g.audit(&format!(
                 "rotation FAILED rotation_id={} service={}: {e}",
@@ -1839,7 +1839,6 @@ fn commit_message(
         reason,
         old_file_id: sw.old_file_id,
         new_file_id: sw.new_file_id,
-        generation: sw.generation,
         size: sw.size,
     })
 }
@@ -1892,7 +1891,6 @@ async fn abort_rotation(
 struct Switch {
     old_file_id: u32,
     new_file_id: u32,
-    generation: u64,
     size: u64,
     old_path: String,
 }
@@ -1953,20 +1951,17 @@ fn switch_to_prepared(
     if let Some(mut row) = g.row_of(service_id) {
         row.path = new_path.to_string();
         row.file_id = new_file_id;
-        row.generation += 1;
         g.persist_row(service_id, &row).map_err(|e| e.to_string())?;
     }
-    let generation = {
+    {
         let r = g.service_registry.get_mut(service_id).ok_or("service vanished")?;
         r.file_path = new_path.to_string();
         r.file_id = new_file_id;
         r.seq = 0;
-        r.generation += 1;
-        r.generation
-    };
+    }
     g.prepared.remove(&new_file_id);
     g.retired_files.insert(old_file_id);
-    Ok(Switch { old_file_id, new_file_id, generation, size, old_path })
+    Ok(Switch { old_file_id, new_file_id, size, old_path })
 }
 
 /// Revocation: build a same-size copy that keeps the old bytes, and switch to it.
@@ -2538,7 +2533,6 @@ async fn handle_sdk_message_inner(
                     name: service_name.to_string(),
                     path: file_path.clone(),
                     file_id,
-                    generation: 0,
                     trusted_local: false,
                 },
             ) {
@@ -2558,7 +2552,6 @@ async fn handle_sdk_message_inner(
                     file_id,
                     trusted_local: false,
                     seq: 0,
-                    generation: 0,
                 },
             );
 
@@ -4905,7 +4898,8 @@ mod rotation_tests {
         assert_eq!(ca["type"], "RotationCommit", "{ca}");
         assert_eq!(ca, cb, "every member gets the same commit");
         assert_eq!(ca["data"]["new_file_id"], new_fid);
-        assert_eq!((ca["data"]["generation"].as_u64(), ca["data"]["size"].as_u64()), (Some(1), Some(8192)));
+        assert_eq!(ca["data"]["size"].as_u64(), Some(8192));
+        assert!(ca["data"].get("generation").is_none(), "commy-wire 0.5.0 has no generation: {ca}");
 
         let (live_path, seq, retired, prepared_left) = {
             let g = server.read().await;
@@ -5492,18 +5486,20 @@ mod grant_message_tests {
         }
     }
 
-    async fn generation(server: &Arc<RwLock<Server>>, id: &str) -> u64 {
-        server.read().await.service_registry[id].generation
+    async fn file_id_of(server: &Arc<RwLock<Server>>, id: &str) -> u32 {
+        server.read().await.service_registry[id].file_id
     }
 
-    async fn wait_generation(server: &Arc<RwLock<Server>>, id: &str, want: u64) {
+    /// Wait until the service has moved to a file other than `from` (a rotation committed).
+    async fn wait_rotated(server: &Arc<RwLock<Server>>, id: &str, from: u32) -> u32 {
         for _ in 0..100 {
-            if generation(server, id).await >= want {
-                return;
+            let now = file_id_of(server, id).await;
+            if now != from {
+                return now;
             }
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
-        panic!("service never reached generation {want}");
+        panic!("service never left file {from}");
     }
 
     #[tokio::test]
@@ -5614,7 +5610,7 @@ mod grant_message_tests {
 
         let ack = call(&server, &mut admin.s, revoke("bob", Some(&one), &[])).await;
         assert_eq!(ack["type"], "GrantAck", "{ack}");
-        wait_generation(&server, &one, 1).await;
+        wait_rotated(&server, &one, fid).await;
 
         let loss = recv(&mut bob).await;
         assert_eq!(loss["type"], "Loss", "{loss}");
@@ -5639,12 +5635,12 @@ mod grant_message_tests {
         let t = tenant();
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut admin = peer(&server, &t, "admin", true).await;
-        let (one, _fid) = new_service(&server, &mut admin, &t, "one").await;
+        let (one, fid) = new_service(&server, &mut admin, &t, "one").await;
         call(&server, &mut admin.s, grant("bob", Some(&one), &["service:write"])).await;
         // bob is not a member of the file (never confirmed or resynced), revoke still moves the file
         let ack = call(&server, &mut admin.s, revoke("bob", Some(&one), &[])).await;
         assert_eq!(ack["type"], "GrantAck", "{ack}");
-        wait_generation(&server, &one, 1).await;
+        wait_rotated(&server, &one, fid).await;
         cleanup(&t);
     }
 
@@ -5653,11 +5649,11 @@ mod grant_message_tests {
         let t = tenant();
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut admin = peer(&server, &t, "admin", true).await;
-        let (one, _f) = new_service(&server, &mut admin, &t, "one").await;
+        let (one, f) = new_service(&server, &mut admin, &t, "one").await;
         let ack = call(&server, &mut admin.s, revoke("nobody", Some(&one), &[])).await;
         assert_eq!(ack["type"], "GrantAck", "{ack}");
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(generation(&server, &one).await, 0);
+        assert_eq!(file_id_of(&server, &one).await, f);
         cleanup(&t);
     }
 
@@ -5666,17 +5662,17 @@ mod grant_message_tests {
         let t = tenant();
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut admin = peer(&server, &t, "admin", true).await;
-        let (one, _f1) = new_service(&server, &mut admin, &t, "one").await;
-        let (two, _f2) = new_service(&server, &mut admin, &t, "two").await;
-        let (three, _f3) = new_service(&server, &mut admin, &t, "three").await;
+        let (one, f1) = new_service(&server, &mut admin, &t, "one").await;
+        let (two, f2) = new_service(&server, &mut admin, &t, "two").await;
+        let (three, f3) = new_service(&server, &mut admin, &t, "three").await;
         call(&server, &mut admin.s, grant("bob", None, &["service:read"])).await;
         call(&server, &mut admin.s, grant("bob", Some(&three), &["service:write"])).await;
         let ack = call(&server, &mut admin.s, revoke("bob", None, &[])).await;
         assert_eq!(ack["type"], "GrantAck", "{ack}");
-        wait_generation(&server, &one, 1).await;
-        wait_generation(&server, &two, 1).await;
+        wait_rotated(&server, &one, f1).await;
+        wait_rotated(&server, &two, f2).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(generation(&server, &three).await, 0, "bob still has a service grant on three");
+        assert_eq!(file_id_of(&server, &three).await, f3, "bob still has a service grant on three");
         let mut bob = peer(&server, &t, "bob", false).await;
         assert_eq!(call(&server, &mut bob.s, get_path(&one)).await["data"]["code"], "PERMISSION_DENIED");
         assert_eq!(call(&server, &mut bob.s, get_path(&three)).await["type"], "ServiceFilePath");
@@ -5690,14 +5686,14 @@ mod grant_message_tests {
             Server::with_dev_auth(true).with_rotation_min_interval(Duration::from_secs(3600)),
         ));
         let mut admin = peer(&server, &t, "admin", true).await;
-        let (one, _f) = new_service(&server, &mut admin, &t, "one").await;
+        let (one, f) = new_service(&server, &mut admin, &t, "one").await;
         call(&server, &mut admin.s, grant("bob", Some(&one), &["service:read"])).await;
         call(&server, &mut admin.s, grant("carol", Some(&one), &["service:read"])).await;
         call(&server, &mut admin.s, revoke("bob", Some(&one), &[])).await;
-        wait_generation(&server, &one, 1).await;
+        let second = wait_rotated(&server, &one, f).await;
         // an hour-long spacing would refuse a normal rotation now; a revocation goes through
         call(&server, &mut admin.s, revoke("carol", Some(&one), &[])).await;
-        wait_generation(&server, &one, 2).await;
+        wait_rotated(&server, &one, second).await;
         cleanup(&t);
     }
 }
@@ -6069,7 +6065,7 @@ mod persistence_tests {
         {
             let g = server.read().await;
             let rec = &g.service_registry[&id];
-            assert_eq!((rec.file_id, rec.trusted_local, rec.generation), (file_id, true, 0));
+            assert_eq!((rec.file_id, rec.trusted_local), (file_id, true));
             assert!(g.next_file_id > file_id, "new files never reuse an id");
         }
         // bob (no tenant-level permissions) still has exactly the grant he was given
@@ -6115,17 +6111,18 @@ mod persistence_tests {
             let id = create(&server, &mut admin, &t, "svc").await;
             grant(&server, &mut admin, "bob", &id, "service:read").await;
             let old_path = server.read().await.service_registry[&id].file_path.clone();
+            let old_fid = server.read().await.service_registry[&id].file_id;
             // revoking bob rotates the service
             call(&server, &mut admin, json!({"type":"Revoke","data":{"request_id":"v","client_id":"bob","service_id":id}})).await;
             for _ in 0..100 {
-                if server.read().await.service_registry[&id].generation == 1 {
+                if server.read().await.service_registry[&id].file_id != old_fid {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(30)).await;
             }
             let g = server.read().await;
             let rec = &g.service_registry[&id];
-            assert_eq!(rec.generation, 1);
+            assert_ne!(rec.file_id, old_fid);
             (id.clone(), old_path, rec.file_path.clone(), rec.file_id)
         };
         assert_ne!(old_path, new_path);
@@ -6133,7 +6130,7 @@ mod persistence_tests {
         assert_eq!(report.services_loaded, 1, "{report:?}");
         let g = server.read().await;
         let rec = &g.service_registry[&id];
-        assert_eq!((rec.file_path.as_str(), rec.file_id, rec.generation), (new_path.as_str(), new_fid, 1));
+        assert_eq!((rec.file_path.as_str(), rec.file_id), (new_path.as_str(), new_fid));
         cleanup(&t);
     }
 
@@ -6192,12 +6189,13 @@ mod persistence_tests {
         let id = create(&server, &mut admin, &t, "svc").await;
         grant(&server, &mut admin, "bob", &id, "service:read").await;
 
+        let old_fid = server.read().await.service_registry[&id].file_id;
         let r = call(&server, &mut admin, json!({"type":"Revoke","data":{"request_id":"v","client_id":"bob","service_id":id}})).await;
         assert_eq!(r["type"], "Error", "{r}");
         assert_eq!(r["data"]["code"], "INTERNAL_ERROR", "{r}");
         assert!(server.read().await.grants.allows(&t, "bob", &id, crate::server::grants::Action::Read), "the failed revoke must not take effect");
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert_eq!(server.read().await.service_registry[&id].generation, 0, "and must not rotate the file");
+        assert_eq!(server.read().await.service_registry[&id].file_id, old_fid, "and must not rotate the file");
         let events = server.read().await.audit_events().join("\\n");
         assert!(events.contains("grant REFUSED"), "{events}");
         cleanup(&t);

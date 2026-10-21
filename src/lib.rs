@@ -177,8 +177,6 @@ pub struct ServiceRecord {
     pub trusted_local: bool,
     /// The service's current sequence number (a snapshot carries it; C3 will advance it).
     pub seq: u64,
-    /// How many times the file has been rotated.
-    pub generation: u64,
 }
 
 pub struct Server {
@@ -425,7 +423,6 @@ impl Server {
                     file_id: row.file_id,
                     trusted_local: row.trusted_local,
                     seq: 0,
-                    generation: row.generation,
                 },
             );
             report.services_loaded += 1;
@@ -467,7 +464,6 @@ impl Server {
             name: r.service_name.clone(),
             path: r.file_path.clone(),
             file_id: r.file_id,
-            generation: r.generation,
             trusted_local: r.trusted_local,
         })
     }
