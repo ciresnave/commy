@@ -5,7 +5,7 @@
     license      = "MIT"
     name         = "commy"
     repository   = "https://github.com/ciresnave/commy"
-    version      = "0.18.2"
+    version      = "0.19.0"
 
 [features]
     # The cluster code (src/clustering.rs, src/server/clustering) is experimental and not used by the server.
@@ -20,7 +20,7 @@
 [dependencies]
     auth-framework    = { version = "0.6.0-rc97", features = ["sqlite-storage"] }
     chrono            = { version = "0.4", features = ["serde"] }
-commy-wire = "0.4.0"
+commy-wire = "0.5.0"
     futures           = "0.3"
 hkdf = "0.13"
     memmap2           = "0.9"
