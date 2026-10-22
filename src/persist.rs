@@ -74,6 +74,39 @@ pub struct AuditEvent {
     /// Milliseconds since the Unix epoch, server clock.
     pub ts_ms: u64,
     pub line: String,
+    /// Hash of the previous event (hex); empty for the first event of the chain. Events written
+    /// before the chain existed have neither this nor `hash`.
+    #[serde(default)]
+    pub prev: String,
+    /// SHA-256 (hex) over the sequence number, the time, `prev` and the line; empty on an event
+    /// written before the chain existed.
+    #[serde(default)]
+    pub hash: String,
+}
+
+/// The hash that chains an audit event to the one before it. The sequence number is inside it, so an
+/// event copied to another slot no longer matches.
+pub fn audit_hash(seq: u64, ts_ms: u64, prev: &str, line: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"commy-audit-v1\0");
+    h.update(seq.to_le_bytes());
+    h.update(ts_ms.to_le_bytes());
+    h.update((prev.len() as u64).to_le_bytes());
+    h.update(prev.as_bytes());
+    h.update(line.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What [`Persistence::verify_audit`] found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuditCheck {
+    /// Events examined.
+    pub events: u64,
+    /// How many of them carry a chain hash (older ones do not).
+    pub chained: u64,
+    /// Sequence number of the first event that does not fit the chain; `None` if all do.
+    pub first_bad: Option<u64>,
 }
 
 impl Record for AuditEvent {
@@ -113,8 +146,9 @@ pub struct Persistence {
     /// does not take the other down.
     audit_store: Store,
     next_seq: Mutex<u64>,
-    /// (next audit sequence, oldest audit sequence still stored, how many events to keep)
-    audit: Mutex<(u64, u64, u64)>,
+    /// (next audit sequence, oldest audit sequence still stored, how many events to keep, hash of
+    /// the newest event; empty if there is none or it predates the chain)
+    audit: Mutex<(u64, u64, u64, String)>,
 }
 
 const PAGE: usize = 256;
@@ -161,16 +195,26 @@ impl Persistence {
             store,
             audit_store,
             next_seq: Mutex::new(0),
-            audit: Mutex::new((0, 0, DEFAULT_AUDIT_LIMIT)),
+            audit: Mutex::new((0, 0, DEFAULT_AUDIT_LIMIT, String::new())),
         };
         let next = this.keys("grants/")?.last().map_or(0, |k| seq_of(k) + 1);
         *this.next_seq.lock().unwrap_or_else(|e| e.into_inner()) = next;
         let audit_keys = Self::keys_in(&this.audit_store, "audit/")?;
         let first = audit_keys.first().map_or(0, |k| audit_seq_of(k));
         let after_last = audit_keys.last().map_or(0, |k| audit_seq_of(k) + 1);
+        let last_hash = match audit_keys.last() {
+            Some(k) => this
+                .audit_store
+                .get_record::<AuditEvent>(k)
+                .map_err(err)?
+                .map(|e| e.hash)
+                .unwrap_or_default(),
+            None => String::new(),
+        };
         let mut a = this.audit.lock().unwrap_or_else(|e| e.into_inner());
         a.0 = after_last;
         a.1 = first;
+        a.3 = last_hash;
         drop(a);
         Ok(this)
     }
@@ -264,16 +308,21 @@ impl Persistence {
             .unwrap_or(0);
         let mut a = self.audit.lock().unwrap_or_else(|e| e.into_inner());
         let seq = a.0;
+        let prev = a.3.clone();
+        let hash = audit_hash(seq, ts_ms, &prev, line);
         self.audit_store
             .put_record(
                 &format!("audit/{seq:020}"),
                 &AuditEvent {
                     ts_ms,
                     line: line.to_string(),
+                    prev,
+                    hash: hash.clone(),
                 },
             )
             .map_err(err)?;
         a.0 += 1;
+        a.3 = hash;
         let mut removed = 0;
         while a.0 - a.1 > a.2 && removed < 8 {
             if self.audit_store.delete(&format!("audit/{:020}", a.1)).is_err() {
@@ -302,6 +351,57 @@ impl Persistence {
             }
         }
         Ok(out)
+    }
+
+    /// Check the hash chain over every stored audit event. An edited line, a removed or copied event
+    /// and a broken link are found; the oldest retained event is the anchor (pruning removes from the
+    /// front), so a log cut at the front or the tail verifies. To catch that, record
+    /// [`Persistence::audit_head`] somewhere the server cannot write and compare it later.
+    pub fn verify_audit(&self) -> Result<AuditCheck, PersistError> {
+        let mut check = AuditCheck {
+            events: 0,
+            chained: 0,
+            first_bad: None,
+        };
+        let mut before: Option<(u64, String)> = None;
+        for key in Self::keys_in(&self.audit_store, "audit/")? {
+            let seq = audit_seq_of(&key);
+            let Some(e) = self.audit_store.get_record::<AuditEvent>(&key).map_err(err)? else {
+                continue;
+            };
+            check.events += 1;
+            let ok = if e.hash.is_empty() {
+                // only the events from before the chain may lack a hash
+                before.is_none()
+            } else {
+                check.chained += 1;
+                let linked = match &before {
+                    Some((s, h)) => *s + 1 == seq && *h == e.prev,
+                    None => true,
+                };
+                let sound = e.hash == audit_hash(seq, e.ts_ms, &e.prev, &e.line);
+                before = Some((seq, e.hash.clone()));
+                linked && sound
+            };
+            if !ok && check.first_bad.is_none() {
+                check.first_bad = Some(seq);
+            }
+        }
+        Ok(check)
+    }
+
+    /// The newest chained audit event as stored: its sequence number and hash. Keep a copy outside
+    /// the server to notice a log that was cut short. `None` if there is no chained event.
+    pub fn audit_head(&self) -> Result<Option<(u64, String)>, PersistError> {
+        let Some(key) = Self::keys_in(&self.audit_store, "audit/")?.pop() else {
+            return Ok(None);
+        };
+        Ok(self
+            .audit_store
+            .get_record::<AuditEvent>(&key)
+            .map_err(err)?
+            .filter(|e| !e.hash.is_empty())
+            .map(|e| (audit_seq_of(&key), e.hash)))
     }
 
     /// Every stored grant operation, oldest first.
@@ -480,6 +580,132 @@ mod tests {
         let all = p.load_audit(None, usize::MAX).unwrap();
         assert_eq!(all.len(), n);
         assert!(all.windows(2).all(|w| w[0].1.line < w[1].1.line));
+    }
+
+    fn audit_lines(p: &Persistence) -> Vec<String> {
+        p.load_audit(None, usize::MAX).unwrap().into_iter().map(|(_, e)| e.line).collect()
+    }
+
+    fn five() -> Persistence {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        for i in 0..5 {
+            p.append_audit(&format!("e{i}")).unwrap();
+        }
+        p
+    }
+
+    const K2: &str = "audit/00000000000000000002";
+
+    #[test]
+    fn an_untouched_audit_log_verifies_as_a_chain() {
+        let c = five().verify_audit().unwrap();
+        assert_eq!((c.events, c.chained, c.first_bad), (5, 5, None));
+    }
+
+    #[test]
+    fn an_edited_audit_line_is_found_at_its_sequence() {
+        let p = five();
+        let mut e = p.audit_store.get_record::<AuditEvent>(K2).unwrap().unwrap();
+        e.line = "forged".into();
+        p.audit_store.put_record(K2, &e).unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, Some(2));
+    }
+
+    #[test]
+    fn an_edited_line_with_its_hash_recomputed_still_breaks_the_next_link() {
+        let p = five();
+        let mut e = p.audit_store.get_record::<AuditEvent>(K2).unwrap().unwrap();
+        e.line = "forged".into();
+        e.hash = audit_hash(2, e.ts_ms, &e.prev, &e.line);
+        p.audit_store.put_record(K2, &e).unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, Some(3));
+    }
+
+    #[test]
+    fn a_removed_middle_event_is_found() {
+        let p = five();
+        p.audit_store.delete(K2).unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, Some(3));
+    }
+
+    #[test]
+    fn a_copied_event_in_another_slot_is_found() {
+        let p = five();
+        let e = p.audit_store.get_record::<AuditEvent>("audit/00000000000000000001").unwrap().unwrap();
+        p.audit_store.put_record("audit/00000000000000000003", &e).unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, Some(3));
+    }
+
+    #[test]
+    fn the_chain_continues_across_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let p = Persistence::open(dir.path()).unwrap();
+            p.append_audit("one").unwrap();
+            p.append_audit("two").unwrap();
+        }
+        let p = Persistence::open(dir.path()).unwrap();
+        p.append_audit("three").unwrap();
+        let c = p.verify_audit().unwrap();
+        assert_eq!((c.events, c.chained, c.first_bad), (3, 3, None));
+    }
+
+    #[test]
+    fn pruning_the_oldest_events_does_not_break_verification() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        p.set_audit_limit(3);
+        for i in 0..10 {
+            p.append_audit(&format!("e{i}")).unwrap();
+        }
+        let c = p.verify_audit().unwrap();
+        assert_eq!((c.events, c.first_bad), (3, None));
+    }
+
+    /// An event as 0.19.x wrote it, before the chain existed.
+    #[derive(Serialize, Deserialize)]
+    struct UnchainedEvent {
+        ts_ms: u64,
+        line: String,
+    }
+
+    impl Record for UnchainedEvent {
+        const KIND: &'static str = "commy-audit";
+        const SCHEMA: u32 = 1;
+    }
+
+    #[test]
+    fn events_written_before_the_chain_existed_load_and_the_chain_starts_after_them() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let p = Persistence::open(dir.path()).unwrap();
+            for i in 0..2u64 {
+                let e = UnchainedEvent { ts_ms: 1, line: format!("old{i}") };
+                p.audit_store.put_record(&format!("audit/{i:020}"), &e).unwrap();
+            }
+        }
+        let p = Persistence::open(dir.path()).unwrap();
+        p.append_audit("new0").unwrap();
+        p.append_audit("new1").unwrap();
+        assert_eq!(audit_lines(&p), ["old0", "old1", "new0", "new1"]);
+        let c = p.verify_audit().unwrap();
+        assert_eq!((c.events, c.chained, c.first_bad), (4, 2, None));
+    }
+
+    #[test]
+    fn the_head_changes_with_every_event_and_shows_a_cut_tail() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        assert_eq!(p.audit_head().unwrap(), None);
+        p.append_audit("a").unwrap();
+        let h0 = p.audit_head().unwrap().unwrap();
+        p.append_audit("b").unwrap();
+        let h1 = p.audit_head().unwrap().unwrap();
+        assert_ne!(h0, h1);
+        assert_eq!((h0.0, h1.0), (0, 1));
+        // cutting the last event off leaves a chain that still verifies, but its head is no longer
+        // the one an operator recorded
+        p.audit_store.delete("audit/00000000000000000001").unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, None);
+        assert_eq!(p.audit_head().unwrap().unwrap(), h0);
     }
 
     #[test]

@@ -589,6 +589,20 @@ impl Server {
         }
     }
 
+    /// Check the audit log's hash chain (see [`persist::Persistence::verify_audit`]); `None` without
+    /// persistence.
+    pub fn verify_audit(&self) -> Result<Option<persist::AuditCheck>, persist::PersistError> {
+        self.persistence.as_ref().map(|p| p.verify_audit()).transpose()
+    }
+
+    /// Sequence number and hash of the newest chained audit event, to keep outside the server.
+    pub fn audit_head(&self) -> Result<Option<(u64, String)>, persist::PersistError> {
+        match &self.persistence {
+            Some(p) => p.audit_head(),
+            None => Ok(None),
+        }
+    }
+
     /// The recorded audit events, oldest first.
     pub fn audit_events(&self) -> Vec<String> {
         self.audit_log

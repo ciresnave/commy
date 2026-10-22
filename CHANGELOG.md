@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.19.2
+- Security: the audit log is hash-chained. Each event carries `prev` and `hash` (SHA-256 over sequence, time, previous hash and line); `Persistence::verify_audit` / `Server::verify_audit` return the first sequence that does not fit, and `audit_head` gives the newest hash to keep off the machine. Events from before the chain still load and the chain starts after them. A log cut at the front or tail verifies unless compared with a recorded head.
 ## 0.19.1
 - Security: `Cargo.lock` moves `rustls-webpki` 0.103.15 to 0.103.16 (RUSTSEC-2026-0382/0383). Lock-only; `cargo audit` and `cargo deny check advisories` are clean.
 ## 0.19.0
