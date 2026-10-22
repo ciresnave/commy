@@ -98,6 +98,29 @@ pub fn audit_hash(seq: u64, ts_ms: u64, prev: &str, line: &str) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// What [`Persistence::check_audit_anchor`] found when it compared a recorded head with the log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnchorCheck {
+    /// The log holds that event with that hash.
+    Matches,
+    /// The log holds an event at that sequence number with a different hash: it was rewritten.
+    Differs,
+    /// The event is not there although the log has not been pruned past it: the tail was cut.
+    Missing,
+    /// The event is older than the oldest retained one; pruning removed it, nothing can be said.
+    Pruned,
+}
+
+/// Read a head written by [`Persistence::write_audit_anchor`]: sequence number and hash.
+pub fn read_audit_anchor(path: &Path) -> Result<(u64, String), PersistError> {
+    let text = std::fs::read_to_string(path).map_err(err)?;
+    let mut it = text.split_whitespace();
+    match (it.next().and_then(|s| s.parse().ok()), it.next(), it.next()) {
+        (Some(seq), Some(hash), None) => Ok((seq, hash.to_string())),
+        _ => Err(PersistError(format!("{}: not an audit anchor", path.display()))),
+    }
+}
+
 /// What [`Persistence::verify_audit`] found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuditCheck {
@@ -404,6 +427,34 @@ impl Persistence {
             .map(|e| (audit_seq_of(&key), e.hash)))
     }
 
+    /// Compare a head recorded earlier (see [`Persistence::audit_head`]) with the log as it is now.
+    /// This finds what the chain alone cannot: a cut tail, or a whole log rewritten with fresh hashes.
+    pub fn check_audit_anchor(&self, seq: u64, hash: &str) -> Result<AnchorCheck, PersistError> {
+        let key = format!("audit/{seq:020}");
+        if let Some(e) = self.audit_store.get_record::<AuditEvent>(&key).map_err(err)? {
+            return Ok(if e.hash == hash { AnchorCheck::Matches } else { AnchorCheck::Differs });
+        }
+        let oldest = Self::keys_in(&self.audit_store, "audit/")?.first().map(|k| audit_seq_of(k));
+        Ok(match oldest {
+            Some(o) if seq < o => AnchorCheck::Pruned,
+            _ => AnchorCheck::Missing,
+        })
+    }
+
+    /// Write the current head to `path` as `<seq> <hash>`, replacing the file (written beside it
+    /// and renamed). Point it at a place the server's own account cannot rewrite, or ship the file
+    /// away. Returns `false`, writing nothing, if there is no chained event yet.
+    pub fn write_audit_anchor(&self, path: &Path) -> Result<bool, PersistError> {
+        let Some((seq, hash)) = self.audit_head()? else {
+            return Ok(false);
+        };
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, format!("{seq} {hash}
+")).map_err(err)?;
+        std::fs::rename(&tmp, path).map_err(err)?;
+        Ok(true)
+    }
+
     /// Every stored grant operation, oldest first.
     pub fn load_grant_ops(&self) -> Result<Vec<GrantOp>, PersistError> {
         let mut out = Vec::new();
@@ -706,6 +757,59 @@ mod tests {
         p.audit_store.delete("audit/00000000000000000001").unwrap();
         assert_eq!(p.verify_audit().unwrap().first_bad, None);
         assert_eq!(p.audit_head().unwrap().unwrap(), h0);
+    }
+
+    #[test]
+    fn a_recorded_head_matches_the_log_it_came_from_and_still_does_after_more_events() {
+        let p = five();
+        let (seq, hash) = p.audit_head().unwrap().unwrap();
+        assert_eq!(p.check_audit_anchor(seq, &hash).unwrap(), AnchorCheck::Matches);
+        p.append_audit("later").unwrap();
+        assert_eq!(p.check_audit_anchor(seq, &hash).unwrap(), AnchorCheck::Matches);
+    }
+
+    #[test]
+    fn a_cut_tail_is_found_against_a_recorded_head() {
+        let p = five();
+        let (seq, hash) = p.audit_head().unwrap().unwrap();
+        p.audit_store.delete("audit/00000000000000000004").unwrap();
+        p.audit_store.delete("audit/00000000000000000003").unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, None, "the chain alone cannot see it");
+        assert_eq!(p.check_audit_anchor(seq, &hash).unwrap(), AnchorCheck::Missing);
+    }
+
+    #[test]
+    fn a_rewritten_log_is_found_against_a_recorded_head() {
+        let p = five();
+        let (seq, hash) = p.audit_head().unwrap().unwrap();
+        let q = Persistence::open_with(Config::Memory).unwrap();
+        for i in 0..5 {
+            q.append_audit(&format!("other{i}")).unwrap();
+        }
+        assert_eq!(q.check_audit_anchor(seq, &hash).unwrap(), AnchorCheck::Differs);
+    }
+
+    #[test]
+    fn a_head_older_than_the_retained_events_is_reported_as_pruned_not_as_cut() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        p.set_audit_limit(3);
+        p.append_audit("a").unwrap();
+        let (seq, hash) = p.audit_head().unwrap().unwrap();
+        for i in 0..10 {
+            p.append_audit(&format!("e{i}")).unwrap();
+        }
+        assert_eq!(p.check_audit_anchor(seq, &hash).unwrap(), AnchorCheck::Pruned);
+    }
+
+    #[test]
+    fn the_head_is_written_to_and_read_from_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("anchor.txt");
+        let p = five();
+        assert!(p.write_audit_anchor(&file).unwrap());
+        assert_eq!(read_audit_anchor(&file).unwrap(), p.audit_head().unwrap().unwrap());
+        let empty = Persistence::open_with(Config::Memory).unwrap();
+        assert!(!empty.write_audit_anchor(&dir.path().join("none")).unwrap(), "nothing to write yet");
     }
 
     #[test]
