@@ -603,6 +603,27 @@ impl Server {
         }
     }
 
+    /// Write the audit head to `path` (see [`persist::Persistence::write_audit_anchor`]); `false` if
+    /// there is nothing to write or no persistence.
+    pub fn write_audit_anchor(&self, path: &std::path::Path) -> Result<bool, persist::PersistError> {
+        match &self.persistence {
+            Some(p) => p.write_audit_anchor(path),
+            None => Ok(false),
+        }
+    }
+
+    /// Compare the head recorded in `path` with the audit log now; `None` without persistence.
+    pub fn check_audit_anchor(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<Option<persist::AnchorCheck>, persist::PersistError> {
+        let Some(p) = &self.persistence else {
+            return Ok(None);
+        };
+        let (seq, hash) = persist::read_audit_anchor(path)?;
+        p.check_audit_anchor(seq, &hash).map(Some)
+    }
+
     /// The recorded audit events, oldest first.
     pub fn audit_events(&self) -> Vec<String> {
         self.audit_log
