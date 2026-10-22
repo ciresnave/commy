@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.19.4
+- Security: `Cargo.lock` moves `tokio` 1.54.0 to 1.54.1 (RUSTSEC-2026-0384, `Interval` race). Lock-only. The only `tokio::time::interval` use is the cluster heartbeat in `src/server/clustering/heartbeat.rs`, behind the default-off `clustering` feature, so a default build does not reach it.
 ## 0.19.3
 - R13: `Server::write_audit_anchor(path)` and `Server::check_audit_anchor(path)` (and the `Persistence` equivalents) record the audit head and compare it later, which finds a cut tail or a log rewritten with fresh hashes (the chain alone cannot). Nothing calls them automatically; the operator keeps the file where the server's account cannot rewrite it.
 ## 0.19.2
