@@ -67,6 +67,6 @@ start Commy.
 
 - **Restart:** services and grants come back; sessions, nonces and rotations in flight do not, and
   clients resynchronise.
-- **Audit log:** `<state dir>/audit/`, best effort, hash-chained (`Server::verify_audit` finds an edited, copied or removed event; record `Server::audit_head` off the machine to also catch a cut tail).
+- **Audit log:** `<state dir>/audit/`, best effort, hash-chained (`Server::verify_audit` detects modification, insertion and reordering, not truncation; record `Server::audit_head` off the machine to also catch a cut tail).
 - **Backups:** the state directory plus the auth directory. Service contents are not persisted by
   Commy beyond the files themselves.
