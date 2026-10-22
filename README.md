@@ -50,7 +50,9 @@ in the working directory.
 - One server only: the clustering code is experimental, unused and compiled only with the Cargo feature `clustering` (`docs/CLUSTERING.md`).
 - Service files carry no per-file operating-system permissions; a long random name inside an
   unlisted tenant directory is the only barrier on the server's machine.
-- The audit log is durable but best effort and not tamper-evident (events are appended under
+- The audit log is durable but best effort, and hash-chained: an edited, copied or removed event is found by
+  `Server::verify_audit`, but a log cut at the front or the tail is found only against a head you recorded
+  elsewhere (`Server::audit_head`). Events are appended under
   `<state dir>/audit/`; a write that fails is counted in `Server::audit_failures` and never blocks the
   operation it describes). The grant operation log is not compacted.
 - Basic and custom credentials are refused; mTLS is later work.

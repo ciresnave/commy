@@ -51,7 +51,7 @@ Every step is its own PR with a version line; none merges before the previous on
 ## Known gaps to state in the release notes
 
 - Authentication is API key or JWT checked by `auth-framework`, one database per tenant; creating tenants, users and keys is that framework's tooling, not Commy's (`docs/AUTHENTICATION.md`). Basic and custom credentials are refused, mTLS is later, and the old MessagePack protocol is development-only until it is removed (R12).
-- The grant operation log and the audit log are durable but not compacted, and the audit log is not tamper-evident.
+- The grant operation log and the audit log are durable but not compacted. The audit log is hash-chained, which finds edits, copies and removals inside it; a cut tail is found only against a head recorded elsewhere.
 - Limits and timeouts are environment variables, not a configuration file. (R7)
 - Service files carry no per-file permissions; the unlisted tenant directory and a random name are the
   barrier on the server's machine. (R8)
