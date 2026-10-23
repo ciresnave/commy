@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.19.5
+- Dependencies: `persistant` 0.8.21 to 0.9.24 (lock was 0.8.22). No source change: the 0.9.0 break is in the `sql!` macro, which commy does not use, and the `Config`, `Faults`, `Needs` and blocking `Store` calls it does use build and pass unchanged (383 lib tests plus the integration tests). `tokio` is already `1.54.1` in the manifest and the lock.
 ## 0.19.4
 - Security: `Cargo.lock` moves `tokio` 1.54.0 to 1.54.1 (RUSTSEC-2026-0384, `Interval` race). The manifest now requires `tokio = "1.54.1"` so a downstream lockfile that still holds 1.54.0 must update when it enables `clustering`. The only `tokio::time::interval` use is the cluster heartbeat in `src/server/clustering/heartbeat.rs`, behind the default-off `clustering` feature, so a default build does not reach it.
 ## 0.19.3
