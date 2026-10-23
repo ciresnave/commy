@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.21.4
+- Tests: `tests/windows_second_account.rs` (R9) checks the tenant-directory ACL with a second real Windows account, AntSpawn's restricted `antspawn-run`, by running jobs through AntSpawn's certified `account` launcher. As that account: a default-ACL control directory can be listed and read; a file in a `create_private` directory opens by its full path; that directory cannot be listed; a `make_file_private` file cannot be read; a `create_secret` directory cannot be passed through. **Passed** on 2026-10-23 (1 test, 9.72 s, no `UNVERIFIED` line) with `spawn` built from AntSpawn `c9a5bc87`. It needs the task `AntSpawnRunner`, `COMMY_R9_SPAWN` (a built `spawn.exe`) and `COMMY_R9_PROBE` (the `spawn-probe.exe` beside it); without them it prints `UNVERIFIED` and returns. Files are opened with the probe's plain `read`, not `cmd /c type`, which lists the parent directory first (an earlier version of the test was refused for that reason, a test bug and not an ACL one).
 ## 0.21.3
 - CI: the advisory CodeRipper portfolio check (`portfolio` job, reusable workflow pinned to `ciresnave/coderipper` `c665210a`). Not a required check and no rule is silenced; its findings go to ROADMAP rows.
 ## 0.21.2

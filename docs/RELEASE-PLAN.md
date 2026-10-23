@@ -67,7 +67,7 @@ Every step is its own PR with a version line; none merges before the previous on
 - Limits and timeouts are environment variables, not a configuration file. (R7)
 - Service files carry no per-file permissions; the unlisted tenant directory and a random name are the
   barrier on the server's machine. (R8)
-- The tenant-directory ACL was not checked with a second real Windows account. (R9)
+- The tenant-directory ACL was checked with a second real Windows account on 2026-10-23 (R9; `tests/windows_second_account.rs`, needs AntSpawn's account setup, so GitHub CI does not run it); antivirus was not checked.
 - The clustering code predates the redesign. (R10)
 
 ## Not in scope
