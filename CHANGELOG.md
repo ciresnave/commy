@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.19.8
+- Security: `auth-framework` 0.6.0-rc97 to 0.6.0-rc121. rc85 to rc114 are yanked for leaked secrets. Note the pre-release order: Cargo compares `rc97` and `rc121` as text, so `rc97` sorts above `rc121`; the requirement `0.6.0-rc121` therefore does not exclude the yanked `rc97`, and the lock is what keeps it out. The lock also moves `jsonwebtoken` 10.4.0 to 11.1.0 and drops `lettre` and its dependencies, which rc121 no longer pulls in.
 ## 0.19.7
 - Security: `Cargo.lock` moves `ctutils` 0.4.3 to 0.4.5 (RUSTSEC-2026-0385, fixed in 0.4.4). Lock-only.
 ## 0.19.6
