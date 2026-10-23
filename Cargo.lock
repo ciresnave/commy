@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "commy"
-version = "0.19.4"
+version = "0.19.5"
 dependencies = [
  "auth-framework",
  "chrono",
@@ -2638,9 +2638,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "persistant"
-version = "0.8.22"
+version = "0.9.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c959a99f492557c746665c8852753820f263a2f83f55118fb1095bcae9e90972"
+checksum = "b85ec72740426fb5670d54ea3d950022fdc71f8a9e75230c577e79f0a935f7c4"
 dependencies = [
  "futures-util",
  "opendal",
@@ -3920,7 +3920,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
