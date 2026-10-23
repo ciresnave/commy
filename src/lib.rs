@@ -18,6 +18,10 @@ pub use server::message_router::{MessageRouter, RoutingDecision};
 pub use server::WssServer;
 pub use server::WssServerConfig;
 
+/// The exact `auth-framework` this crate is built on. Its types appear in this crate's public API
+/// (`FrameworkVerifier`, `TenantAuthContext`), so name them through this path to get the same copy.
+pub use auth_framework;
+
 /// A service: a memory-mapped file of bare bytes, from offset 0. Commy writes nothing into it
 /// (no header, no allocator state); what the bytes mean is up to the clients that map it.
 pub struct Service {
