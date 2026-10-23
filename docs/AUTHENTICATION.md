@@ -62,5 +62,6 @@ The `a_provisioned_sqlite_database_is_found_and_its_keys_and_tokens_work` test i
 
 ## Not covered
 
-Basic and custom credentials are refused (`UnsupportedMethod`). The MessagePack `Authenticate` stays
-development-only until that protocol is removed (ROADMAP R12). mTLS is later work.
+Basic and custom credentials are refused (`UnsupportedMethod`). The old MessagePack protocol, with its
+development-only `Authenticate`, was removed in 0.21.0 (ROADMAP R12): `Authenticate` is the JSON message of
+`commy-wire`. mTLS is later work.

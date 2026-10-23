@@ -4,7 +4,7 @@
 //! Implements WebSocket protocol (RFC 6455) with binary frames for MessagePack messages.
 //! Manages WebSocket frame reading/writing, session lifecycle, and message routing.
 
-use crate::protocol::{ClientSession, ClientState, WssMessage};
+use crate::protocol::{ClientSession, ClientState};
 use crate::Server;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -92,54 +92,15 @@ pub async fn handle_connection(
                             }
                         }
                     }
-                    Message::Binary(data) => {
-                        // Parse incoming MessagePack message from binary frame
-                        match rmp_serde::from_slice::<WssMessage>(&data) {
-                            Ok(wss_message) => {
-                                println!(
-                                    "Received {} message from {}",
-                                    wss_message.message_type(),
-                                    peer_addr
-                                );
-
-                                // Route message to handler
-                                if let Some(response) =
-                                    handle_message(wss_message, &mut session, Arc::clone(&_server))
-                                        .await
-                                {
-                                    // Send response back as WebSocket binary frame
-                                    if let Ok(serialized) = rmp_serde::to_vec(&response) {
-                                        if let Err(e) =
-                                            write.send(Message::Binary(serialized.into())).await
-                                        {
-                                            eprintln!("Failed to send WebSocket frame: {}", e);
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                // Update session state
-                                session.last_activity = chrono::Utc::now();
-                                sessions
-                                    .write()
-                                    .await
-                                    .insert(session.session_id.clone(), session.clone());
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "Failed to deserialize message from {}: {}",
-                                    peer_addr, e
-                                );
-                                // Send error response
-                                let error_response = WssMessage::Error {
-                                    code: "INVALID_REQUEST".to_string(),
-                                    message: format!("Invalid message format: {}", e),
-                                    details: None,
-                                };
-                                if let Ok(serialized) = rmp_serde::to_vec(&error_response) {
-                                    let _ = write.send(Message::Binary(serialized.into())).await;
-                                }
-                            }
+                    Message::Binary(_) => {
+                        // The only binary frames are range frames (handled above). The older
+                        // MessagePack protocol was removed in 0.21.0 (R12): refuse, in JSON.
+                        eprintln!("Refused a non-range binary frame from {}", peer_addr);
+                        let err = invalid_request(
+                            "binary frames must be range frames; the MessagePack protocol was removed",
+                        );
+                        if let Ok(text) = serde_json::to_string(&err) {
+                            let _ = write.send(Message::Text(text.into())).await;
                         }
                     }
                     Message::Text(text) => {
@@ -207,13 +168,9 @@ pub async fn handle_connection(
                                     "Received invalid JSON message from {}: {}",
                                     peer_addr, text
                                 );
-                                let error = WssMessage::Error {
-                                    code: "INVALID_REQUEST".to_string(),
-                                    message: "Invalid JSON format".to_string(),
-                                    details: None,
-                                };
-                                if let Ok(serialized) = rmp_serde::to_vec(&error) {
-                                    let _ = write.send(Message::Binary(serialized.into())).await;
+                                let error = invalid_request("Invalid JSON format");
+                                if let Ok(serialized) = serde_json::to_string(&error) {
+                                    let _ = write.send(Message::Text(serialized.into())).await;
                                 }
                             }
                         }
@@ -267,181 +224,9 @@ pub async fn handle_connection(
     Ok(())
 }
 
-/// Handles an incoming WssMessage and returns optional response
-async fn handle_message(
-    message: WssMessage,
-    session: &mut ClientSession,
-    server: Arc<RwLock<Server>>,
-) -> Option<WssMessage> {
-    use crate::protocol::WssMessage::*;
-
-    match message {
-        Authenticate {
-            tenant_id,
-            client_id,
-            credentials: _credentials,
-            auth_method,
-            ..
-        } => {
-            println!(
-                "Authentication request for tenant: {} using method: {}",
-                tenant_id, auth_method
-            );
-
-            if crate::tenant_id::TenantId::parse(&tenant_id).is_err() {
-                return Some(AuthenticationResponse {
-                    success: false,
-                    message: "Invalid tenant id".to_string(),
-                    server_version: env!("CARGO_PKG_VERSION").to_string(),
-                    token: None,
-                    expires_in_seconds: None,
-                });
-            }
-
-            // No credential verifier is wired in yet, so without development authentication
-            // nobody can authenticate. Fail closed.
-            if !server.read().await.dev_auth {
-                return Some(AuthenticationResponse {
-                    success: false,
-                    message: DEV_AUTH_REFUSED.to_string(),
-                    server_version: env!("CARGO_PKG_VERSION").to_string(),
-                    token: None,
-                    expires_in_seconds: None,
-                });
-            }
-
-            // Get tenant from server
-            let auth_context_arc = {
-                let server_guard = server.read().await;
-                let tenant = match server_guard.tenants.get(&tenant_id) {
-                    Some(t) => t,
-                    None => {
-                        return Some(AuthenticationResponse {
-                            success: false,
-                            message: format!("Tenant '{}' not found", tenant_id),
-                            server_version: env!("CARGO_PKG_VERSION").to_string(),
-                            token: None,
-                            expires_in_seconds: None,
-                        });
-                    }
-                };
-                Arc::clone(&tenant.auth_context)
-            };
-            let _ = auth_context_arc; // Keep reference to auth context (may be used in future)
-                                      // Auth-framework is registered but NOT initialized to avoid configuration issues
-                                      // In production, implement proper auth-framework integration with database backend
-
-            if !client_id.is_empty() && !valid_client_id(&client_id) {
-                return Some(AuthenticationResponse {
-                    success: false,
-                    message: "Invalid client id".to_string(),
-                    server_version: env!("CARGO_PKG_VERSION").to_string(),
-                    token: None,
-                    expires_in_seconds: None,
-                });
-            }
-            session.client_id = Some(if client_id.is_empty() {
-                session.session_id.clone()
-            } else {
-                client_id
-            });
-
-            // Grant full admin permissions to all clients in development mode
-            session.tenant_id = Some(tenant_id.clone());
-            session.state = ClientState::Active;
-            let token_str = format!(
-                "dev-token-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-            );
-            session.token = Some(token_str.clone());
-
-            let permissions = crate::auth::PermissionSet::admin();
-            session.permissions = Some(permissions.clone());
-
-            println!(
-                "Client {} authenticated successfully (DEV MODE) with admin permissions",
-                session.session_id
-            );
-
-            Some(AuthenticationResponse {
-                success: true,
-                message: "Authentication successful (development mode)".to_string(),
-                server_version: env!("CARGO_PKG_VERSION").to_string(),
-                token: Some(token_str),
-                expires_in_seconds: Some(3600),
-            })
-        }
-
-        Heartbeat { .. } => {
-            session.last_heartbeat_ack = Some(chrono::Utc::now());
-            Some(HeartbeatAck {
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            })
-        }
-
-        Logout { token: _, .. } => {
-            println!("Logout request from session: {}", session.session_id);
-
-            // Auth-framework handles token management internally
-            // Just clear the session state
-            session.token = None;
-            session.permissions = None;
-            session.state = ClientState::Disconnected;
-            // Clear subscriptions so the client no longer receives variable
-            // change notifications after logout.
-            session.subscriptions.clear();
-            session.tenant_id = None;
-            session.client_id = None;
-
-            println!("Client {} logged out successfully", session.session_id);
-
-            Some(LogoutResponse {
-                success: true,
-                message: "Logout successful".to_string(),
-            })
-        }
-
-        RefreshToken {
-            current_token: _, ..
-        } => {
-            println!("Token refresh request from session: {}", session.session_id);
-
-            // Auth-framework handles token refresh internally via its validate/create methods
-            // For now, just return a response that token refresh needs to be re-authenticated
-            Some(TokenRefreshResponse {
-                success: false,
-                message: "Token refresh requires re-authentication with auth-framework".to_string(),
-                token: None,
-                expires_in_seconds: None,
-            })
-        }
-
-        Error {
-            code,
-            message,
-            details,
-        } => {
-            eprintln!("Client error: {} - {}", code, message);
-            if let Some(d) = details {
-                eprintln!("Details: {}", d);
-            }
-            None
-        }
-
-        _ => {
-            eprintln!("Unhandled message type");
-            None
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::PermissionSet;
 
     #[test]
     fn test_session_creation() {
@@ -461,22 +246,6 @@ mod tests {
         assert_eq!(session.state, ClientState::Active);
     }
 
-    #[tokio::test]
-    async fn test_handle_heartbeat() {
-        let message = WssMessage::Heartbeat {
-            session_id: "test_session".to_string(),
-        };
-        let mut session = ClientSession::new();
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::HeartbeatAck { .. } => (),
-            _ => panic!("Expected HeartbeatAck response"),
-        }
-    }
-
     #[test]
     fn test_session_subscription() {
         let mut session = ClientSession::new();
@@ -485,297 +254,6 @@ mod tests {
 
         assert_eq!(session.subscriptions.len(), 2);
         assert!(session.subscriptions.contains("service_a/var1"));
-    }
-
-
-
-
-
-    #[tokio::test]
-    async fn test_logout() {
-        // Set development environment
-        unsafe {
-            std::env::set_var("ENVIRONMENT", "development");
-        }
-
-        let mut server = Server::with_dev_auth(true);
-        let _tenant = server.get_tenant("test_tenant");
-
-        // Create a session with a token (simulating authenticated state)
-        let mut session = ClientSession::new();
-        session.token = Some("test_token_123".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-        session.state = ClientState::Active;
-        session.permissions = Some(PermissionSet::read_only());
-
-        let server_arc = Arc::new(RwLock::new(server));
-
-        let message = WssMessage::Logout {
-            session_id: session.session_id.clone(),
-            token: "test_token_123".to_string(),
-        };
-
-        let response = handle_message(message, &mut session, server_arc.clone()).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::LogoutResponse { success, .. } => {
-                assert!(success, "Logout should succeed");
-            }
-            _ => panic!("Expected LogoutResponse"),
-        }
-
-        // Verify session state cleared
-        assert!(session.token.is_none(), "Token should be cleared");
-        assert!(
-            session.permissions.is_none(),
-            "Permissions should be cleared"
-        );
-        assert_eq!(
-            session.state,
-            ClientState::Disconnected,
-            "State should be Disconnected"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_token_refresh_returns_error() {
-        // Set development environment
-        unsafe {
-            std::env::set_var("ENVIRONMENT", "development");
-        }
-
-        let mut server = Server::with_dev_auth(true);
-        let _tenant = server.get_tenant("test_tenant");
-
-        // Create a session with a valid token
-        let mut session = ClientSession::new();
-        session.token = Some("old_token_123".to_string());
-        session.tenant_id = Some("test_tenant".to_string());
-        session.state = ClientState::Active;
-
-        let server_arc = Arc::new(RwLock::new(server));
-
-        let message = WssMessage::RefreshToken {
-            session_id: session.session_id.clone(),
-            current_token: "old_token_123".to_string(),
-        };
-
-        let response = handle_message(message, &mut session, server_arc.clone()).await;
-
-        // Current implementation returns error for token refresh
-        // (auth-framework doesn't expose refresh API directly)
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::TokenRefreshResponse {
-                success, message, ..
-            } => {
-                assert!(
-                    !success,
-                    "Token refresh should indicate requires re-authentication"
-                );
-                assert!(
-                    message.contains("re-authentication"),
-                    "Should mention re-authentication"
-                );
-            }
-            _ => panic!("Expected TokenRefreshResponse"),
-        }
-
-        // Session token should remain unchanged
-        assert_eq!(session.token, Some("old_token_123".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_token_refresh_with_invalid_token() {
-        // Set development environment
-        unsafe {
-            std::env::set_var("ENVIRONMENT", "development");
-        }
-
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-
-        let mut session = ClientSession::new();
-        session.tenant_id = Some("test_tenant".to_string());
-
-        let message = WssMessage::RefreshToken {
-            session_id: session.session_id.clone(),
-            current_token: "invalid_token".to_string(),
-        };
-
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::TokenRefreshResponse { success, .. } => {
-                assert!(!success, "Token refresh should fail (not supported)");
-            }
-            _ => panic!("Expected TokenRefreshResponse"),
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Security / auth boundary tests
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// #2: token == None is the un-authenticated path — should be rejected even
-    /// if the request carries a valid-looking tenant_id.
-
-    /// #1: client authenticated to tenant_a requests GetVariables for tenant_b.
-    /// The cross-tenant guard added to handle_message must reject this.
-
-    /// #1: same cross-tenant guard must apply to SetVariables.
-
-    /// #8: Authenticate to a tenant that has not been registered in the Server.
-    #[tokio::test]
-    async fn test_authenticate_unknown_tenant_returns_failure() {
-        unsafe {
-            std::env::set_var("ENVIRONMENT", "development");
-        }
-        // Server with NO tenants registered
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-
-        let mut session = ClientSession::new();
-        let message = WssMessage::Authenticate {
-            tenant_id: "ghost_tenant".to_string(),
-            client_id: "client_001".to_string(),
-            client_version: "0.1.0".to_string(),
-            credentials: "any_token".to_string(),
-            auth_method: "jwt".to_string(),
-        };
-
-        let response = handle_message(message, &mut session, server).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::AuthenticationResponse {
-                success, message, ..
-            } => {
-                assert!(!success, "Auth to non-existent tenant must fail");
-                assert!(
-                    message.contains("ghost_tenant"),
-                    "Error should name the missing tenant: {}",
-                    message
-                );
-            }
-            other => panic!("Expected AuthenticationResponse, got {:?}", other),
-        }
-    }
-
-    /// #7: after Logout the session token is cleared; a subsequent GetVariables
-    /// must be rejected and subscriptions must be empty.
-
-
-
-
-
-
-    /// Authenticate to a tenant that EXISTS in the server must succeed and must
-    /// fully populate the session (tenant_id, token, state, admin permissions).
-    #[tokio::test]
-    async fn test_authenticate_known_tenant_succeeds_and_sets_session() {
-        unsafe {
-            std::env::set_var("ENVIRONMENT", "development");
-        }
-        let tenant_id = "known_org";
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        // Pre-create the tenant so the handler can find it
-        server.write().await.get_tenant(tenant_id);
-
-        let mut session = ClientSession::new();
-        let message = WssMessage::Authenticate {
-            tenant_id: tenant_id.to_string(),
-            client_id: "client_42".to_string(),
-            client_version: "0.1.0".to_string(),
-            credentials: "some-api-key".to_string(),
-            auth_method: "api_key".to_string(),
-        };
-
-        let response = handle_message(message, &mut session, Arc::clone(&server)).await;
-
-        assert!(response.is_some());
-        match response.unwrap() {
-            WssMessage::AuthenticationResponse {
-                success,
-                token,
-                expires_in_seconds,
-                ..
-            } => {
-                assert!(success, "Auth to existing tenant must succeed");
-                assert!(token.is_some(), "Successful auth must provide a token");
-                assert!(
-                    expires_in_seconds.is_some(),
-                    "Successful auth must provide an expiry"
-                );
-            }
-            other => panic!("Expected AuthenticationResponse, got {:?}", other),
-        }
-        // Session state must be fully populated
-        assert_eq!(
-            session.tenant_id.as_deref(),
-            Some(tenant_id),
-            "Session tenant_id must be set after successful auth"
-        );
-        assert_eq!(
-            session.state,
-            ClientState::Active,
-            "Session state must be Active after successful auth"
-        );
-        assert!(
-            session.token.is_some(),
-            "Session token must be set after successful auth"
-        );
-        assert!(
-            session.permissions.is_some(),
-            "Session permissions must be set after successful auth"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_logout_clears_the_token_and_subscriptions() {
-        unsafe {
-            std::env::set_var("ENVIRONMENT", "development");
-        }
-        let mut server = Server::with_dev_auth(true);
-        let _t = server.get_tenant("tenant_x");
-        let server_arc = Arc::new(RwLock::new(server));
-
-        let mut session = ClientSession::new();
-        session.token = Some("tok_xyz".to_string());
-        session.tenant_id = Some("tenant_x".to_string());
-        session.state = ClientState::Active;
-        session.permissions = Some(crate::auth::PermissionSet::admin());
-        session.subscriptions.insert("svc/var1".to_string());
-
-        let logout = WssMessage::Logout {
-            session_id: session.session_id.clone(),
-            token: "tok_xyz".to_string(),
-        };
-        let resp = handle_message(logout, &mut session, Arc::clone(&server_arc)).await;
-        assert!(matches!(
-            resp,
-            Some(WssMessage::LogoutResponse { success: true, .. })
-        ));
-        assert!(session.token.is_none(), "token must be None after logout");
-        assert!(
-            session.subscriptions.is_empty(),
-            "subscriptions must be cleared on logout"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_server_only_message_sent_by_client_returns_none() {
-        // HeartbeatAck is a server-only message; a client sending it gets no response.
-        let mut session = ClientSession::new();
-        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
-        let msg = WssMessage::HeartbeatAck {
-            timestamp: chrono::Utc::now().to_rfc3339(),
-        };
-        let resp = handle_message(msg, &mut session, server).await;
-        assert!(
-            resp.is_none(),
-            "Server-only message sent by client must return None (no response)"
-        );
     }
 }
 ///
@@ -1235,19 +713,6 @@ async fn handle_local_mapping(
 /// Most merged ranges one remote flush may accumulate before `FlushEnd`; keeps a fragmented writer
 /// from growing the pending list without bound.
 const MAX_PENDING_RANGES: usize = 65_536;
-
-/// Longest client id accepted.
-const MAX_CLIENT_ID_LEN: usize = 128;
-
-/// A client id is how grants name a client: 1 to 128 characters of letters, digits and `_ - . @ :`.
-/// (No `|`, which the grant store uses as a separator, and no spaces or control characters.)
-fn valid_client_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= MAX_CLIENT_ID_LEN
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@' | ':'))
-}
 
 /// The identity a session's grants are filed under: its client id, or its session id when it has
 /// none.
@@ -2898,6 +2363,7 @@ async fn handle_sdk_message_inner(
 
         "Heartbeat" => {
             // Heartbeat is just a keep-alive, respond with acknowledgment
+            session.last_heartbeat_ack = Some(chrono::Utc::now());
             Some(serde_json::json!({
                 "type": "Heartbeat",
                 "data": {
@@ -5842,36 +5308,6 @@ mod dev_auth_identity_tests {
         cleanup(&t);
     }
 
-    #[tokio::test]
-    async fn the_messagepack_authenticate_sets_the_client_id_too() {
-        let t = tenant();
-        let mut server = Server::with_dev_auth(true);
-        let _ = server.get_tenant(&t);
-        let server = Arc::new(RwLock::new(server));
-        let mut s = ClientSession::new();
-        let msg = WssMessage::Authenticate {
-            tenant_id: t.clone(),
-            client_id: "carol".to_string(),
-            client_version: "1".to_string(),
-            credentials: "x".to_string(),
-            auth_method: "api_key".to_string(),
-        };
-        let r = handle_message(msg, &mut s, Arc::clone(&server)).await;
-        assert!(matches!(r, Some(WssMessage::AuthenticationResponse { success: true, .. })), "{r:?}");
-        assert_eq!(s.client_id.as_deref(), Some("carol"));
-        let mut s2 = ClientSession::new();
-        let bad = WssMessage::Authenticate {
-            tenant_id: t.clone(),
-            client_id: "no good".to_string(),
-            client_version: "1".to_string(),
-            credentials: "x".to_string(),
-            auth_method: "api_key".to_string(),
-        };
-        let r = handle_message(bad, &mut s2, server).await;
-        assert!(matches!(r, Some(WssMessage::AuthenticationResponse { success: false, .. })), "{r:?}");
-        assert!(s2.token.is_none());
-        cleanup(&t);
-    }
 }
 
 #[cfg(test)]
@@ -6958,21 +6394,42 @@ mod credential_verifier_tests {
         cleanup(&t);
     }
 
-    #[tokio::test]
-    async fn the_messagepack_authenticate_is_refused_unless_development_authentication_is_on() {
-        // A production server (verifier configured, dev auth off) must not accept the legacy path.
-        let t = tenant();
-        let server = production(&t);
+}
+
+#[cfg(test)]
+mod removed_protocol_tests {
+    use super::*;
+
+    async fn call(msg: serde_json::Value) -> serde_json::Value {
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut s = ClientSession::new();
-        let msg = WssMessage::Authenticate {
-            tenant_id: t.clone(),
-            client_id: "alice@example.com".to_string(),
-            client_version: "1".to_string(),
-            credentials: "k-alice-secret".to_string(),
-            auth_method: "api_key".to_string(),
-        };
-        let r = handle_message(msg, &mut s, server).await;
-        assert!(matches!(r, Some(WssMessage::AuthenticationResponse { success: false, .. })), "{r:?}");
-        assert!(s.token.is_none());
+        handle_sdk_message(msg, &mut s, server).await.expect("every message gets a reply")
+    }
+
+    /// Plan C6: the named-variable messages are gone from the wire. Moved here from the removed
+    /// `WssMessage` decode test (R12): a client that still sends one gets an error, not a handler.
+    #[tokio::test]
+    async fn the_named_variable_messages_get_an_error_reply() {
+        for name in [
+            "GetVariables", "VariablesData", "SetVariables", "VariablesUpdated",
+            "VariableChanged", "Subscribe", "SubscriptionAck",
+        ] {
+            let r = call(serde_json::json!({ "type": name, "data": {} })).await;
+            assert_eq!(r["type"], "Error", "{name}: {r}");
+        }
+    }
+
+    /// The JSON heartbeat sets the field `ClientSession::is_healthy` reads (the removed MessagePack
+    /// heartbeat did; R12).
+    #[tokio::test]
+    async fn the_json_heartbeat_records_the_acknowledgement() {
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = ClientSession::new();
+        assert!(s.last_heartbeat_ack.is_none());
+        let r = handle_sdk_message(serde_json::json!({ "type": "Heartbeat", "data": {} }), &mut s, server)
+            .await
+            .unwrap();
+        assert_eq!(r["type"], "Heartbeat");
+        assert!(s.last_heartbeat_ack.is_some());
     }
 }

@@ -1,147 +1,12 @@
-//! WebSocket protocol for COMMY
+//! Client session state for COMMY
 //!
-//! Defines messages and message routing for remote Client-Server communication
-//! over WSS (WebSocket Secure).
-//!
-//! ## Serialization Strategy
-//! All WssMessage types are serialized using **MessagePack** for maximum efficiency:
-//! - 40-50% smaller payloads compared to JSON
-//! - 20-50% faster serialization and deserialization  
-//! - Maintains compatibility with custom tenant services
-//! - Example: Heartbeat message 64 bytes (JSON) → 31 bytes (MessagePack)
+//! The wire protocol itself is JSON text frames plus the binary range frames of `commy-wire`; the
+//! older MessagePack `WssMessage` protocol was removed in 0.21.0 (R12).
 
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Unique identifier for WSS connections/clients
 pub type ClientSessionId = String;
-
-/// WebSocket message types for COMMY protocol
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
-pub enum WssMessage {
-    /// Client->Server: Authenticate with credentials
-    Authenticate {
-        tenant_id: String,
-        client_id: String,
-        client_version: String,
-        credentials: String, // Token or credentials
-        auth_method: String, // "api_key", "jwt", "mtls", "custom", etc.
-    },
-
-    /// Server->Client: Authentication response
-    AuthenticationResponse {
-        success: bool,
-        message: String,
-        server_version: String,
-        token: Option<String>,
-        expires_in_seconds: Option<u64>,
-    },
-
-    /// Client->Server: Heartbeat/keepalive
-    Heartbeat { session_id: ClientSessionId },
-
-    /// Server->Client: Heartbeat acknowledgment
-    HeartbeatAck { timestamp: String },
-
-    /// Server->Client: Permission revocation notice
-    PermissionRevoked { reason: String, detail: String },
-
-    /// Server->Client: Request to migrate to new service file
-    FileMigration {
-        old_service_path: String,
-        new_service_path: String,
-        service_name: String,
-        reason: String,
-    },
-
-    /// Client->Server: Migration acknowledgment
-    MigrationAck { success: bool, service_name: String },
-
-    /// Client->Server: Check permission
-    CheckPermission {
-        session_id: ClientSessionId,
-        tenant_id: String,
-        permission: String, // Serialized Permission
-    },
-
-    /// Server->Client: Permission check response
-    PermissionResponse { has_permission: bool },
-
-    /// Server->Client: Server-to-server: sync token/session across cluster
-    TokenSync {
-        client_id: String,
-        token: String,
-        tenant_id: String,
-        permissions: String, // Serialized PermissionSet
-        expires_at: String,  // ISO 8601
-    },
-
-    /// Server->Client: Cluster node availability ping
-    ClusterPing { node_id: String, timestamp: String },
-
-    /// Client->Server: Cluster ping response
-    ClusterPingResponse { node_id: String, timestamp: String },
-
-    /// Client->Server: Error message
-    Error {
-        code: String,
-        message: String,
-        details: Option<String>,
-    },
-
-    /// Generic acknowledgment
-    Ack { message_id: String },
-
-    /// Client->Server: Logout and revoke token
-    Logout {
-        session_id: ClientSessionId,
-        token: String,
-    },
-
-    /// Server->Client: Logout acknowledgment
-    LogoutResponse { success: bool, message: String },
-
-    /// Client->Server: Refresh token before expiration
-    RefreshToken {
-        session_id: ClientSessionId,
-        current_token: String,
-    },
-
-    /// Server->Client: New token after refresh
-    TokenRefreshResponse {
-        success: bool,
-        message: String,
-        token: Option<String>,
-        expires_in_seconds: Option<u64>,
-    },
-}
-
-impl WssMessage {
-    /// Get a human-readable type name for logging
-    pub fn message_type(&self) -> &'static str {
-        match self {
-            WssMessage::Authenticate { .. } => "Authenticate",
-            WssMessage::AuthenticationResponse { .. } => "AuthenticationResponse",
-            WssMessage::Heartbeat { .. } => "Heartbeat",
-            WssMessage::HeartbeatAck { .. } => "HeartbeatAck",
-            WssMessage::PermissionRevoked { .. } => "PermissionRevoked",
-            WssMessage::FileMigration { .. } => "FileMigration",
-            WssMessage::MigrationAck { .. } => "MigrationAck",
-            WssMessage::CheckPermission { .. } => "CheckPermission",
-            WssMessage::PermissionResponse { .. } => "PermissionResponse",
-            WssMessage::TokenSync { .. } => "TokenSync",
-            WssMessage::ClusterPing { .. } => "ClusterPing",
-            WssMessage::ClusterPingResponse { .. } => "ClusterPingResponse",
-            WssMessage::Error { .. } => "Error",
-            WssMessage::Ack { .. } => "Ack",
-            WssMessage::Logout { .. } => "Logout",
-            WssMessage::LogoutResponse { .. } => "LogoutResponse",
-            WssMessage::RefreshToken { .. } => "RefreshToken",
-            WssMessage::TokenRefreshResponse { .. } => "TokenRefreshResponse",
-        }
-    }
-}
 
 /// Client connection state
 #[derive(Clone, Debug, PartialEq)]
@@ -255,23 +120,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_wss_message_types() {
-        let auth_msg = WssMessage::Authenticate {
-            tenant_id: "tenant1".to_string(),
-            client_id: "client1".to_string(),
-            client_version: "0.1.0".to_string(),
-            credentials: "secret".to_string(),
-            auth_method: "api_key".to_string(),
-        };
-        assert_eq!(auth_msg.message_type(), "Authenticate");
-
-        let heartbeat = WssMessage::Heartbeat {
-            session_id: "session1".to_string(),
-        };
-        assert_eq!(heartbeat.message_type(), "Heartbeat");
-    }
-
-    #[test]
     fn test_client_session_creation() {
         let session = ClientSession::new();
         assert_eq!(session.state, ClientState::Unauthenticated);
@@ -326,44 +174,6 @@ mod tests {
     }
 
     #[test]
-    fn test_json_roundtrip_authenticate_and_heartbeat() {
-        // WssMessage uses #[serde(tag = "type", content = "data")] (adjacently tagged),
-        // which is supported by serde_json but not rmp_serde for struct variants.
-        // JSON is the correct serialisation format to test here.
-
-        // Authenticate
-        let msg = WssMessage::Authenticate {
-            tenant_id: "tenant_1".to_string(),
-            client_id: "client_1".to_string(),
-            client_version: "0.1.0".to_string(),
-            credentials: "secret".to_string(),
-            auth_method: "api_key".to_string(),
-        };
-        let encoded = serde_json::to_string(&msg).expect("json encode failed");
-        let decoded: WssMessage = serde_json::from_str(&encoded).expect("json decode failed");
-        assert_eq!(decoded.message_type(), "Authenticate");
-
-        // Heartbeat
-        let hb = WssMessage::Heartbeat {
-            session_id: "sess-42".to_string(),
-        };
-        let encoded = serde_json::to_string(&hb).expect("json encode heartbeat failed");
-        let decoded: WssMessage =
-            serde_json::from_str(&encoded).expect("json decode heartbeat failed");
-        assert_eq!(decoded.message_type(), "Heartbeat");
-
-        // Error
-        let err = WssMessage::Error {
-            code: "TEST".to_string(),
-            message: "test error".to_string(),
-            details: Some("details".to_string()),
-        };
-        let encoded = serde_json::to_string(&err).expect("encode error failed");
-        let decoded: WssMessage = serde_json::from_str(&encoded).expect("decode error failed");
-        assert_eq!(decoded.message_type(), "Error");
-    }
-
-    #[test]
     fn test_authenticate_updates_last_activity() {
         let mut session = ClientSession::new();
         // Rewind last_activity to a known past moment
@@ -381,103 +191,5 @@ mod tests {
         assert_eq!(session.client_id, Some("cli_42".to_string()));
         assert_eq!(session.tenant_id, Some("tenant_x".to_string()));
         assert_eq!(session.state, ClientState::Active);
-    }
-
-    #[test]
-    fn test_all_message_type_names() {
-        let cases: &[(&WssMessage, &str)] = &[
-            (&WssMessage::AuthenticationResponse {
-                success: true,
-                message: String::new(),
-                server_version: String::new(),
-                token: None,
-                expires_in_seconds: None,
-            }, "AuthenticationResponse"),
-            (&WssMessage::HeartbeatAck {
-                timestamp: String::new(),
-            }, "HeartbeatAck"),
-            (&WssMessage::PermissionRevoked {
-                reason: String::new(),
-                detail: String::new(),
-            }, "PermissionRevoked"),
-            (&WssMessage::FileMigration {
-                old_service_path: String::new(),
-                new_service_path: String::new(),
-                service_name: String::new(),
-                reason: String::new(),
-            }, "FileMigration"),
-            (&WssMessage::MigrationAck {
-                success: true,
-                service_name: String::new(),
-            }, "MigrationAck"),
-            (&WssMessage::CheckPermission {
-                session_id: String::new(),
-                tenant_id: String::new(),
-                permission: String::new(),
-            }, "CheckPermission"),
-            (&WssMessage::PermissionResponse {
-                has_permission: true,
-            }, "PermissionResponse"),
-            (&WssMessage::TokenSync {
-                client_id: String::new(),
-                token: String::new(),
-                tenant_id: String::new(),
-                permissions: String::new(),
-                expires_at: String::new(),
-            }, "TokenSync"),
-            (&WssMessage::ClusterPing {
-                node_id: String::new(),
-                timestamp: String::new(),
-            }, "ClusterPing"),
-            (&WssMessage::ClusterPingResponse {
-                node_id: String::new(),
-                timestamp: String::new(),
-            }, "ClusterPingResponse"),
-            (&WssMessage::Error {
-                code: String::new(),
-                message: String::new(),
-                details: None,
-            }, "Error"),
-            (&WssMessage::Ack {
-                message_id: String::new(),
-            }, "Ack"),
-            (&WssMessage::Logout {
-                session_id: String::new(),
-                token: String::new(),
-            }, "Logout"),
-            (&WssMessage::LogoutResponse {
-                success: true,
-                message: String::new(),
-            }, "LogoutResponse"),
-            (&WssMessage::RefreshToken {
-                session_id: String::new(),
-                current_token: String::new(),
-            }, "RefreshToken"),
-            (&WssMessage::TokenRefreshResponse {
-                success: true,
-                message: String::new(),
-                token: None,
-                expires_in_seconds: None,
-            }, "TokenRefreshResponse"),
-        ];
-
-        for (msg, expected) in cases {
-            assert_eq!(msg.message_type(), *expected, "Wrong type name for {}", expected);
-        }
-    }
-
-    #[test]
-    fn the_named_variable_messages_no_longer_exist_on_the_wire() {
-        // Plan C6: a client that still sends one gets a decode error, not a handler.
-        for name in [
-            "GetVariables", "VariablesData", "SetVariables", "VariablesUpdated",
-            "VariableChanged", "Subscribe", "SubscriptionAck",
-        ] {
-            let json = serde_json::json!({ "type": name, "data": {} });
-            assert!(
-                serde_json::from_value::<WssMessage>(json).is_err(),
-                "{name} must not decode"
-            );
-        }
     }
 }

@@ -8,13 +8,12 @@
 //! # Architecture
 //!
 //! ```text
-//! Client → WSS Connection → WssServer (with TLS) → SessionManager → MessageRouter → Tenant/Service
+//! Client → WSS Connection → WssServer (with TLS) → SessionManager → WsHandler → Tenant/Service
 //! ```
 //!
 //! - **WssServer**: Listens on a WSS port, accepts TLS connections, performs WebSocket handshake
 //! - **TlsConfiguration**: Loads and manages TLS certificates
 //! - **SessionManager**: Tracks active clients, manages permissions, broadcasts updates
-//! - **MessageRouter**: Routes incoming WssMessages to appropriate handlers
 //! - **WsHandler**: Per-connection task managing individual client communication
 
 /// Experimental, unused by the server; build with `--features clustering` (see `docs/CLUSTERING.md`).
@@ -25,14 +24,13 @@ pub mod framework_verifier;
 pub mod grants;
 pub mod local_mapping;
 pub mod rotation;
-pub mod message_router;
 pub mod session_manager;
 pub mod tls;
 pub mod verify;
 pub mod ws_handler;
 
 use crate::Server;
-use crate::protocol::{ClientSession, WssMessage};
+use crate::protocol::ClientSession;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tls::TlsConfiguration;
@@ -205,24 +203,6 @@ impl WssServer {
             session.last_activity = chrono::Utc::now();
         }
     }
-
-    /// Broadcast a message to all connected clients of a tenant
-    pub async fn broadcast_to_tenant(&self, tenant_id: &str, _message: WssMessage) {
-        let sessions = self.sessions.read().await;
-        for session in sessions.values() {
-            if session
-                .tenant_id
-                .as_ref()
-                .map_or(false, |id| id == tenant_id)
-            {
-                // In production, send message to client through their outbound queue
-                println!(
-                    "Broadcasting to client {} in tenant {}",
-                    session.session_id, tenant_id
-                );
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -359,32 +339,6 @@ mod tests {
         // Should not panic for a session that does not exist
         wss.update_session_state("ghost_id").await;
         assert_eq!(wss.active_sessions().await, 0);
-    }
-
-    // ─── WssServer::broadcast_to_tenant ───────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_broadcast_to_tenant_completes_without_panic() {
-        use crate::protocol::ClientSession;
-        let server = Arc::new(RwLock::new(Server::new()));
-        let wss = WssServer::new(WssServerConfig::default(), server);
-
-        // Insert two sessions: one matching tenant, one not
-        let mut session_a = ClientSession::new();
-        session_a.tenant_id = Some("tenant_a".to_string());
-        let mut session_b = ClientSession::new();
-        session_b.tenant_id = Some("tenant_b".to_string());
-
-        {
-            let mut s = wss.sessions.write().await;
-            s.insert(session_a.session_id.clone(), session_a);
-            s.insert(session_b.session_id.clone(), session_b);
-        }
-
-        let msg = WssMessage::Heartbeat { session_id: "test".to_string() };
-        wss.broadcast_to_tenant("tenant_a", msg).await;
-        // No assertion needed — just verify it completes without panic
-        assert_eq!(wss.active_sessions().await, 2);
     }
 
     // ─── WssServer::start_token_cleanup_task ──────────────────────────────────
