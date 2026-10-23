@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.19.9
+- Security: `auth-framework` 0.6.0-rc121 to 0.6.0-rc126; rc121 is yanked for SAML authentication bypasses. The requirement is now the exact `=0.6.0-rc126`: Cargo orders `rcN` as text, so `rc97` sorts above `rc126` and a bare lower bound would admit yanked builds. Commy does not use SAML or token-exchange (no `saml` or `token_exchange` in `src`, `Cargo.toml` or the tests). The lock also moves `orion` 0.17.15 to 0.18.0 and `pasetors` 0.7.8 to 0.8.1, auth-framework dependencies.
 ## 0.19.8
 - Security: `auth-framework` 0.6.0-rc97 to 0.6.0-rc121. rc85 to rc114 are yanked for leaked secrets. Note the pre-release order: Cargo compares `rc97` and `rc121` as text, so `rc97` sorts above `rc121`; the requirement `0.6.0-rc121` therefore does not exclude the yanked `rc97`, and the lock is what keeps it out. The lock also moves `jsonwebtoken` 10.4.0 to 11.1.0 and drops `lettre` and its dependencies, which rc121 no longer pulls in.
 ## 0.19.7
