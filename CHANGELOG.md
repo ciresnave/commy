@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.19.7
+- Security: `Cargo.lock` moves `ctutils` 0.4.3 to 0.4.5 (RUSTSEC-2026-0385, fixed in 0.4.4). Lock-only.
 ## 0.19.6
 - Tests: `e_other_tenant_cannot_use_a_service_it_does_not_own` removes the `tenant_a_<hex>` and `tenant_b_<hex>` directories it created; it left them in the working directory. No product change.
 ## 0.19.5
