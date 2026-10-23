@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.19.6
+- Tests: `e_other_tenant_cannot_use_a_service_it_does_not_own` removes the `tenant_a_<hex>` and `tenant_b_<hex>` directories it created; it left them in the working directory. No product change.
 ## 0.19.5
 - Dependencies: `persistant` 0.8.21 to 0.9.24 (lock was 0.8.22). No source change: the 0.9.0 break is in the `sql!` macro, which commy does not use, and the `Config`, `Faults`, `Needs` and blocking `Store` calls it does use build and pass unchanged (383 lib tests plus the integration tests). `tokio` is already `1.54.1` in the manifest and the lock.
 ## 0.19.4
