@@ -11,8 +11,9 @@
 //!   the files inside (inherit-only, files only), so no account but the server and administrators
 //!   can list it.
 //!
-//! Nothing here can be tested against a second real account on one machine; the tests check the mode
-//! or the access control list, and that the owner can still use the directory.
+//! The unit tests check the mode or the access control list, and that the owner can still use the
+//! directory. The second-account check on Windows is `tests/windows_second_account.rs` (R9), which runs
+//! jobs as AntSpawn's restricted account and needs that account's setup.
 
 use std::io;
 use std::path::Path;
