@@ -3,9 +3,9 @@
 //! Handles revoking client permissions and migrating them to new service files
 //! with optional honeypot detection.
 
-use crate::protocol::{ClientSessionId, WssMessage};
+use crate::protocol::ClientSessionId;
 use crate::auth::AuthError;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use thiserror::Error;
@@ -219,29 +219,6 @@ impl RevocationManager {
         }
     }
 
-    /// Generate migration notification message
-    pub fn create_migration_message(
-        old_path: &Path,
-        new_path: &Path,
-        service_name: &str,
-        reason: &str,
-    ) -> WssMessage {
-        WssMessage::FileMigration {
-            old_service_path: old_path.to_string_lossy().to_string(),
-            new_service_path: new_path.to_string_lossy().to_string(),
-            service_name: service_name.to_string(),
-            reason: reason.to_string(),
-        }
-    }
-
-    /// Generate permission revocation message
-    pub fn create_revocation_message(reason: &str, detail: &str) -> WssMessage {
-        WssMessage::PermissionRevoked {
-            reason: reason.to_string(),
-            detail: detail.to_string(),
-        }
-    }
-
     /// Check if client is revoked (honeypot detection)
     pub async fn is_client_revoked(&self, client_id: &str) -> bool {
         let revoked = self.revoked_clients.read().await;
@@ -400,23 +377,6 @@ mod tests {
         // Migration gone — is_migration_complete should error
         let result = manager.is_migration_complete("svc").await;
         assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_create_migration_message() {
-        let msg = RevocationManager::create_migration_message(
-            std::path::Path::new("/old/svc.mem"),
-            std::path::Path::new("/new/svc.mem"),
-            "my_service",
-            "admin_revocation",
-        );
-        matches!(msg, crate::protocol::WssMessage::FileMigration { .. });
-    }
-
-    #[tokio::test]
-    async fn test_create_revocation_message() {
-        let msg = RevocationManager::create_revocation_message("token_expired", "token too old");
-        matches!(msg, crate::protocol::WssMessage::PermissionRevoked { .. });
     }
 
     #[tokio::test]

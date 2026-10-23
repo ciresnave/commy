@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.21.0
+- **Breaking: the MessagePack protocol is removed (R12).** `commy::protocol::WssMessage`, `commy::MessageRouter`, `commy::RoutingDecision`, `WssServer::broadcast_to_tenant` and `RevocationManager::create_migration_message` / `create_revocation_message` are gone, and so is the `rmp-serde` dependency. Nothing on the real wire used them: crates.io lists no crate that depends on commy (query `GET /api/v1/crates/commy/reverse_dependencies` returned `total: 0`; the same query for `commy-wire` returns `commy` and `commy-sdk-rust`), and `commy-sdk-rust` does not call it.
+- Replacements: revocation reaches a connected client as `commy-wire` `Loss` with `LossKind::Revoked`, and a file move as the rotation messages (`RotationPending` to `RotationCommit`); `Authenticate` is the JSON message of `commy-wire`; `Disconnect` ends a session. `Logout` and `RefreshToken` have no replacement (nothing called the first; the second always answered "re-authenticate"). Authenticate again with a fresh credential.
+- A binary frame that is not a range frame, and a text frame that is not JSON, are answered with a JSON `Error` (`INVALID_REQUEST`) and the connection stays open; before, the answer was a MessagePack frame. The JSON `Heartbeat` now records `last_heartbeat_ack`, as the MessagePack one did.
+- `ClusterPing` and `TokenSync` moved unchanged into `commy::clustering::ClusterMessage` (feature `clustering`, experimental).
 ## 0.20.1
 - Docs only: `ROADMAP.md` R1 and `docs/RELEASE-PLAN.md` read the five freeze gates against the repos and crates.io. dirty-ranges 0.1.2 is published, so the "needs 0.1.0" text is gone; gates 1 to 5 are met with refs and only the freeze itself is left.
 ## 0.20.0

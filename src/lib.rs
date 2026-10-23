@@ -14,7 +14,6 @@ pub mod server;
 pub mod tenant_id;
 
 pub use auth::{AuthError, AuthResult, Permission, PermissionSet, TenantAuthContext};
-pub use server::message_router::{MessageRouter, RoutingDecision};
 pub use server::WssServer;
 pub use server::WssServerConfig;
 

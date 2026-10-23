@@ -323,3 +323,31 @@ async fn an_admin_opens_local_mapping_and_a_client_completes_the_handshake_over_
 
     cleanup(&tenant);
 }
+
+/// R12: the MessagePack protocol is gone. A binary frame that is not a range frame is refused in
+/// JSON, authenticates nobody, and leaves the connection usable.
+#[tokio::test]
+async fn a_binary_frame_that_is_not_a_range_frame_is_refused_in_json() {
+    let (port, _server, certs) = start_server().await;
+    let mut c = connect(port, &certs).await;
+    let not_a_range_frame = commy_wire::KIND_RANGE.wrapping_add(1);
+    c.send(Message::Binary(vec![not_a_range_frame, 1, 2, 3].into())).await.unwrap();
+    let r = next_text(&mut c).await;
+    assert_eq!(r["type"], "Error", "{r}");
+    assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+    // Still connected, and still unauthenticated: it must authenticate like anyone else.
+    let tenant = format!("r12_{}", std::process::id());
+    authenticate(&mut c, &tenant).await;
+    cleanup(&tenant);
+}
+
+/// R12: text that is not JSON is answered with a JSON error (it used to be a MessagePack one).
+#[tokio::test]
+async fn text_that_is_not_json_is_refused_in_json() {
+    let (port, _server, certs) = start_server().await;
+    let mut c = connect(port, &certs).await;
+    c.send(Message::Text("this is not json".into())).await.unwrap();
+    let r = next_text(&mut c).await;
+    assert_eq!(r["type"], "Error", "{r}");
+    assert_eq!(r["data"]["code"], "INVALID_REQUEST", "{r}");
+}

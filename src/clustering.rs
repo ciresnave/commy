@@ -7,16 +7,32 @@
 //! - Failover and redundancy
 //!
 //! ## Message Format
-//! Cluster communication (token sync, pings) uses MessagePack for efficiency
-//! in high-frequency inter-server communication.
+//! Cluster messages are `ClusterMessage` values; the cluster code is experimental and unused by the
+//! server (see `docs/CLUSTERING.md`).
 
-use crate::protocol::WssMessage;
 use crate::auth::AuthResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc};
+
+/// The two messages the experimental cluster code exchanges between nodes. They moved here unchanged
+/// from the removed MessagePack `WssMessage` (R12); nothing on the server's wire uses them.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum ClusterMessage {
+    /// Server-to-server: sync token/session across the cluster
+    TokenSync {
+        client_id: String,
+        token: String,
+        tenant_id: String,
+        permissions: String, // Serialized PermissionSet
+        expires_at: String,  // ISO 8601
+    },
+    /// Cluster node availability ping
+    ClusterPing { node_id: String, timestamp: String },
+}
 
 /// Cluster node information
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,16 +257,16 @@ impl ClusterManager {
     }
 
     /// Create cluster ping message
-    pub fn create_cluster_ping(&self) -> WssMessage {
-        WssMessage::ClusterPing {
+    pub fn create_cluster_ping(&self) -> ClusterMessage {
+        ClusterMessage::ClusterPing {
             node_id: self.local_node_id.clone(),
             timestamp: Utc::now().to_rfc3339(),
         }
     }
 
     /// Create token sync message
-    pub fn create_token_sync(token: &SyncToken) -> WssMessage {
-        WssMessage::TokenSync {
+    pub fn create_token_sync(token: &SyncToken) -> ClusterMessage {
+        ClusterMessage::TokenSync {
             client_id: token.client_id.clone(),
             token: token.token.clone(),
             tenant_id: token.tenant_id.clone(),
@@ -510,7 +526,7 @@ mod tests {
 
         let msg = manager.create_cluster_ping();
         match msg {
-            WssMessage::ClusterPing { node_id, .. } => {
+            ClusterMessage::ClusterPing { node_id, .. } => {
                 assert_eq!(node_id, "ping-node");
             }
             _ => panic!("Expected ClusterPing message"),
@@ -530,7 +546,7 @@ mod tests {
 
         let msg = ClusterManager::create_token_sync(&token);
         match msg {
-            WssMessage::TokenSync { client_id, token: tok, tenant_id, .. } => {
+            ClusterMessage::TokenSync { client_id, token: tok, tenant_id, .. } => {
                 assert_eq!(client_id, "clnt");
                 assert_eq!(tok, "tok");
                 assert_eq!(tenant_id, "tnt");
