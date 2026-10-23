@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.21.3
+- CI: the advisory CodeRipper portfolio check (`portfolio` job, reusable workflow pinned to `ciresnave/coderipper` `c665210a`). Not a required check and no rule is silenced; its findings go to ROADMAP rows.
 ## 0.21.2
 - Docs only: `docs/PLAN-R12-REMOVE-WSSMESSAGE.md`, the plan behind 0.21.0, kept as the record with its status set to executed.
 ## 0.21.0

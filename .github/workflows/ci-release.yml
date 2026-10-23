@@ -65,6 +65,14 @@ jobs:
       - name: Run all tests
         run: cargo test --all --locked
 
+  # Advisory portfolio check (CodeRipper). Not a required check; its findings are tracked in ROADMAP.md,
+  # no rule is silenced. Public repository, so no runs-on override.
+  portfolio:
+    name: Portfolio (CodeRipper, advisory)
+    permissions:
+      contents: read
+    uses: ciresnave/coderipper/.github/workflows/portfolio.yml@c665210ad0972cf3ddb7bc81bdd7800c3248a938
+
   release:
     name: Release
     needs: test
