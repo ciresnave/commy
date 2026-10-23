@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.21.2
+- Docs only: `docs/PLAN-R12-REMOVE-WSSMESSAGE.md`, the plan behind 0.21.0, kept as the record with its status set to executed.
 ## 0.21.0
 - **Breaking: the MessagePack protocol is removed (R12).** `commy::protocol::WssMessage`, `commy::MessageRouter`, `commy::RoutingDecision`, `WssServer::broadcast_to_tenant` and `RevocationManager::create_migration_message` / `create_revocation_message` are gone, and so is the `rmp-serde` dependency. Nothing on the real wire used them: crates.io lists no crate that depends on commy (query `GET /api/v1/crates/commy/reverse_dependencies` returned `total: 0`; the same query for `commy-wire` returns `commy` and `commy-sdk-rust`), and `commy-sdk-rust` does not call it.
 - Replacements: revocation reaches a connected client as `commy-wire` `Loss` with `LossKind::Revoked`, and a file move as the rotation messages (`RotationPending` to `RotationCommit`); `Authenticate` is the JSON message of `commy-wire`; `Disconnect` ends a session. `Logout` and `RefreshToken` have no replacement (nothing called the first; the second always answered "re-authenticate"). Authenticate again with a fresh credential.
