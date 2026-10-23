@@ -3540,6 +3540,8 @@ mod audit_tests {
         let sid = make_service(&server, &mut a, &ta).await;
         let mut b = authed(&server, &tb).await;
         let r = send(&server, &mut b, serde_json::json!({"type":"GetServiceFilePath","data":{"request_id":"r","service_id":sid}})).await;
+        let _ = std::fs::remove_dir_all(format!("tenant_{}", ta));
+        let _ = std::fs::remove_dir_all(format!("tenant_{}", tb));
         assert_eq!(r["type"], "Error", "tenant B reached tenant A's service: {r}");
     }
 
