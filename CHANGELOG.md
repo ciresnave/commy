@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.20.1
+- Docs only: `ROADMAP.md` R1 and `docs/RELEASE-PLAN.md` read the five freeze gates against the repos and crates.io. dirty-ranges 0.1.2 is published, so the "needs 0.1.0" text is gone; gates 1 to 5 are met with refs and only the freeze itself is left.
 ## 0.20.0
 - **Breaking: `auth-framework` is pinned to `=0.6.0-rc126`** (rc121 and earlier are yanked, security: rc121 for SAML authentication bypasses). Commy's public API takes `auth-framework` types (`FrameworkVerifier::with_framework`, `TenantAuthContext`), so a consumer that holds its own `AuthFramework` at another rc now has two copies of the crate and mismatched types; move it to `=0.6.0-rc126`, or build the framework through the new `commy::auth_framework` re-export, which names commy's copy. The requirement is now the exact `=0.6.0-rc126`: Cargo orders `rcN` as text, so `rc97` sorts above `rc126` and a bare lower bound would admit yanked builds. Commy does not use SAML or token-exchange (no `saml` or `token_exchange` in `src`, `Cargo.toml` or the tests). The lock also moves `orion` 0.17.15 to 0.18.0 and `pasetors` 0.7.8 to 0.8.1, auth-framework dependencies.
 ## 0.19.8

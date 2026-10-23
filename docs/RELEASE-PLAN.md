@@ -38,6 +38,18 @@ Server rows of the plan (C1 to C6, C8 to C10) are merged, with R3's administrati
    as TESTED or UNVERIFIED, and trapping is the default only where TESTED. Commy itself carries bytes and
    does not depend on this, but the release notes must say it.
 
+## Gate status (read 2026-10-23)
+
+Refs: Commy `main` 956bb5e, `commy-sdk-rust` `main` 8838377, `dirty-ranges` `main` 303ed42, `commy-wire` 0.5.0 from crates.io. Read from the repos and crates.io, not run again by the Commy lane except where it says so.
+
+1. **Met, as name presence only.** All 30 `ControlMessage` variants of `commy-wire` 0.5.0 appear in Commy's `src` and in the SDK's `src` (a `git grep` of each variant name, both repos). That shows nobody ships a message the other side lacks; it does not show each one is exercised, which gate 3 does by behaviour.
+2. **Met for the Rust SDK.** `tests/wire_vectors.rs` is in its tree and its `test (ubuntu, windows, macos)` jobs passed at 8838377 (CI run of 2026-10-21). No second SDK exists yet.
+3. **Met.** The SDK's `e2e (real commy server)` job builds the real `commy` binary at commit bcbf961 (0.19.0) and passed at 8838377. `tests/e2e.rs` covers the remote mirror, local mapping, a resize filled remotely and one filled locally, the straggler, an abort, grants and revoke, and a restart.
+4. **Closed**, board 235 (above).
+5. **Met.** The `dirty-ranges` README at 303ed42 lists every OS and architecture as TESTED or UNVERIFIED, with trapping default only where TESTED. Its UNVERIFIED rows (Linux aarch64 musl, 64 KiB pages, 32-bit) and the macOS blocked-signal case must go in the release notes, as step 5 says.
+
+What is left is step 2 of the sequence: `commy-wire` still says "layout unfrozen" in its 0.5.0 README, and Commy's README says "not frozen until the first coordinated release". Marking it frozen is the owner's decision.
+
 ## Sequence
 
 1. Settle the open layout questions; PM allocates the release number *n*.
