@@ -30,7 +30,9 @@ fn write_new(path: &Path, bytes: &[u8], private: bool) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Drop inherited permissions and grant the current user alone full control.
+/// Leave the current user as the only principal on the key. Dropping inherited entries is not
+/// enough: a new file also gets the creating token's default DACL, which on an elevated token
+/// names SYSTEM and Administrators, so those are removed explicitly by well-known SID.
 #[cfg(windows)]
 fn restrict_to_owner(path: &Path) -> std::io::Result<()> {
     let user = std::env::var("USERNAME")
@@ -39,6 +41,7 @@ fn restrict_to_owner(path: &Path) -> std::io::Result<()> {
         .arg(path)
         .args(["/inheritance:r", "/grant:r"])
         .arg(format!("{user}:F"))
+        .args(["/remove:g", "*S-1-5-18", "*S-1-5-32-544"])
         .stdout(std::process::Stdio::null())
         .status()?;
     if status.success() {
