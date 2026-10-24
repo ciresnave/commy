@@ -1,0 +1,19 @@
+# The waivers of this repository's CodeRipper runs (the advisory `portfolio` job of ci.yml). A waiver carries its reason and its
+# owner and is reviewed in the pull request that adds it.
+
+# SEC-002 reads git history. These files are not in the tree at HEAD; the waivers stay only because the commits do. Owner: the
+# commy lane. Remove when the history is rewritten or the commits age out of the scanned window.
+[[allow]]
+check = "SEC-002"
+file = "dev-key.pem"
+reason = "history only: commit 6cf0879 holds a dev-only private key, never loaded by default, in history only (untracked since 0.11.1). Owner: commy lane. Remove when history is rewritten."
+
+[[allow]]
+check = "SEC-002"
+file = "dev-key-temp.pem"
+reason = "history only: commit 6cf0879 holds a dev-only private key, never loaded by default, in history only (untracked since 0.11.1). Owner: commy lane. Remove when history is rewritten."
+
+[[allow]]
+check = "SEC-002"
+file = "WORK_ITEMS_SUMMARY.md"
+reason = "history only: commit 7d2c8d5 holds a truncated example token in a doc (not a credential), in history only. Owner: commy lane. Remove when history is rewritten."
