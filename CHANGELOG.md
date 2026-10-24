@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.0
+- **Breaking: the `commy::liveness` and `commy::auth_methods` modules are removed.** `LivenessMonitor`, `LivenessConfig`, `LivenessError`, `LivenessResult`, `DeadClientInfo` and `AuthMethodType`, `ApiKeyConfig`, `JwtConfig`, `MtlsConfig`, `AuthMethodConfig`, `RegisteredAuthMethod`, `AuthMethodRegistry` were public but never called by the server, the binary, the examples or the tests, and are in no other repository of ours (checked at each repo's `origin/main`; the same grep finds 42 hits in commy before the removal). The server tracks liveness through its own heartbeats; authentication goes through `server::verify`.
+- `commy::revocation` stays, on purpose: nothing calls `RevocationManager`, which means that module does not enforce revocation. That is a gap to close, not dead code (ROADMAP R22).
+- `.coderipper.toml` declares the nine remaining items of R15 as public API with a reason each.
 ## 0.22.5
 - Tests and cleanup (R16, `unused-return-values`): none of the three functions returns an error (`remove_service` and `set_trusted_local` return `bool`, `finish` an `Option`). The six test call sites that ignored `set_trusted_local` now `assert!` it, so a setup that silently failed fails the test; the three production sites (`remove_service` once, `finish` twice) discard the value on purpose, with `let _ =` and a comment. No behaviour change.
 ## 0.22.4
