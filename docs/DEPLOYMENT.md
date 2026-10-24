@@ -60,8 +60,8 @@ The health check is a TCP connect to the listen port; the server has no HTTP hea
 Zero-copy local mapping needs the clients on the same filesystem as the server, so it does not cross
 a container boundary unless the tenant directory is a shared mount. Remote mirrors work anywhere.
 
-`docker-compose.yml` is only the set of test databases for `tests/storage_backends.rs`; it does not
-start Commy.
+`docker-compose.yml` is only a set of test databases for the future backend tests (ROADMAP R21; no test uses them
+today); it does not start Commy.
 
 ## Operating notes
 

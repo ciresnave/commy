@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.25.1
+- Docs only (spec-to-roadmap audit, ROADMAP R29): `tests/README.md` now describes the three in-memory tests of `tests/storage_backends.rs` (it documented PostgreSQL, MySQL and Redis tests deleted in 0.22.3); `README.md` and `docs/DEPLOYMENT.md` no longer send readers there for external-database tests; `.github/copilot-instructions.md` and `docs/RELEASE-PLAN.md` no longer claim development-only authentication or environment-only settings. `ROADMAP.md` gains R23 to R29, one row per piece of work named in a doc and not yet on the roadmap.
 ## 0.25.0
 - **Breaking: the `commy::revocation` module is removed** (`RevocationManager`, `RevocationReason`, `RevokedClientInfo`, `MigrationState`, `RevocationError`, `RevocationResult`). Nothing called it. It is not a gap in enforcement: the server revokes through `grants.revoke` and the revocation rotation in `ws_handler`, which move the file, send `LossKind::Revoked` and write the audit line, and its tests pass. The module was a second, unconnected, in-memory model. No other repository of ours names any of its types (the one `Revocation*` hit in Humboldt is the `oauth2` crate's own type).
 - `.coderipper.toml` loses the two `reachability` entries that kept it.

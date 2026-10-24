@@ -1,7 +1,7 @@
 # Roadmap
 
 Authoritative portfolio priorities live in the portfolio roadmap; this file records what is open in
-Commy itself. State is `main` at 0.16.x unless a row says otherwise.
+Commy itself. State is `main` at 0.25.x unless a row says otherwise.
 
 ## Done (server side of plan v11)
 
@@ -36,3 +36,10 @@ grants on role-system with the revocation rotation they trigger.
 | R22 | Remove the unenforced revocation model | done (0.25.0) | `revocation::RevocationManager` was public and never called, which looked like unenforced revocation (R15 finding). It is not: revocation is enforced by `grants.revoke` and the revocation rotation (`ws_handler`), with passing tests; the module was a second, unconnected model. Deleted (PM 2026-10-24). |
 | R10 | Docs hygiene and clustering | done: docs (0.17.1), feature gate (0.18.0) | The stale deployment, Docker and authentication guides are replaced by `docs/DEPLOYMENT.md`, `docs/CLUSTERING.md` and `docs/AUTHENTICATION.md`. `src/server/clustering` replicates the old variable model, is unused by the server and is not to be reworked while the FAM to Synapse merge is open; it is behind the default-off Cargo feature `clustering`. |
 | R11 | Rust SDK parity and other SDKs | open (SDK lanes) | Every non-Rust SDK runs the `commy-wire` golden vectors in its own CI. |
+| R23 | Compact the grant operation log | open | R5 stores grants as an append-only log replayed at start-up and never compacts it (README, `docs/RELEASE-PLAN.md` known gaps). Replay time grows with every grant and revoke. |
+| R24 | A wire message to read the audit log | open, needs a CireSnave call | R6: operators read the files or `Server::audit_history`; there is no wire message. A new `commy-wire` message is a layout change, so it must precede the R1 freeze or wait for the next minor of `commy-wire`. Wanted at all? |
+| R25 | mTLS, and Basic / custom credentials | held (CireSnave: wanted, and when?) | README and `docs/AUTHENTICATION.md` say "mTLS is later work"; Basic and custom credentials are refused. Nothing is designed. |
+| R26 | Configuration: hot reload; verifier and rotation interval as file settings | open, low | R7 "not yet" list. Later: ConfigurAnt for the file once its schema crate is stable. |
+| R27 | Clustering design | held (FAM to Synapse merge) | `docs/CLUSTERING.md`: the scope of a future design is not decided; `src/server/clustering` is not to be reworked meanwhile (R10). |
+| R28 | Release sequence after the freeze (`docs/RELEASE-PLAN.md` steps 2 to 5) | held (R1 freeze, the PM allocates the number) | Publish `commy-wire` frozen, Commy and the SDKs on that wire at one number, announce with the known-gaps list. Each step its own PR, none before the previous is published. |
+| R29 | Docs that contradicted the code | done (0.25.1) | `tests/README.md` documented PostgreSQL, MySQL and Redis tests deleted in 0.22.3 (now describes the three memory tests; external stores wait on R21); `README.md` and `docs/DEPLOYMENT.md` pointed at it for external-database tests; `.github/copilot-instructions.md` said authentication is development-only (R4, 0.16.0); `docs/RELEASE-PLAN.md` said limits are environment variables only (R7, 0.17.0). Found by the spec-to-roadmap audit of 2026-10-24. |
