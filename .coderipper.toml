@@ -28,6 +28,4 @@ public_api = [
   { file = "src/persist.rs", symbol = "AuditCheck", reason = "Return type of the public `Server::verify_audit` (documented in the README and DEPLOYMENT.md); its callers are embedders and operators. Owner: commy lane." },
   { file = "src/persist.rs", symbol = "read_audit_anchor", reason = "Public reader of an audit anchor file written by `Server::write_audit_anchor` (R13); its callers are embedders and operators. Owner: commy lane." },
   { file = "src/protocol.rs", symbol = "is_healthy", reason = "Public method of `ClientSession` (queue-stall check), exercised by its tests; the module that called it (`liveness`) was removed in 0.23.0. Owner: commy lane." },
-  { file = "src/revocation.rs", symbol = "RevocationError", reason = "Public API, unwired: `RevocationManager` is not called by the server, so revocation here is not enforced. Kept on purpose, not as dead code (ROADMAP R22 wires it). Owner: commy lane." },
-  { file = "src/revocation.rs", symbol = "RevocationResult", reason = "Public API, unwired: see `RevocationError` (ROADMAP R22). Owner: commy lane." },
 ]

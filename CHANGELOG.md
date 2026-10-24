@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.25.0
+- **Breaking: the `commy::revocation` module is removed** (`RevocationManager`, `RevocationReason`, `RevokedClientInfo`, `MigrationState`, `RevocationError`, `RevocationResult`). Nothing called it. It is not a gap in enforcement: the server revokes through `grants.revoke` and the revocation rotation in `ws_handler`, which move the file, send `LossKind::Revoked` and write the audit line, and its tests pass. The module was a second, unconnected, in-memory model. No other repository of ours names any of its types (the one `Revocation*` hit in Humboldt is the `oauth2` crate's own type).
+- `.coderipper.toml` loses the two `reachability` entries that kept it.
 ## 0.24.0
 - **Breaking: `auth-framework` is now `=0.6.0-rc131`** (was `rc126`; the newest published). commy re-exports the crate as `commy::auth_framework`, so a consumer that names its types sees the change. The pin is exact on purpose: Cargo orders `rcN` as text (`rc97` sorts above `rc126`), so a range would pick the wrong release. Transitive: `serde-saphyr` 2.0.0, `granit-parser` 2.0.0, `html-escape` 0.3.0. No code change was needed; build and tests pass.
 ## 0.23.0
