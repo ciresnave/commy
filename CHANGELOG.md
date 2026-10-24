@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.22.2
+- Cleanup (R18, dead-code half): the unused `register_test_credentials` in `src/main.rs` and the never-read private `Server.servers` and `Server.clients` fields are deleted; the two public-but-uncalled-by-the-binary items (`WssServer::update_session_state`, `TlsConfiguration::for_development`) keep `#[allow(dead_code)]` with a reason. No public API change. The three `#[ignore]`d storage-backend tests are untouched (see ROADMAP R18).
 ## 0.22.1
 - Docs and CI only: the missing MIT `LICENSE` (holder Eric Evans); `.coderipper.toml` waives the three SEC-002 history findings by path (dev-only keys and a truncated example token, in history only); the `portfolio` job is repinned to coderipper 0.9.14 (`d14a22b6`). ROADMAP R19 and R20 updated.
 ## 0.22.0

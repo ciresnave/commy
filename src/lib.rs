@@ -184,10 +184,6 @@ pub struct ServiceRecord {
 
 pub struct Server {
     pub tenants: std::collections::HashMap<String, Tenant>,
-    #[allow(dead_code)]
-    servers: Vec<Server>,
-    #[allow(dead_code)]
-    clients: Vec<Client>,
     /// Maps service_id → ServiceRecord (only Server knows this mapping)
     pub service_registry: std::collections::HashMap<String, ServiceRecord>,
     /// Development authentication: accepts any credential and grants admin. Off unless the
@@ -293,8 +289,6 @@ impl Server {
     pub fn with_dev_auth(dev_auth: bool) -> Self {
         Server {
             tenants: std::collections::HashMap::new(),
-            servers: vec![],
-            clients: vec![],
             service_registry: std::collections::HashMap::new(),
             dev_auth,
             next_file_id: 1,
