@@ -7,7 +7,6 @@ pub mod config;
 pub mod persist;
 pub mod private_dir;
 pub mod protocol;
-pub mod revocation;
 pub mod server;
 pub mod tenant_id;
 
