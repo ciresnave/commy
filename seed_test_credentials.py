@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 Seed test API credentials in PostgreSQL for Commy examples.
 

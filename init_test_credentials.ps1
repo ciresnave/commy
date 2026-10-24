@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # Initialize PostgreSQL with test credentials for Commy examples
 # Runs psql inside the PostgreSQL Docker container
 # Usage: .\init_test_credentials.ps1

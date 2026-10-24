@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Real TLS + WebSocket loopback: a self-signed certificate, the real `WssServer` accept loop and
 //! connection loop, and real clients. This is the path the handler unit tests cannot reach: the
 //! TLS provider choice, the binary-frame dispatch and the outbound-queue select.

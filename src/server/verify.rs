@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Credential verification (plan R4): who is this client?
 //!
 //! A [`CredentialVerifier`] turns the credentials in an `Authenticate` request into an identity and

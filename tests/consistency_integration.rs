@@ -1,4 +1,5 @@
 #![cfg(feature = "clustering")]
+// SPDX-License-Identifier: MIT
 //! Integration tests for consistency management in multi-server scenarios
 
 #[cfg(test)]

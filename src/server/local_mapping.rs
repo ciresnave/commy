@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Server side of the local-mapping handshake (plan C1).
 //!
 //! The server never sees stores into a mapping, so a local mapping is only offered for a service an

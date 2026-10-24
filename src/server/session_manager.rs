@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Session Manager
 //!
 //! Manages active client sessions, tracks permissions, and handles broadcasts.

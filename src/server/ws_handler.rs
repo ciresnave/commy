@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! WebSocket Connection Handler (RFC 6455)
 //!
 //! Handles individual WebSocket connections from remote clients.

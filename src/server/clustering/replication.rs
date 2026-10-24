@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Service state replication coordinator
 //!
 //! Manages state transfer between servers, including synchronization,

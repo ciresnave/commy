@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /// Clustering configuration for multi-server Commy deployments
 ///
 /// This module defines all configuration options for running Commy in a clustered mode,

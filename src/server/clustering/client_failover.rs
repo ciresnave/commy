@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /// Client Failover Detection - Detects connection loss and triggers reconnection
 use std::sync::Arc;
 use tokio::sync::RwLock;

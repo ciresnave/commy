@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! WSS Server Module
 //!
 //! Provides the WebSocket Secure (WSS) server implementation for COMMY.

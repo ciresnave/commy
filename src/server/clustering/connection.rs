@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Inter-server connection management and pooling
 //!
 //! This module handles TCP connections between servers in the cluster,

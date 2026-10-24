@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Conflict Resolution Strategies for Distributed Consistency
 //!
 //! Provides pluggable conflict resolution when concurrent writes occur

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Consistency Integration for Multi-Server Coordination
 //!
 //! Integrates vector clocks and conflict resolution into service replication

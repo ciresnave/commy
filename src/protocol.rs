@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Client session state for COMMY
 //!
 //! The wire protocol itself is JSON text frames plus the binary range frames of `commy-wire`; the

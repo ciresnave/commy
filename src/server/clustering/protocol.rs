@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Server-to-server communication protocol handler
 //!
 //! Manages TCP connections between servers and handles message serialization/deserialization.

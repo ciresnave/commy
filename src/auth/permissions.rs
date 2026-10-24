@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Permission management for multi-tenant access control
 //! 
 //! This module defines the permission model for COMMY:

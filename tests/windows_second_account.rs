@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! R9: the tenant-directory access control list against a second real Windows account.
 //!
 //! What `private_dir` promises (and `docs` and the CHANGELOG repeat): another account can open a file

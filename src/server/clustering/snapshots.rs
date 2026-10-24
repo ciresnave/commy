@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Service state snapshots for replication
 //!
 //! Provides serialization and deserialization of service memory state for transfer between servers.

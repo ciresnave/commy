@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Multi-tenant authentication and authorization module
 //!
 //! This module provides per-tenant authentication with isolated contexts.

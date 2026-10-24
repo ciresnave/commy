@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Range forwarding (plan C3): who is on which file, and what to send them.
 //!
 //! A session joins a file as a **local** mapper (it proved it shares the filesystem, see

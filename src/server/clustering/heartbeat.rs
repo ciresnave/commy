@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Heartbeat and liveness detection for peer servers
 //!
 //! Maintains periodic heartbeat with all peers and detects server failures

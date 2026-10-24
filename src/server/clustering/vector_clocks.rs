@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Vector Clock Implementation for Multi-Server Consistency
 //!
 //! Vector clocks enable causality tracking across distributed servers.

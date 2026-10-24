@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for authentication storage backends
 //!
 //! These tests cover the in-memory backend, the only one `TenantAuthContext` wires (ROADMAP R21: PostgreSQL, MySQL and

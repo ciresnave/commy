@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! TLS Configuration and Certificate Loading
 //!
 //! Handles loading and validation of TLS certificates and keys for WSS support.

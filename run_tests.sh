@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # Commy Server Testing Guide
 # This script helps you test the Commy WebSocket server locally
 

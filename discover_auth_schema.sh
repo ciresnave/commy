@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # discover_auth_schema.sh - Discover auth-framework's PostgreSQL schema
 
 set -e
