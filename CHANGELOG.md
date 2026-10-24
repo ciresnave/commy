@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.26.0
+- **Breaking: `auth-framework` is now `=0.6.0-rc138`** (was `rc131`). It fixes GHSA-hfhv-fmf7-8x37: the Shared Signals `receive_event` accepted unsigned events. commy re-exports the crate as `commy::auth_framework`, so a consumer that names its types sees the change. The pin stays exact on purpose (Cargo orders `rcN` as text).
 ## 0.25.1
 - Docs only (spec-to-roadmap audit, ROADMAP R29): `tests/README.md` now describes the three in-memory tests of `tests/storage_backends.rs` (it documented PostgreSQL, MySQL and Redis tests deleted in 0.22.3); `README.md` and `docs/DEPLOYMENT.md` no longer send readers there for external-database tests; `.github/copilot-instructions.md` and `docs/RELEASE-PLAN.md` no longer claim development-only authentication or environment-only settings. `ROADMAP.md` gains R23 to R29, one row per piece of work named in a doc and not yet on the roadmap.
 ## 0.25.0
