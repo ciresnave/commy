@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.22.1
+- Docs and CI only: the missing MIT `LICENSE` (holder Eric Evans); `.coderipper.toml` waives the three SEC-002 history findings by path (dev-only keys and a truncated example token, in history only); the `portfolio` job is repinned to coderipper 0.9.14 (`d14a22b6`). ROADMAP R19 and R20 updated.
 ## 0.22.0
 - **Breaking: the `gen_certs` binary no longer writes a fixed key.** It embedded one certificate and private key, so every install wrote the same, publicly known key. It now generates a new self-signed pair on every run (`rcgen`, SAN `localhost` and `127.0.0.1`), writes the key owner-only (mode 0600 on Unix, an owner-only ACL on Windows), takes an optional output directory, and refuses to overwrite an existing `dev-cert.pem` or `dev-key.pem`. The embedded PEMs are gone from the crate. The commy server never loaded that key by default.
 - `rcgen` moved from a dev-dependency to a dependency (the binary needs it). The stray root `gen_certs.rs` is deleted.
