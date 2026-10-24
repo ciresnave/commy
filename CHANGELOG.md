@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.24.0
+- **Breaking: `auth-framework` is now `=0.6.0-rc131`** (was `rc126`; the newest published). commy re-exports the crate as `commy::auth_framework`, so a consumer that names its types sees the change. The pin is exact on purpose: Cargo orders `rcN` as text (`rc97` sorts above `rc126`), so a range would pick the wrong release. Transitive: `serde-saphyr` 2.0.0, `granit-parser` 2.0.0, `html-escape` 0.3.0. No code change was needed; build and tests pass.
 ## 0.23.0
 - **Breaking: the `commy::liveness` and `commy::auth_methods` modules are removed.** `LivenessMonitor`, `LivenessConfig`, `LivenessError`, `LivenessResult`, `DeadClientInfo` and `AuthMethodType`, `ApiKeyConfig`, `JwtConfig`, `MtlsConfig`, `AuthMethodConfig`, `RegisteredAuthMethod`, `AuthMethodRegistry` were public but never called by the server, the binary, the examples or the tests, and are in no other repository of ours (checked at each repo's `origin/main`; the same grep finds 42 hits in commy before the removal). The server tracks liveness through its own heartbeats; authentication goes through `server::verify`.
 - `commy::revocation` stays, on purpose: nothing calls `RevocationManager`, which means that module does not enforce revocation. That is a gap to close, not dead code (ROADMAP R22).
