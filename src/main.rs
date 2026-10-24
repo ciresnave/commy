@@ -5,37 +5,6 @@ use commy::{
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Register test API keys via auth-framework for examples
-/// This allows examples to authenticate without manual database setup
-#[allow(dead_code)]
-async fn register_test_credentials(_db_url: &str) {
-    println!("[Commy]");
-    println!("[Commy] 📝 Test API Keys for Examples");
-    println!("[Commy] ────────────────────────────────────────────────────");
-    println!("[Commy]");
-    println!("[Commy] ℹ Test API keys are pre-configured in PostgreSQL");
-    println!("[Commy]");
-
-    println!("[Commy] Available API Keys for Testing:");
-    println!("[Commy]   • test_key_123");
-    println!("[Commy]     Used by: basic_client, hybrid_client examples");
-    println!("[Commy]     Permissions: read, write");
-    println!("[Commy]");
-    println!("[Commy]   • admin_key_with_all_perms");
-    println!("[Commy]     Used by: permissions_example (admin user)");
-    println!("[Commy]     Permissions: admin, manage_tenants, manage_users");
-    println!("[Commy]");
-    println!("[Commy]   • read_only_key");
-    println!("[Commy]     Used by: permissions_example (read-only user)");
-    println!("[Commy]     Permissions: read");
-    println!("[Commy]");
-    println!("[Commy]   •  creator_key");
-    println!("[Commy]     Used by: permissions_example (creator user)");
-    println!("[Commy]     Permissions: admin, create_services, manage_variables");
-    println!("[Commy] ────────────────────────────────────────────────────");
-    println!("[Commy]");
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configuration: environment variables, then the file (COMMY_CONFIG or ./commy.toml), then defaults.
