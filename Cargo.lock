@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "commy"
-version = "0.22.4"
+version = "0.22.5"
 dependencies = [
  "auth-framework",
  "chrono",
