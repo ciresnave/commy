@@ -17,3 +17,17 @@ reason = "history only: commit 6cf0879 holds a dev-only private key, never loade
 check = "SEC-002"
 file = "WORK_ITEMS_SUMMARY.md"
 reason = "history only: commit 7d2c8d5 holds a truncated example token in a doc (not a credential), in history only. Owner: commy lane. Remove when history is rewritten."
+
+# `reachability`: public API with no caller inside the crate. Each reason says who calls it.
+[reachability]
+public_api = [
+  { file = "src/auth/permissions.rs", symbol = "is_expired", reason = "Public API of `ClientTenantPermissions` for embedders (documented, in the semver promise); exercised by the permission tests, no caller inside the server. Owner: commy lane." },
+  { file = "src/server/mod.rs", symbol = "validate_tls", reason = "Public API of `WssServerConfig` for embedders to check a certificate pair before starting a server; exercised by tests, the binary builds its TLS configuration directly. Owner: commy lane." },
+  { file = "src/server/verify.rs", symbol = "with_key", reason = "Public builder of `StaticApiKeys`, the credential verifier an embedder installs with `Server::with_verifier`; used by the ws_handler tests, no caller in the binary. Owner: commy lane." },
+  { file = "src/persist.rs", symbol = "AnchorCheck", reason = "Return type of the public `Server::check_audit_anchor` (R13 audit tamper evidence, documented in the README and CHANGELOG); its callers are embedders and operators. Owner: commy lane." },
+  { file = "src/persist.rs", symbol = "AuditCheck", reason = "Return type of the public `Server::verify_audit` (documented in the README and DEPLOYMENT.md); its callers are embedders and operators. Owner: commy lane." },
+  { file = "src/persist.rs", symbol = "read_audit_anchor", reason = "Public reader of an audit anchor file written by `Server::write_audit_anchor` (R13); its callers are embedders and operators. Owner: commy lane." },
+  { file = "src/protocol.rs", symbol = "is_healthy", reason = "Public method of `ClientSession` (queue-stall check), exercised by its tests; the module that called it (`liveness`) was removed in 0.23.0. Owner: commy lane." },
+  { file = "src/revocation.rs", symbol = "RevocationError", reason = "Public API, unwired: `RevocationManager` is not called by the server, so revocation here is not enforced. Kept on purpose, not as dead code (ROADMAP R22 wires it). Owner: commy lane." },
+  { file = "src/revocation.rs", symbol = "RevocationResult", reason = "Public API, unwired: see `RevocationError` (ROADMAP R22). Owner: commy lane." },
+]
