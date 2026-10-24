@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.22.4
+- **Security: `Server::get_tenant` no longer prints the whole `DATABASE_URL` to stderr.** When the variable was set, the server logged it in full, password included (and again for a URL of an unknown type). The log line now shows the URL with the password replaced by `***` and the query string dropped. Anyone who ran a server with `DATABASE_URL` set should treat that password as exposed to whoever could read the server's stderr or its logs, and rotate it. The URL was only ever logged; `StorageBackend` is not wired (R21), so it was never used to connect.
 ## 0.22.3
 - Tests (R18, `#[ignore]` half): the three `#[ignore]`d tests in `tests/storage_backends.rs` (PostgreSQL, MySQL, Redis) are deleted. `TenantAuthContext::new` never reads `TenantAuthConfig.storage_backend`, so they exercised no database and passed whether or not one answered; running them in CI against service containers would have been a green check that tested nothing. `StorageBackend`'s docs now say only `Memory` takes effect. Wiring the backends is ROADMAP R21.
 ## 0.22.2

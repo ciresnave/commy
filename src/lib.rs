@@ -256,6 +256,29 @@ pub enum ServiceSizeError {
 
 /// The file size to create for a requested size: at least one byte, rounded up to whole pages,
 /// and no more than `max` (itself rounded up to whole pages).
+/// A database URL that is safe to log: the password and the query string (which can carry one) are removed.
+///
+/// `postgresql://user:secret@host:5432/db?password=x` becomes `postgresql://user:***@host:5432/db`. A string with no
+/// `://` is not a URL we can take apart, so none of it is returned.
+fn redact_database_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "<unparsable database URL>".to_string();
+    };
+    let rest = rest.split(['?', '#']).next().unwrap_or("");
+    let (authority, path) = match rest.find('/') {
+        Some(i) => rest.split_at(i),
+        None => (rest, ""),
+    };
+    let authority = match authority.rsplit_once('@') {
+        Some((userinfo, host)) => match userinfo.split_once(':') {
+            Some((user, _password)) => format!("{user}:***@{host}"),
+            None => format!("{userinfo}@{host}"),
+        },
+        None => authority.to_string(),
+    };
+    format!("{scheme}://{authority}{path}")
+}
+
 pub fn service_file_size(requested: u64, max: u64) -> Result<u64, ServiceSizeError> {
     if requested == 0 {
         return Err(ServiceSizeError::Zero);
@@ -642,7 +665,7 @@ impl Server {
             .or_insert_with(|| {
                 // Determine storage backend based on DATABASE_URL environment variable
                 let storage_backend = if let Ok(db_url) = std::env::var("DATABASE_URL") {
-                    eprintln!("[TENANTS] DATABASE_URL found: {}", db_url);
+                    eprintln!("[TENANTS] DATABASE_URL found: {}", redact_database_url(&db_url));
                     // Parse the database URL to determine type and extract connection details
                     if db_url.starts_with("postgresql://") {
                         eprintln!(
@@ -663,7 +686,7 @@ impl Server {
                         // Default to memory if URL doesn't match known databases
                         eprintln!(
                             "[TENANTS] Unknown database type, falling back to Memory: {}",
-                            db_url
+                            redact_database_url(&db_url)
                         );
                         auth::tenant_context::StorageBackend::Memory
                     }
@@ -852,5 +875,30 @@ mod tests {
         svc.as_mut_slice()[100..104].copy_from_slice(&[9, 8, 7, 6]);
         svc.flush().unwrap();
         assert_eq!(&std::fs::read(&path).unwrap()[100..104], &[9, 8, 7, 6]);
+    }
+
+    #[test]
+    fn redact_database_url_removes_the_password() {
+        let out = redact_database_url("postgresql://app:hunter2-s3cret@db.example:5432/commy");
+        assert_eq!(out, "postgresql://app:***@db.example:5432/commy");
+        assert!(!out.contains("hunter2"));
+    }
+
+    #[test]
+    fn redact_database_url_drops_the_query_string_and_keeps_a_passwordless_url() {
+        assert_eq!(
+            redact_database_url("mysql://app:pw@h/db?password=hunter2&ssl=1"),
+            "mysql://app:***@h/db"
+        );
+        assert_eq!(redact_database_url("redis://cache:6379"), "redis://cache:6379");
+        // a password containing '@' and ':' is still removed whole
+        let out = redact_database_url("postgresql://u:p@ss:w0rd@h/db");
+        assert_eq!(out, "postgresql://u:***@h/db");
+        assert!(!out.contains("ss:w0rd"));
+    }
+
+    #[test]
+    fn redact_database_url_returns_nothing_of_a_non_url() {
+        assert_eq!(redact_database_url("hunter2"), "<unparsable database URL>");
     }
 }
