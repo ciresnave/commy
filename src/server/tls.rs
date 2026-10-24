@@ -137,7 +137,7 @@ impl TlsConfiguration {
     ///
     /// This is a convenience method for development/testing.
     /// Production should use proper certificates.
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "public API of the library; the binary does not call it, the tests do")]
     pub fn for_development() -> Result<Self, TlsError> {
         // In development, you would generate or load test certificates
         // For now, this returns an error as no test certs are bundled

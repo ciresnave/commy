@@ -197,7 +197,7 @@ impl WssServer {
     }
 
     /// Update client session activity
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "public API of the library; the binary does not call it, the tests do")]
     pub async fn update_session_state(&self, session_id: &str) {
         if let Some(session) = self.sessions.write().await.get_mut(session_id) {
             session.last_activity = chrono::Utc::now();
