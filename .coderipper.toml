@@ -18,6 +18,12 @@ check = "SEC-002"
 file = "WORK_ITEMS_SUMMARY.md"
 reason = "history only: commit 7d2c8d5 holds a truncated example token in a doc (not a credential), in history only. Owner: commy lane. Remove when history is rewritten."
 
+# `licence`: the LICENSE holder is a person. Owner: commy lane; remove when the holder becomes an entity.
+[[allow]]
+check = "licence"
+file = "LICENSE"
+reason = "holder is CireSnave until the entities exist (board 272, 2026-10-24)"
+
 # `reachability`: public API with no caller inside the crate. Each reason says who calls it.
 [reachability]
 public_api = [
