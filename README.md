@@ -67,7 +67,7 @@ cargo build
 cargo test
 ```
 
-Tests that need an external database are in `tests/storage_backends.rs` (see `tests/README.md`).
+`tests/storage_backends.rs` runs authentication against the in-memory backend only; tests against real databases wait on ROADMAP R21 (`tests/README.md`).
 `tests/wss_loopback.rs` runs the real TLS and WebSocket server against real clients on a loopback port.
 
 Licensed under MIT.

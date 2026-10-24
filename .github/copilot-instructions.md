@@ -12,7 +12,7 @@ change the contract there first, never here alone.
   ranges over WSS. The server's order wins: one sequence number per flush, per `file_id`.
 - Files rotate (resize: drain barrier, the requester fills a prepared file, commit or abort; revocation).
 - Access is per client, tenant and service (`server::grants`, on role-system); tenant-wide is shorthand.
-- Authentication is development-only today (`COMMY_ALLOW_DEV_AUTH=1`).
+- Authentication is API key or JWT through `auth-framework` (`docs/AUTHENTICATION.md`); `COMMY_ALLOW_DEV_AUTH=1` is the development switch.
 
 ## Rules for changes
 

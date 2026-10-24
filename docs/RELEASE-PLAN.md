@@ -64,7 +64,7 @@ Every step is its own PR with a version line; none merges before the previous on
 
 - Authentication is API key or JWT checked by `auth-framework`, one database per tenant; creating tenants, users and keys is that framework's tooling, not Commy's (`docs/AUTHENTICATION.md`). Basic and custom credentials are refused, mTLS is later. The old MessagePack protocol was removed in 0.21.0 (R12).
 - The grant operation log and the audit log are durable but not compacted. The audit log is hash-chained: it detects modification, insertion and reordering, not truncation (a cut tail or front is found only against a head recorded elsewhere).
-- Limits and timeouts are environment variables, not a configuration file. (R7)
+- Settings come from environment variables or a TOML file (`COMMY_CONFIG`, `commy.example.toml`); no hot reload, and the verifier and rotation interval are not file settings. (R7, R26)
 - Service files carry no per-file permissions; the unlisted tenant directory and a random name are the
   barrier on the server's machine. (R8)
 - The tenant-directory ACL was checked with a second real Windows account on 2026-10-23 (R9; `tests/windows_second_account.rs`, needs AntSpawn's account setup, so GitHub CI does not run it); antivirus was not checked.
