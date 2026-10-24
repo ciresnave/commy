@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.22.5
+- Tests and cleanup (R16, `unused-return-values`): none of the three functions returns an error (`remove_service` and `set_trusted_local` return `bool`, `finish` an `Option`). The six test call sites that ignored `set_trusted_local` now `assert!` it, so a setup that silently failed fails the test; the three production sites (`remove_service` once, `finish` twice) discard the value on purpose, with `let _ =` and a comment. No behaviour change.
 ## 0.22.4
 - **Security: `Server::get_tenant` no longer prints the whole `DATABASE_URL` to stderr.** When the variable was set, the server logged it in full, password included (and again for a URL of an unknown type). The log line now shows the URL with the password replaced by `***` and the query string dropped. Anyone who ran a server with `DATABASE_URL` set should treat that password as exposed to whoever could read the server's stderr or its logs, and rotate it. The URL was only ever logged; `StorageBackend` is not wired (R21), so it was never used to connect.
 ## 0.22.3

@@ -1236,7 +1236,8 @@ async fn run_rotation(
             Some((new_file_id, path, size)) => switch_to_prepared(&mut g, &service_id, new_file_id, &path, size),
             None => switch_to_copy(&mut g, &service_id),
         };
-        g.rotations.finish(&service_id);
+        // The rotation's final state is not needed once the result is in hand; ending it is idempotent.
+        let _ = g.rotations.finish(&service_id);
         match &result {
             Ok(sw) => g.audit(&format!(
                 "rotation COMMITTED rotation_id={} service={} old_file={} new_file={} size={}",
@@ -1326,7 +1327,8 @@ async fn abort_rotation(
             g.prepared.remove(&file_id);
             let _ = std::fs::remove_file(path);
         }
-        g.rotations.finish(service_id);
+        // The rotation's final state is not needed here; ending it is idempotent.
+        let _ = g.rotations.finish(service_id);
         g.audit(&format!(
             "rotation ABORTED rotation_id={} service={} reason={:?}",
             active.rotation_id, service_id, why
@@ -2212,7 +2214,8 @@ async fn handle_sdk_message_inner(
                 return Some(wire_error(commy_wire::ErrorCode::NotFound, "Unknown service", None));
             };
             if let Some(tenant) = guard.tenants.get_mut(tenant_id) {
-                tenant.remove_service(&record.service_name);
+                // false only if the tenant's name map had already lost the service; the registry entry is gone either way.
+                let _ = tenant.remove_service(&record.service_name);
             }
             guard.retired_files.insert(record.file_id);
             // The grants named this service id, which is never reused; drop them so nothing
@@ -3537,8 +3540,8 @@ mod local_mapping_tests {
         let b = make_service(&server, &mut s, &t).await;
         {
             let mut g = server.write().await;
-            g.set_trusted_local(&a, true);
-            g.set_trusted_local(&b, true);
+            assert!(g.set_trusted_local(&a, true));
+            assert!(g.set_trusted_local(&b, true));
         }
         let ra = send(&server, &mut s, get_path(&a)).await;
         let rb = send(&server, &mut s, get_path(&b)).await;
@@ -3557,7 +3560,7 @@ mod local_mapping_tests {
         let mut ids = vec![];
         for _ in 0..(crate::server::local_mapping::MAX_PENDING_NONCES + 1) {
             let id = make_service(&server, &mut s, &t).await;
-            server.write().await.set_trusted_local(&id, true);
+            assert!(server.write().await.set_trusted_local(&id, true));
             ids.push(id);
         }
         let mut limited = false;
@@ -3888,7 +3891,7 @@ mod forwarding_tests {
         assert_eq!(r["type"], "Service", "{r}");
         let id = r["data"]["service_id"].as_str().unwrap().to_string();
         let mut g = server.write().await;
-        g.set_trusted_local(&id, true);
+        assert!(g.set_trusted_local(&id, true));
         let rec = &g.service_registry[&id];
         (id.clone(), rec.file_id, rec.file_path.clone())
     }
@@ -4246,7 +4249,7 @@ mod rotation_tests {
         assert_eq!(r["type"], "Service", "{r}");
         let id = r["data"]["service_id"].as_str().unwrap().to_string();
         let mut g = server.write().await;
-        g.set_trusted_local(&id, true);
+        assert!(g.set_trusted_local(&id, true));
         let rec = &g.service_registry[&id];
         (id.clone(), rec.file_id, rec.file_path.clone())
     }
@@ -5286,7 +5289,7 @@ mod dev_auth_identity_tests {
         let (mut admin, r) = login(&server, &t, json!({"client_id":"admin"})).await;
         assert_eq!(r["data"]["permissions"], json!(["all"]), "no dev_scopes still means admin: {r}");
         let id = make_service(&server, &mut admin, &t).await;
-        server.write().await.set_trusted_local(&id, true);
+        assert!(server.write().await.set_trusted_local(&id, true));
         let (mut viewer, r) = login(&server, &t, json!({"client_id":"viewer","dev_scopes":["read"]})).await;
         assert_eq!(r["data"]["permissions"], json!(["read"]));
         let r = call(&server, &mut viewer, get_path(&id)).await;
