@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.22.3
+- Tests (R18, `#[ignore]` half): the three `#[ignore]`d tests in `tests/storage_backends.rs` (PostgreSQL, MySQL, Redis) are deleted. `TenantAuthContext::new` never reads `TenantAuthConfig.storage_backend`, so they exercised no database and passed whether or not one answered; running them in CI against service containers would have been a green check that tested nothing. `StorageBackend`'s docs now say only `Memory` takes effect. Wiring the backends is ROADMAP R21.
 ## 0.22.1
 - Docs and CI only: the missing MIT `LICENSE` (holder Eric Evans); `.coderipper.toml` waives the three SEC-002 history findings by path (dev-only keys and a truncated example token, in history only); the `portfolio` job is repinned to coderipper 0.9.14 (`d14a22b6`). ROADMAP R19 and R20 updated.
 ## 0.22.0
