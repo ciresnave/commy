@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.0
+- **Breaking: the `gen_certs` binary no longer writes a fixed key.** It embedded one certificate and private key, so every install wrote the same, publicly known key. It now generates a new self-signed pair on every run (`rcgen`, SAN `localhost` and `127.0.0.1`), writes the key owner-only (mode 0600 on Unix, an owner-only ACL on Windows), takes an optional output directory, and refuses to overwrite an existing `dev-cert.pem` or `dev-key.pem`. The embedded PEMs are gone from the crate. The commy server never loaded that key by default.
+- `rcgen` moved from a dev-dependency to a dependency (the binary needs it). The stray root `gen_certs.rs` is deleted.
+- Tests: `tests/gen_certs.rs` (two runs differ; the pair loads as a TLS identity; no overwrite; owner-only permissions). The old binary wrote byte-identical keys on two runs.
 ## 0.21.5
 - Docs and CI only: `ROADMAP.md` R15 to R20, one row per rule the CodeRipper `portfolio` job fails on `cfa8e354` (`reachability`, `unused-return-values`, `SUP-004`, `lint-suppression`, `licence`, `SEC-002`); no rule is silenced. The `portfolio` job is repinned to `ciresnave/coderipper` `30e012b7` (was `c665210a`; sweeps workspace members, Windows fix). The repin has no PR of its own.
 ## 0.21.4
