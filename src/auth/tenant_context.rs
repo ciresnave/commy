@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tenant-specific authentication context
 //!
 //! This module provides the TenantAuthContext which wraps auth-framework's AuthFramework

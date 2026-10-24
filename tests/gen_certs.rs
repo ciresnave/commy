@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `gen_certs` must make a new key every run and keep the key file private.
 
 use std::path::Path;

@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.26.1
+- Licence headers: every one of the 52 tracked source files (`.rs`, `.py`, `.sh`, `.ps1`) now starts with `SPDX-License-Identifier: MIT` (line 2 under a shebang), matching `Cargo.toml` and `LICENSE`. One line added per file, nothing else changed. `python tools/spdx.py` adds the line where it is missing and `python tools/spdx.py --check` fails if any file lacks it (it enumerates `git ls-files`, keeps line endings, and reports a different identifier without rewriting it). Clears the CodeRipper `licence` finding "52 of 52 source files carry no SPDX-License-Identifier".
 ## 0.26.0
 - **Breaking: `auth-framework` is now `=0.6.0-rc138`** (was `rc131`). It fixes GHSA-hfhv-fmf7-8x37: the Shared Signals `receive_event` accepted unsigned events. commy re-exports the crate as `commy::auth_framework`, so a consumer that names its types sees the change. The pin stays exact on purpose (Cargo orders `rcN` as text).
 ## 0.25.1

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Rotation bookkeeping (plan C4): which rotations are running, who has drained, and the limits.
 //!
 //! A rotation replaces a service's file. `RESIZE` runs a drain barrier first: every member of the old

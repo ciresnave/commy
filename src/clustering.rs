@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Multi-server clustering support for COMMY
 //! 
 //! Enables multiple COMMY servers to work together:

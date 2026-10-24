@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! A validated tenant identifier.
 //!
 //! A tenant id reaches the file system (`tenant_<id>/service_<uuid>.mem`), so it is parsed once, at

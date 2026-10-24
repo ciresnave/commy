@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Inter-server communication protocol
 //!
 //! Defines message types for server-to-server communication in the cluster.

@@ -1,4 +1,5 @@
 #![cfg(feature = "clustering")]
+// SPDX-License-Identifier: MIT
 //! Comprehensive Clustering Integration Tests
 //!
 //! These tests simulate realistic multi-server scenarios including:

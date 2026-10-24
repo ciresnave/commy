@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Service-scoped access control (plan C10).
 //!
 //! Grants are per client, tenant and service. A tenant-wide grant is shorthand for every service of

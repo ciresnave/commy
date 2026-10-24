@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Peer registry for cluster management
 
 use std::collections::HashMap;

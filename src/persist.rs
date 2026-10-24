@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Durable state (plan R5): the service registry and the grants, on PersistAnt.
 //!
 //! Without this, a restart forgets every service id (the files are orphaned) and every grant. What

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Power-cut test (plan R5): the real `commy` binary is killed without any chance to shut down, then
 //! started again on the same state directory. Services and grants must be what they were.
 

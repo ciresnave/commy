@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Commy Server Clustering
 //!
 //! Enables multiple Commy servers to operate in a cluster with service state

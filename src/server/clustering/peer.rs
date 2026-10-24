@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Peer information and status management
 
 use std::time::{Duration, Instant};

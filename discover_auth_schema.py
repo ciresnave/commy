@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Query PostgreSQL database to discover table schema."""
 
 import subprocess

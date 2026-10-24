@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Writes a fresh self-signed development certificate and private key.
 //!
 //! Every run generates a new key pair, so no two runs (and no two users) share a key. The key

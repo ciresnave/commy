@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use commy::{
     server::{WssServer, WssServerConfig},
     Server,

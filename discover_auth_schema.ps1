@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+# SPDX-License-Identifier: MIT
 # discover_auth_schema.ps1 - Discover auth-framework's PostgreSQL schema
 
 $Container = "commy-postgres-1"

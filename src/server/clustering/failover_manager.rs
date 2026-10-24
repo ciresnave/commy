@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::protocol::ClientSession;
 /// Failover Manager - Detects peer failures and orchestrates service migration
 use crate::server::clustering::{

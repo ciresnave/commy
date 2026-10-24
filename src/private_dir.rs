@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Tenant directories that only the Commy server and administrators can list (plan C8).
 //!
 //! A service file has no permissions of its own (plan Q9, deferred): a long random file name inside a

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The production credential verifier (plan R4): API keys and JWTs checked by `auth-framework`.
 //!
 //! One framework instance **per tenant**, each with its own SQLite database and its own JWT secret,

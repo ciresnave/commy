@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Configuration file (plan R7).
 //!
 //! Settings come from, in order of precedence: the environment variable `COMMY_<NAME>`, the
