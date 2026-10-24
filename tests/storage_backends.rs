@@ -1,7 +1,7 @@
 //! Integration tests for authentication storage backends
 //!
-//! These tests verify that auth-framework correctly uses different storage backends
-//! (Memory, PostgreSQL, MySQL, Redis) when configured through TenantAuthConfig.
+//! These tests cover the in-memory backend, the only one `TenantAuthContext` wires (ROADMAP R21: PostgreSQL, MySQL and
+//! Redis are accepted by `TenantAuthConfig` and ignored).
 
 use commy::auth::tenant_context::{StorageBackend, TenantAuthConfig, TenantAuthContext};
 use std::time::Duration;
@@ -49,136 +49,6 @@ async fn test_memory_storage_backend() {
         is_valid.is_ok() && is_valid.unwrap(),
         "Token validation failed with memory storage"
     );
-}
-
-/// Test PostgreSQL storage backend configuration
-///
-/// Note: This test checks that configuration is accepted, but does not
-/// require a real PostgreSQL database unless DATABASE_URL is set.
-/// Set DATABASE_URL environment variable to test against real PostgreSQL.
-#[tokio::test]
-#[ignore] // Run with: cargo test --test storage_backends -- --ignored --nocapture
-async fn test_postgresql_storage_backend() {
-    // Check if DATABASE_URL is set for real testing
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://test:test@localhost:5432/commy_test".to_string());
-
-    let config = TenantAuthConfig {
-        tenant_id: "test_postgres_tenant".to_string(),
-        storage_backend: StorageBackend::PostgreSQL {
-            url: db_url.clone(),
-            max_connections: 10,
-        },
-        token_lifetime_secs: 3600,
-        ..Default::default()
-    };
-
-    let context = TenantAuthContext::new(config);
-
-    // Try to initialize - will fail if no database, but should accept config
-    let result = context.initialize().await;
-
-    if db_url.contains("localhost") && result.is_err() {
-        println!(
-            "PostgreSQL not available (expected for CI/local dev): {:?}",
-            result.err()
-        );
-        println!("Set DATABASE_URL to test against real PostgreSQL");
-    } else {
-        assert!(
-            result.is_ok(),
-            "PostgreSQL initialization failed: {:?}",
-            result.err()
-        );
-
-        // If DB is available, test token operations
-        let auth_fw = context.auth().write().await;
-        let token = auth_fw
-            .create_auth_token(
-                "postgres_user",
-                vec!["read".to_string(), "write".to_string()],
-                "jwt",
-                None,
-            )
-            .await;
-
-        assert!(
-            token.is_ok(),
-            "Token creation failed with PostgreSQL: {:?}",
-            token.err()
-        );
-    }
-}
-
-/// Test MySQL storage backend configuration
-#[tokio::test]
-#[ignore] // Run with: cargo test --test storage_backends -- --ignored --nocapture
-async fn test_mysql_storage_backend() {
-    let db_url = std::env::var("MYSQL_URL")
-        .unwrap_or_else(|_| "mysql://test:test@localhost:3306/commy_test".to_string());
-
-    let config = TenantAuthConfig {
-        tenant_id: "test_mysql_tenant".to_string(),
-        storage_backend: StorageBackend::MySQL {
-            url: db_url.clone(),
-            max_connections: 10,
-        },
-        token_lifetime_secs: 3600,
-        ..Default::default()
-    };
-
-    let context = TenantAuthContext::new(config);
-
-    let result = context.initialize().await;
-
-    if db_url.contains("localhost") && result.is_err() {
-        println!(
-            "MySQL not available (expected for CI/local dev): {:?}",
-            result.err()
-        );
-        println!("Set MYSQL_URL to test against real MySQL");
-    } else {
-        assert!(
-            result.is_ok(),
-            "MySQL initialization failed: {:?}",
-            result.err()
-        );
-    }
-}
-
-/// Test Redis storage backend configuration
-#[tokio::test]
-#[ignore] // Run with: cargo test --test storage_backends -- --ignored --nocapture
-async fn test_redis_storage_backend() {
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
-
-    let config = TenantAuthConfig {
-        tenant_id: "test_redis_tenant".to_string(),
-        storage_backend: StorageBackend::Redis {
-            url: redis_url.clone(),
-        },
-        token_lifetime_secs: 3600,
-        ..Default::default()
-    };
-
-    let context = TenantAuthContext::new(config);
-
-    let result = context.initialize().await;
-
-    if redis_url.contains("localhost") && result.is_err() {
-        println!(
-            "Redis not available (expected for CI/local dev): {:?}",
-            result.err()
-        );
-        println!("Set REDIS_URL to test against real Redis");
-    } else {
-        assert!(
-            result.is_ok(),
-            "Redis initialization failed: {:?}",
-            result.err()
-        );
-    }
 }
 
 /// Test storage backend switching between tenants

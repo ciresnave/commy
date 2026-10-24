@@ -11,6 +11,10 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Storage backend configuration for authentication
+///
+/// **Only [`StorageBackend::Memory`] takes effect.** [`TenantAuthContext::new`] does not read this field: every tenant's
+/// `AuthFramework` uses its default storage whatever the variant says, so `PostgreSQL`, `MySQL` and `Redis` are accepted
+/// and ignored (ROADMAP R21).
 #[derive(Clone, Debug)]
 pub enum StorageBackend {
     /// In-memory storage (default, development only)
