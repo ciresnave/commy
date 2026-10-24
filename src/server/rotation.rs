@@ -270,7 +270,7 @@ mod tests {
         let now = t0();
         let gap = Duration::from_secs(10);
         r.begin("svc", "a", 1, set(&[]), gap, now).unwrap();
-        r.finish("svc");
+        assert!(r.finish("svc").is_some());
         assert_eq!(
             r.begin("svc", "a", 1, set(&[]), gap, now + Duration::from_secs(9)).unwrap_err(),
             Refusal::TooSoon
@@ -303,11 +303,11 @@ mod tests {
         for i in 0..REQUESTER_CAP + 2 {
             let svc = format!("svc{i}");
             r.begin_forced(&svc, "root", 1, set(&[]), now).unwrap();
-            r.finish(&svc);
+            assert!(r.finish(&svc).is_some());
         }
         // spacing: the same service again at once
         r.begin_forced("svc0", "root", 1, set(&[]), now).unwrap();
-        r.finish("svc0");
+        assert!(r.finish("svc0").is_some());
         r.begin_forced("svc0", "root", 1, set(&[]), now).unwrap();
         assert_eq!(
             r.begin_forced("svc0", "root", 1, set(&[]), now).unwrap_err(),

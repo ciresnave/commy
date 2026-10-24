@@ -1,7 +1,7 @@
 # Changelog
 
 ## 0.26.2
-- CI config only: `.coderipper.toml` waives the `licence` finding "LICENSE names a person as the copyright holder" (holder is CireSnave until the entities exist, board 272, 2026-10-24). No code change.
+- CI config only: `.coderipper.toml` waives the `licence` finding "LICENSE names a person as the copyright holder" (holder is CireSnave until the entities exist, board 272, 2026-10-24). The `SEC-002` finding at `src/bin/gen_certs.rs` is waived as history only (the key embedded before 0.22.0). Tests only: the three bare `Rotations::finish` calls in `rotation.rs` tests now `assert!` that a rotation was running (CodeRipper `unused-return-values`).
 ## 0.26.1
 - Licence headers: every one of the 52 tracked source files (`.rs`, `.py`, `.sh`, `.ps1`) now starts with `SPDX-License-Identifier: MIT` (line 2 under a shebang), matching `Cargo.toml` and `LICENSE`. One line added per file, nothing else changed. `python tools/spdx.py` adds the line where it is missing and `python tools/spdx.py --check` fails if any file lacks it (it enumerates `git ls-files`, keeps line endings, and reports a different identifier without rewriting it). Clears the CodeRipper `licence` finding "52 of 52 source files carry no SPDX-License-Identifier".
 ## 0.26.0
