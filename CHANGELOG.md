@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.27.1
+- R26 (part): `rotation_min_interval_ms` / `COMMY_ROTATION_MIN_INTERVAL_MS` sets the least time between two rotations of one service (default 1000); it was settable only in code. Hot reload and choosing the verifier from the file remain open.
 ## 0.27.0
 - **R23: the grant operation log is compacted.** Once `COMMY_GRANT_COMPACT_AFTER` operations (default 1000; 0 turns it off) are stored, and at start-up when that many are waiting, the server replays the log into a scratch store and writes the result as one snapshot, `grant-snapshot/current` under the state store, then removes the operations it covers. Start-up replays the snapshot and the operations after it. Write-through and fail closed as R5: a snapshot that cannot be written leaves the log untouched; a crash between the snapshot and the removals leaves operations that replay skips; sequence numbers are never reused. `Server::compact_grants()` does it on demand. What sessions imported at authentication is not in the log and is not in the snapshot.
 - **Breaking (library):** `GrantStore` gains `snapshot` and `restore`; `Server` gains the public field `grant_compact_after`.
