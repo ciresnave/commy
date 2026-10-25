@@ -47,6 +47,7 @@ in the working directory.
 
 ## Known limits
 
+- Commy is not a backup, checkpointing or failover system: a mirror is a live, writable view of a service shared with the other clients, not a stored copy of past state, and Commy never snapshots, labels or restores what the bytes mean. Do not rely on a mirror as a backup.
 - One server only: the clustering code is experimental, unused and compiled only with the Cargo feature `clustering` (`docs/CLUSTERING.md`).
 - Service files carry no per-file operating-system permissions; a long random name inside an
   unlisted tenant directory is the only barrier on the server's machine.

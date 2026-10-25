@@ -64,7 +64,7 @@ docker run -d -p 8443:8443 -v commy-state:/var/lib/commy -v ./certs:/etc/commy:r
 
 The health check is a TCP connect to the listen port; the server has no HTTP health endpoint. (Each probe shows up in the log as a failed TLS handshake; that is expected.) The server also refuses to start without a certificate and key.
 Zero-copy local mapping needs the clients on the same filesystem as the server, so it does not cross
-a container boundary unless the tenant directory is a shared mount. Remote mirrors work anywhere.
+a container boundary unless the tenant directory is a shared mount. Remote mirrors work anywhere. Commy is not a backup, checkpointing or failover system: a mirror is a live, writable view of a service shared with the other clients, not a stored copy of past state, and Commy never snapshots, labels or restores what the bytes mean. Do not rely on a mirror as a backup.
 
 `docker-compose.yml` is only a set of test databases for the future backend tests (ROADMAP R21; no test uses them
 today); it does not start Commy.
