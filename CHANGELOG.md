@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.5
+- **Docs: patent sweep, second pass.** Charts US 8,127,174 B1 (Symantec/Cohesity, in force to about 2030) against the byte-range mirrors and marks it needs-review; reads the claims of the other open hits; adds eight searches. No code change.
+
 ## 0.27.4
 - **Docs: patent sweep** of commy 0.27.3 (`docs/PATENT-SWEEP.md`, first pass: 19 ideas, 11 hits, three patents read to the claims, none overlapping; follow-up list inside). No code change.
 
