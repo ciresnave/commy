@@ -390,6 +390,54 @@ impl Server {
         }
     }
 
+    /// Apply the settings that may change while serving (R26 hot reload): the timeouts, the
+    /// rotation interval, the service size limit, the audit retention and the grant compaction
+    /// threshold. A setting absent from `settings` goes back to its default, so removing a line
+    /// from the file undoes it. Every change is an audit event (`config: <key> <old> -> <new>`);
+    /// the changes are also returned. Listen address, TLS, directories and the verifier are not
+    /// here: they are read once, at start-up.
+    pub fn apply_live_settings(&mut self, settings: &config::Settings) -> Vec<String> {
+        use std::time::Duration;
+        let mut changes = Vec::new();
+        let ms = |var: &str, default: Duration| {
+            settings.get_parsed::<u64>(var).map(Duration::from_millis).unwrap_or(default)
+        };
+        let mut note = |key: &str, old: String, new: String| {
+            if old != new {
+                changes.push(format!("config: {key} {old} -> {new}"));
+            }
+        };
+        let fill = ms("COMMY_FILL_TIMEOUT_MS", Duration::from_secs(30));
+        note("fill_timeout_ms", self.fill_timeout.as_millis().to_string(), fill.as_millis().to_string());
+        self.fill_timeout = fill;
+        let drain = ms("COMMY_DRAIN_TIMEOUT_MS", Duration::from_secs(5));
+        note("drain_timeout_ms", self.drain_timeout.as_millis().to_string(), drain.as_millis().to_string());
+        self.drain_timeout = drain;
+        let rot = ms("COMMY_ROTATION_MIN_INTERVAL_MS", server::rotation::DEFAULT_MIN_INTERVAL);
+        note(
+            "rotation_min_interval_ms",
+            self.rotation_min_interval.as_millis().to_string(),
+            rot.as_millis().to_string(),
+        );
+        self.rotation_min_interval = rot;
+        let max = settings.get_parsed::<u64>(MAX_SERVICE_SIZE_ENV).unwrap_or(DEFAULT_MAX_SERVICE_SIZE);
+        note("max_service_size", self.max_service_size.to_string(), max.to_string());
+        self.max_service_size = max;
+        let keep = settings.get_parsed::<u64>("COMMY_AUDIT_MAX_EVENTS");
+        note("audit_max_events", format!("{:?}", self.audit_max_events), format!("{keep:?}"));
+        self.audit_max_events = keep;
+        if let Some(p) = &self.persistence {
+            p.set_audit_limit(keep.unwrap_or(persist::DEFAULT_AUDIT_LIMIT));
+        }
+        let compact = settings.get_parsed::<u64>("COMMY_GRANT_COMPACT_AFTER").unwrap_or(DEFAULT_GRANT_COMPACT_AFTER);
+        note("grant_compact_after", self.grant_compact_after.to_string(), compact.to_string());
+        self.grant_compact_after = compact;
+        for line in &changes {
+            self.audit(line);
+        }
+        changes
+    }
+
     /// Open (or close) a service to local mapping. Returns false for an unknown service.
     /// (An admin message for this arrives with the service-scoped permissions, C10.)
     pub fn set_trusted_local(&mut self, service_id: &str, trusted: bool) -> bool {

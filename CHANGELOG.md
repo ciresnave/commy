@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.27.3
+- **R26: hot reload of the configuration file.** The server looks at the file every 5 seconds and, when it changed, applies `fill_timeout_ms`, `drain_timeout_ms`, `rotation_min_interval_ms`, `max_service_size`, `audit_max_events` and `grant_compact_after` without a restart (`Server::apply_live_settings`, `config::watch`). A file that does not parse, or holds an unknown or forbidden key, is rejected whole and the current settings stay; a line removed from the file puts that setting back to its default; the environment still beats the file. Every applied change (`config: <key> <old> -> <new>`), every rejection and every change to a key that needs a restart is an audit event. Everything else (listen address, TLS paths, directories, cluster keys) is read once at start-up. The verifier stays out of the file until R25.
 ## 0.27.2
 - Docs only: `docs/PLAN-R26-CONFIG.md`, the design note for the rest of R26 (hot reload; verifier as a file setting). Nothing built.
 ## 0.27.1
