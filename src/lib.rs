@@ -382,6 +382,9 @@ impl Server {
         if let Some(keep) = settings.get_parsed::<u64>("COMMY_AUDIT_MAX_EVENTS") {
             self.audit_max_events = Some(keep);
         }
+        if let Some(ms) = settings.get_parsed::<u64>("COMMY_ROTATION_MIN_INTERVAL_MS") {
+            self.rotation_min_interval = std::time::Duration::from_millis(ms);
+        }
         if let Some(n) = settings.get_parsed::<u64>("COMMY_GRANT_COMPACT_AFTER") {
             self.grant_compact_after = n;
         }

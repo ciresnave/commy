@@ -14,5 +14,7 @@
 # drain_timeout_ms = 5000
 # fill_timeout_ms = 30000
 # audit_max_events = 100000
+# grant_compact_after = 1000           # stored grant changes before the log is folded into a snapshot; 0 = never
+# rotation_min_interval_ms = 1000      # least time between two rotations of one service
 # cluster_enabled = false
 # cluster_nodes = "node-1:9000,node-2:9000,node-3:9000"

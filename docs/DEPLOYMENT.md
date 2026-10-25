@@ -23,6 +23,7 @@ refused in the file.
 | `COMMY_DRAIN_TIMEOUT_MS`, `COMMY_FILL_TIMEOUT_MS` (`drain_timeout_ms`, `fill_timeout_ms`) | Resize timeouts | 5000, 30000 |
 | `COMMY_AUDIT_MAX_EVENTS` (`audit_max_events`) | Audit events kept | 100000 |
 | `COMMY_GRANT_COMPACT_AFTER` (`grant_compact_after`) | Stored grant changes that trigger folding the log into a snapshot; 0 = never | 1000 |
+| `COMMY_ROTATION_MIN_INTERVAL_MS` (`rotation_min_interval_ms`) | Least time between two rotations of one service | 1000 |
 | `COMMY_SERVER_ID` (`server_id`) | A name printed in the log | `node-1` |
 
 `COMMY_CLUSTER_ENABLED` is read and only produces a warning: the server does not replicate

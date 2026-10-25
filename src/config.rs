@@ -35,6 +35,7 @@ pub const KEYS: &[&str] = &[
     "fill_timeout_ms",
     "audit_max_events",
     "grant_compact_after",
+    "rotation_min_interval_ms",
 ];
 
 /// Keys that are refused in the file, with the reason.
@@ -214,11 +215,14 @@ mod tests {
 fill_timeout_ms = 111
 drain_timeout_ms = 222
 audit_max_events = 7
+rotation_min_interval_ms = 2500
 ").unwrap());
         assert_eq!(s.max_service_size, 4096);
         assert_eq!(s.fill_timeout, std::time::Duration::from_millis(111));
         assert_eq!(s.drain_timeout, std::time::Duration::from_millis(222));
         assert_eq!(s.audit_max_events, Some(7));
+        assert_eq!(s.rotation_min_interval, std::time::Duration::from_millis(2500));
+        assert_eq!(crate::Server::new().rotation_min_interval, crate::server::rotation::DEFAULT_MIN_INTERVAL);
         let mut t = crate::Server::new();
         t.configure(&Settings::empty());
         assert_eq!((t.max_service_size, t.fill_timeout, t.drain_timeout), (defaults.max_service_size, defaults.fill_timeout, defaults.drain_timeout));
