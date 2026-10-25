@@ -63,7 +63,7 @@ Every step is its own PR with a version line; none merges before the previous on
 ## Known gaps to state in the release notes
 
 - Authentication is API key or JWT checked by `auth-framework`, one database per tenant; creating tenants, users and keys is that framework's tooling, not Commy's (`docs/AUTHENTICATION.md`). Basic and custom credentials are refused, mTLS is later. The old MessagePack protocol was removed in 0.21.0 (R12).
-- The grant operation log and the audit log are durable but not compacted. The audit log is hash-chained: it detects modification, insertion and reordering, not truncation (a cut tail or front is found only against a head recorded elsewhere).
+- The grant operation log is compacted into a snapshot (R23); the audit log keeps its newest events (`COMMY_AUDIT_MAX_EVENTS`). The audit log is hash-chained: it detects modification, insertion and reordering, not truncation (a cut tail or front is found only against a head recorded elsewhere).
 - Settings come from environment variables or a TOML file (`COMMY_CONFIG`, `commy.example.toml`); no hot reload, and the verifier and rotation interval are not file settings. (R7, R26)
 - Service files carry no per-file permissions; the unlisted tenant directory and a random name are the
   barrier on the server's machine. (R8)

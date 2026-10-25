@@ -6,7 +6,10 @@
 //!
 //! - one record per service, `services/<service_id>` (tenant, name, file path, `file_id`,
 //!   whether it is open to local mapping), replaced atomically on every change;
-//! - the grants as an append-only log of operations, `grants/<seq>`, replayed in order at start-up.
+//! - the grants as an append-only log of operations, `grants/<seq>`, replayed in order at start-up,
+//!   and (R23) a snapshot, `grant-snapshot/current`, of the state the log up to `through` produces:
+//!   compaction writes the snapshot first and removes the folded operations afterwards, so a crash
+//!   between the two leaves operations the snapshot already covers, which replay skips.
 //!
 //! Not stored, on purpose: sessions, nonces, rotations in flight, per-file sequence numbers (clients
 //! resynchronise after a restart), and the permissions a session carries from authentication (those
@@ -146,6 +149,29 @@ impl Record for GrantOp {
     const SCHEMA: u32 = 1;
 }
 
+/// The grant state after every operation up to and including sequence number `through`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantSnapshot {
+    pub through: u64,
+    pub rows: Vec<crate::server::grants::RoleRow>,
+}
+
+impl Record for GrantSnapshot {
+    const KIND: &'static str = "commy-grant-snapshot";
+    const SCHEMA: u32 = 1;
+}
+
+const SNAPSHOT_KEY: &str = "grant-snapshot/current";
+
+/// What start-up replays: the snapshot (if any), then the operations after it.
+#[derive(Debug, Default)]
+pub struct LoadedGrants {
+    pub snapshot: Option<GrantSnapshot>,
+    pub ops: Vec<GrantOp>,
+    /// Sequence number of the newest operation in `ops`; `None` if there is none.
+    pub last_seq: Option<u64>,
+}
+
 /// Why a read or write of the state failed.
 #[derive(Debug)]
 pub struct PersistError(pub String);
@@ -170,6 +196,8 @@ pub struct Persistence {
     /// does not take the other down.
     audit_store: Store,
     next_seq: Mutex<u64>,
+    /// Operations stored after the snapshot (what compaction would fold).
+    pending_ops: std::sync::atomic::AtomicU64,
     /// (next audit sequence, oldest audit sequence still stored, how many events to keep, hash of
     /// the newest event; empty if there is none or it predates the chain)
     audit: Mutex<(u64, u64, u64, String)>,
@@ -219,10 +247,19 @@ impl Persistence {
             store,
             audit_store,
             next_seq: Mutex::new(0),
+            pending_ops: std::sync::atomic::AtomicU64::new(0),
             audit: Mutex::new((0, 0, DEFAULT_AUDIT_LIMIT, String::new())),
         };
-        let next = this.keys("grants/")?.last().map_or(0, |k| seq_of(k) + 1);
+        let through = this.store.get_record::<GrantSnapshot>(SNAPSHOT_KEY).map_err(err)?.map(|s| s.through);
+        let grant_keys = this.keys("grants/")?;
+        // Never reuse a number the snapshot covers, even if compaction removed every operation.
+        let next = grant_keys
+            .last()
+            .map_or(0, |k| seq_of(k) + 1)
+            .max(through.map_or(0, |t| t + 1));
         *this.next_seq.lock().unwrap_or_else(|e| e.into_inner()) = next;
+        let pending = grant_keys.iter().filter(|k| through.is_none_or(|t| seq_of(k) > t)).count();
+        this.pending_ops.store(pending as u64, std::sync::atomic::Ordering::Relaxed);
         let audit_keys = Self::keys_in(&this.audit_store, "audit/")?;
         let first = audit_keys.first().map_or(0, |k| audit_seq_of(k));
         let after_last = audit_keys.last().map_or(0, |k| audit_seq_of(k) + 1);
@@ -315,7 +352,48 @@ impl Persistence {
             .map_err(err)?;
         let used = *seq;
         *seq += 1;
+        self.pending_ops.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(used)
+    }
+
+    /// How many stored grant operations a compaction would fold into the snapshot.
+    pub fn pending_grant_ops(&self) -> u64 {
+        self.pending_ops.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Store `snapshot` as the grant state through `snapshot.through`, then remove the operations it
+    /// covers. The snapshot is an atomic replace and goes first: if it cannot be written nothing
+    /// has changed (fail closed), and if removing an operation fails the operation is harmless
+    /// (replay skips what the snapshot covers) and the next compaction removes it.
+    pub fn compact_grants(&self, snapshot: &GrantSnapshot) -> Result<(), PersistError> {
+        self.store.put_record(SNAPSHOT_KEY, snapshot).map_err(err)?;
+        let mut left = 0u64;
+        for key in self.keys("grants/")? {
+            if seq_of(&key) > snapshot.through || self.store.delete(&key).is_err() {
+                left += 1;
+            }
+        }
+        self.pending_ops.store(left, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// The snapshot and the operations after it, as start-up replays them.
+    pub fn load_grants(&self) -> Result<LoadedGrants, PersistError> {
+        let snapshot = self.store.get_record::<GrantSnapshot>(SNAPSHOT_KEY).map_err(err)?;
+        let through = snapshot.as_ref().map(|s| s.through);
+        let mut ops = Vec::new();
+        let mut last_seq = None;
+        for key in self.keys("grants/")? {
+            let seq = seq_of(&key);
+            if through.is_some_and(|t| seq <= t) {
+                continue;
+            }
+            if let Some(op) = self.store.get_record::<GrantOp>(&key).map_err(err)? {
+                ops.push(op);
+                last_seq = Some(seq);
+            }
+        }
+        Ok(LoadedGrants { snapshot, ops, last_seq })
     }
 
     /// How many audit events to keep (the oldest are removed past this); at least 1.
@@ -456,15 +534,9 @@ impl Persistence {
         Ok(true)
     }
 
-    /// Every stored grant operation, oldest first.
+    /// Every stored grant operation after the snapshot, oldest first.
     pub fn load_grant_ops(&self) -> Result<Vec<GrantOp>, PersistError> {
-        let mut out = Vec::new();
-        for key in self.keys("grants/")? {
-            if let Some(op) = self.store.get_record::<GrantOp>(&key).map_err(err)? {
-                out.push(op);
-            }
-        }
-        Ok(out)
+        Ok(self.load_grants()?.ops)
     }
 }
 
@@ -811,6 +883,61 @@ mod tests {
         assert_eq!(read_audit_anchor(&file).unwrap(), p.audit_head().unwrap().unwrap());
         let empty = Persistence::open_with(Config::Memory).unwrap();
         assert!(!empty.write_audit_anchor(&dir.path().join("none")).unwrap(), "nothing to write yet");
+    }
+
+    fn snap(through: u64) -> GrantSnapshot {
+        GrantSnapshot { through, rows: Vec::new() }
+    }
+
+    #[test]
+    fn compaction_removes_the_folded_ops_keeps_later_ones_and_never_reuses_a_number() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let p = Persistence::open(dir.path()).unwrap();
+            for c in ["a", "b", "c"] {
+                p.append_grant_op(&op(c)).unwrap();
+            }
+            assert_eq!(p.pending_grant_ops(), 3);
+            p.compact_grants(&snap(1)).unwrap();
+            assert_eq!(p.pending_grant_ops(), 1);
+            let l = p.load_grants().unwrap();
+            assert_eq!(l.snapshot, Some(snap(1)));
+            assert_eq!(l.ops.iter().map(|o| o.client.as_str()).collect::<Vec<_>>(), ["c"]);
+            assert_eq!(l.last_seq, Some(2));
+            p.compact_grants(&snap(2)).unwrap();
+        }
+        let p = Persistence::open(dir.path()).unwrap();
+        assert_eq!(p.pending_grant_ops(), 0);
+        assert_eq!(p.append_grant_op(&op("d")).unwrap(), 3, "the numbering continues past the snapshot");
+    }
+
+    #[test]
+    fn operations_a_snapshot_covers_are_skipped_if_removing_them_failed() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        for c in ["a", "b", "c"] {
+            p.append_grant_op(&op(c)).unwrap();
+        }
+        // the snapshot is stored but nothing is removed (a crash between the two steps)
+        p.store.put_record(SNAPSHOT_KEY, &snap(1)).unwrap();
+        let l = p.load_grants().unwrap();
+        assert_eq!(l.ops.len(), 1);
+        assert_eq!(l.ops[0].client, "c");
+    }
+
+    #[test]
+    fn a_snapshot_that_cannot_be_written_leaves_the_log_alone() {
+        let p = Persistence::open_with(Config::Faulty {
+            inner: Box::new(Config::Memory),
+            faults: persistant::Faults::fail_writes_after(2),
+        })
+        .unwrap();
+        p.append_grant_op(&op("a")).unwrap();
+        p.append_grant_op(&op("b")).unwrap();
+        assert!(p.compact_grants(&snap(1)).is_err());
+        let l = p.load_grants().unwrap();
+        assert!(l.snapshot.is_none());
+        assert_eq!(l.ops.len(), 2);
+        assert_eq!(p.pending_grant_ops(), 2);
     }
 
     #[test]

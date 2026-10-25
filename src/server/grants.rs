@@ -115,6 +115,24 @@ pub struct Entry {
     pub permissions: Vec<String>,
 }
 
+/// One permission of a stored role.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct PermRow {
+    pub action: String,
+    pub resource: String,
+    pub instance: Option<String>,
+    pub deny: bool,
+}
+
+/// One role of one tenant with its permissions, as a snapshot keeps it. The role name carries the
+/// client (`allow|<scope>|<client>`, `deny||<client>`) and the client holds the role.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct RoleRow {
+    pub tenant: String,
+    pub role: String,
+    pub perms: Vec<PermRow>,
+}
+
 /// Where grants live. The one implementation is [`RoleSystemGrants`].
 pub trait GrantStore: Send + Sync {
     /// Give `client` the `specs` at a service, or tenant-wide when `service` is `None`.
@@ -128,6 +146,10 @@ pub trait GrantStore: Send + Sync {
     fn is_tenant_admin(&self, tenant: &str, client: &str) -> bool;
     /// List grants, optionally of one client and/or one service.
     fn list(&self, tenant: &str, client: Option<&str>, service: Option<&str>) -> Vec<Entry>;
+    /// Everything the store holds, as rows that [`GrantStore::restore`] puts back (R23).
+    fn snapshot(&self) -> Vec<RoleRow>;
+    /// Load `rows` from [`GrantStore::snapshot`], on top of whatever is there.
+    fn restore(&self, rows: &[RoleRow]) -> Result<(), GrantError>;
     /// Import what authentication gave a session as tenant-wide grants, so every service check
     /// goes through this one engine. Additive and idempotent.
     fn import_session(
@@ -216,6 +238,71 @@ fn role_permissions(spec: Spec, service: Option<&str>) -> Vec<RolePermission> {
 }
 
 impl GrantStore for RoleSystemGrants {
+    fn snapshot(&self) -> Vec<RoleRow> {
+        let g = self.systems.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out = Vec::new();
+        for (tenant, sys) in g.iter() {
+            let names: BTreeSet<String> = sys
+                .subject_roles()
+                .iter()
+                .flat_map(|e| e.value().iter().cloned().collect::<Vec<_>>())
+                .collect();
+            for role in names {
+                let Ok(Some(r)) = sys.get_role(&role) else { continue };
+                let mut perms: Vec<PermRow> = r
+                    .permissions()
+                    .permissions()
+                    .iter()
+                    .map(|p| PermRow {
+                        action: p.action().to_string(),
+                        resource: p.resource_type().to_string(),
+                        instance: p.instance().map(str::to_string),
+                        deny: p.is_deny(),
+                    })
+                    .collect();
+                if perms.is_empty() {
+                    continue; // an empty role grants and denies nothing
+                }
+                perms.sort();
+                out.push(RoleRow { tenant: tenant.clone(), role, perms });
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn restore(&self, rows: &[RoleRow]) -> Result<(), GrantError> {
+        for row in rows {
+            // `kind|scope|client`; the client is the part after the second bar and may contain bars.
+            let mut parts = row.role.splitn(3, '|');
+            let (Some(_), Some(_), Some(client)) = (parts.next(), parts.next(), parts.next()) else {
+                return Err(GrantError::Backend(format!("snapshot role '{}' is malformed", row.role)));
+            };
+            self.with(&row.tenant, |sys| {
+                let mut role = sys
+                    .get_role(&row.role)
+                    .map_err(backend)?
+                    .unwrap_or_else(|| Role::new(row.role.clone()));
+                let existed = sys.get_role(&row.role).map_err(backend)?.is_some();
+                for p in &row.perms {
+                    role = role.add_permission(match (p.deny, &p.instance) {
+                        (false, None) => RolePermission::new(&p.action, &p.resource),
+                        (false, Some(i)) => RolePermission::with_instance(&p.action, &p.resource, i),
+                        (true, None) => RolePermission::deny(&p.action, &p.resource),
+                        (true, Some(i)) => RolePermission::deny_instance(&p.action, &p.resource, i),
+                    });
+                }
+                if existed {
+                    sys.update_role(role).map_err(backend)?;
+                } else {
+                    sys.register_role(role).map_err(backend)?;
+                }
+                sys.assign_role(&Subject::user(client), &row.role).map_err(backend)
+            })?;
+        }
+        Ok(())
+    }
+
     fn import_session(
         &self,
         tenant: &str,

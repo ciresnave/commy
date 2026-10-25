@@ -44,8 +44,13 @@ struct Server {
 
 impl Server {
     fn start(work: &Path, state: &Path, certs: &Certs) -> Server {
+        Server::start_with(work, state, certs, &[])
+    }
+
+    fn start_with(work: &Path, state: &Path, certs: &Certs, extra_env: &[(&str, &str)]) -> Server {
         let port = free_port();
         let child = Command::new(env!("CARGO_BIN_EXE_commy"))
+            .envs(extra_env.iter().copied())
             .current_dir(work)
             .env("COMMY_ALLOW_DEV_AUTH", "1")
             .env("COMMY_LISTEN_ADDR", "127.0.0.1")
@@ -176,6 +181,61 @@ async fn a_killed_server_comes_back_with_its_services_and_grants_and_revokes() {
     login(&mut admin, &tenant, "admin", Some(json!([]))).await;
     let r = ask(&mut admin, path_request(&service_id)).await;
     assert!(r["data"]["path"].is_string(), "the admin's service is still open to local mapping: {r}");
+    second.kill();
+
+    let _ = std::fs::remove_dir_all(work.path().join(format!("tenant_{tenant}")));
+}
+
+
+fn grant_op_files(state: &Path) -> usize {
+    std::fs::read_dir(state.join("data").join("grants")).map_or(0, |d| d.count())
+}
+
+#[tokio::test]
+async fn a_killed_server_with_a_compacted_grant_log_keeps_every_grant_and_revoke() {
+    let work = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let certs = self_signed(work.path());
+    let tenant = format!("rc_{}", uuid::Uuid::new_v4().simple());
+    // compact every 6 stored operations
+    let env = [("COMMY_GRANT_COMPACT_AFTER", "6")];
+
+    let first = Server::start_with(work.path(), state.path(), &certs, &env);
+    let service_id = {
+        let mut admin = connect(first.port, &certs).await;
+        login(&mut admin, &tenant, "admin", None).await;
+        let r = ask(&mut admin, json!({"type":"CreateService","data":{"tenant_id":tenant,"service_name":"svc","size":4096}})).await;
+        let id = r["data"]["service_id"].as_str().unwrap().to_string();
+        // 20 changes: bob keeps read at the end, carol ends revoked, dave is granted and revoked again
+        for round in 0..5 {
+            for (who, verb) in [("bob", "Grant"), ("carol", "Grant"), ("dave", "Grant"), ("dave", "Revoke")] {
+                let mut data = json!({"request_id":"g","client_id":who,"service_id":id});
+                if verb == "Grant" {
+                    data["permissions"] = json!(["service:read"]);
+                }
+                let r = ask(&mut admin, json!({"type":verb,"data":data})).await;
+                assert_eq!(r["type"], "GrantAck", "round {round} {who} {verb}: {r}");
+            }
+        }
+        let r = ask(&mut admin, json!({"type":"Revoke","data":{"request_id":"v","client_id":"carol","service_id":id}})).await;
+        assert_eq!(r["type"], "GrantAck", "{r}");
+        id
+    };
+    first.kill();
+    assert!(state.path().join("data").join("grant-snapshot").join("current").exists(), "a snapshot was written");
+    assert!(grant_op_files(state.path()) < 6, "{} operation files left of 21", grant_op_files(state.path()));
+
+    let second = Server::start_with(work.path(), state.path(), &certs, &env);
+    for (who, allowed) in [("bob", true), ("carol", false), ("dave", false), ("eve", false)] {
+        let mut c = connect(second.port, &certs).await;
+        login(&mut c, &tenant, who, Some(json!([]))).await;
+        let r = ask(&mut c, path_request(&service_id)).await;
+        if allowed {
+            assert_eq!(r["type"], "ServiceFilePath", "{who}: {r}");
+        } else {
+            assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{who}: {r}");
+        }
+    }
     second.kill();
 
     let _ = std::fs::remove_dir_all(work.path().join(format!("tenant_{tenant}")));

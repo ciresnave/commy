@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.27.0
+- **R23: the grant operation log is compacted.** Once `COMMY_GRANT_COMPACT_AFTER` operations (default 1000; 0 turns it off) are stored, and at start-up when that many are waiting, the server replays the log into a scratch store and writes the result as one snapshot, `grant-snapshot/current` under the state store, then removes the operations it covers. Start-up replays the snapshot and the operations after it. Write-through and fail closed as R5: a snapshot that cannot be written leaves the log untouched; a crash between the snapshot and the removals leaves operations that replay skips; sequence numbers are never reused. `Server::compact_grants()` does it on demand. What sessions imported at authentication is not in the log and is not in the snapshot.
+- **Breaking (library):** `GrantStore` gains `snapshot` and `restore`; `Server` gains the public field `grant_compact_after`.
+- Tests: `tests/grant_compaction.rs` (full replay against snapshot replay over random grant and revoke sequences, the threshold, session imports), `tests/restart.rs` (real kill and restart with a compacted log).
 ## 0.26.3
 - CI only: the `portfolio` job is repinned to `ciresnave/coderipper` `ee9c3950` (0.9.24; was `d14a22b6`, 0.9.14). 0.9.24 adds the patent-index match and lockfile reading; a transitive match is at most Medium and cannot fail the gate. No code change.
 ## 0.26.2

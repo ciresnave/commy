@@ -34,6 +34,7 @@ pub const KEYS: &[&str] = &[
     "drain_timeout_ms",
     "fill_timeout_ms",
     "audit_max_events",
+    "grant_compact_after",
 ];
 
 /// Keys that are refused in the file, with the reason.
