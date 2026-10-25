@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.27.2
+- Docs only: `docs/PLAN-R26-CONFIG.md`, the design note for the rest of R26 (hot reload; verifier as a file setting). Nothing built.
 ## 0.27.1
 - R26 (part): `rotation_min_interval_ms` / `COMMY_ROTATION_MIN_INTERVAL_MS` sets the least time between two rotations of one service (default 1000); it was settable only in code. Hot reload and choosing the verifier from the file remain open.
 ## 0.27.0
