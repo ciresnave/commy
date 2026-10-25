@@ -38,6 +38,62 @@ pub const KEYS: &[&str] = &[
     "rotation_min_interval_ms",
 ];
 
+/// The keys a running server applies when the file changes (R26); every other key is read once, at
+/// start-up, and a change to it waits for a restart.
+pub const LIVE_KEYS: &[&str] = &[
+    "fill_timeout_ms",
+    "drain_timeout_ms",
+    "rotation_min_interval_ms",
+    "max_service_size",
+    "audit_max_events",
+    "grant_compact_after",
+];
+
+/// How often [`watch`] looks at the file.
+pub const RELOAD_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Watch the configuration file at `path` and apply a change to the [`LIVE_KEYS`] (plan R26):
+/// poll its modification time and size every `every`; on a change parse the whole file, and if it
+/// is not valid (syntax, unknown or forbidden key, unreadable) keep the current settings and record
+/// why. `current` is what the server started with. A change to a key outside [`LIVE_KEYS`] is
+/// recorded as waiting for a restart. Every outcome is an audit event, never a value of a secret
+/// (the file holds none). The environment still beats the file, as at start-up.
+pub fn watch(
+    server: std::sync::Arc<tokio::sync::RwLock<crate::Server>>,
+    path: PathBuf,
+    mut current: Settings,
+    every: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let signature = |p: &Path| std::fs::metadata(p).ok().map(|m| (m.modified().ok(), m.len()));
+        // None until the first look, so a change made between reading at start-up and now is seen.
+        let mut seen: Option<Option<(Option<std::time::SystemTime>, u64)>> = None;
+        loop {
+            let now = signature(&path);
+            if seen.as_ref() != Some(&now) {
+                seen = Some(now);
+                match Settings::load(&path) {
+                    Err(e) => {
+                        server.read().await.audit(&format!("config: reload rejected, keeping the current settings: {e}"));
+                    }
+                    Ok(new) => {
+                        let mut s = server.write().await;
+                        for key in KEYS.iter().filter(|k| !LIVE_KEYS.contains(k)) {
+                            if current.file_value(key) != new.file_value(key) {
+                                s.audit(&format!("config: {key} changed in the file; it takes effect after a restart"));
+                            }
+                        }
+                        s.apply_live_settings(&new);
+                        drop(s);
+                        current = new;
+                    }
+                }
+            }
+            tokio::time::sleep(every).await;
+        }
+    })
+}
+
 /// Keys that are refused in the file, with the reason.
 const FORBIDDEN: &[(&str, &str)] = &[
     ("auth_master_secret", "secrets belong in the environment (COMMY_AUTH_MASTER_SECRET), never in a file that gets copied and committed"),
@@ -127,6 +183,11 @@ impl Settings {
             _ if Path::new(DEFAULT_CONFIG_FILE).is_file() => Self::load(Path::new(DEFAULT_CONFIG_FILE)),
             _ => Ok(Self::empty()),
         }
+    }
+
+    /// What the file says for `key` (lower case, no `COMMY_`), ignoring the environment.
+    pub fn file_value(&self, key: &str) -> Option<&str> {
+        self.file.get(key).map(String::as_str)
     }
 
     /// The file the settings came from, if any.
@@ -226,5 +287,76 @@ rotation_min_interval_ms = 2500
         let mut t = crate::Server::new();
         t.configure(&Settings::empty());
         assert_eq!((t.max_service_size, t.fill_timeout, t.drain_timeout), (defaults.max_service_size, defaults.fill_timeout, defaults.drain_timeout));
+    }
+
+    #[test]
+    fn live_settings_apply_revert_to_defaults_and_are_audited() {
+        let mut s = crate::Server::new();
+        let d = crate::Server::new();
+        let changes = s.apply_live_settings(&Settings::parse("fill_timeout_ms = 111
+max_service_size = 4096
+").unwrap());
+        assert_eq!(s.fill_timeout, std::time::Duration::from_millis(111));
+        assert_eq!(s.max_service_size, 4096);
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        assert!(s.audit_events().iter().any(|l| l == "config: fill_timeout_ms 30000 -> 111"));
+        // a line removed from the file puts the default back
+        s.apply_live_settings(&Settings::empty());
+        assert_eq!((s.fill_timeout, s.max_service_size), (d.fill_timeout, d.max_service_size));
+        // nothing changed, nothing audited
+        assert!(s.apply_live_settings(&Settings::empty()).is_empty());
+    }
+
+    async fn until(mut ok: impl FnMut() -> bool) {
+        for _ in 0..300 {
+            if ok() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("timed out");
+    }
+
+    #[tokio::test]
+    async fn the_watcher_applies_a_changed_file_rejects_a_bad_one_and_notes_restart_keys() {
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("commy.toml");
+        std::fs::write(&path, "drain_timeout_ms = 100
+").unwrap();
+        let start = Settings::load(&path).unwrap();
+        let server = Arc::new(tokio::sync::RwLock::new(crate::Server::new()));
+        server.write().await.apply_live_settings(&start);
+        let h = watch(Arc::clone(&server), path.clone(), start, std::time::Duration::from_millis(20));
+        let drain = |s: &Arc<tokio::sync::RwLock<crate::Server>>| s.try_read().map(|g| g.drain_timeout.as_millis()).unwrap_or(0);
+        let events = |s: &Arc<tokio::sync::RwLock<crate::Server>>| s.try_read().map(|g| g.audit_events()).unwrap_or_default();
+
+        // a live key changes, and a restart-only key is noted but not applied
+        std::fs::write(&path, "drain_timeout_ms = 200
+listen_port = 9
+").unwrap();
+        until(|| drain(&server) == 200).await;
+        until(|| events(&server).iter().any(|l| l.contains("listen_port changed in the file"))).await;
+
+        // a file that does not parse changes nothing and says why; the length differs so it is seen
+        std::fs::write(&path, "drain_timeout_ms = 300
+no_such_key = 1
+").unwrap();
+        until(|| events(&server).iter().any(|l| l.contains("reload rejected") && l.contains("no_such_key"))).await;
+        assert_eq!(drain(&server), 200, "the rejected file applied nothing, not even its valid line");
+
+        // a forbidden key is rejected the same way
+        std::fs::write(&path, "drain_timeout_ms = 400
+database_url = \"x\"
+").unwrap();
+        until(|| events(&server).iter().any(|l| l.contains("reload rejected") && l.contains("database_url"))).await;
+        assert_eq!(drain(&server), 200);
+
+        // a good file after a bad one is applied; a deleted line returns to the default
+        std::fs::write(&path, "fill_timeout_ms = 5
+").unwrap();
+        until(|| server.try_read().map(|g| g.fill_timeout.as_millis() == 5).unwrap_or(false)).await;
+        assert_eq!(drain(&server), 5000, "drain_timeout_ms is gone from the file: default");
+        h.abort();
     }
 }

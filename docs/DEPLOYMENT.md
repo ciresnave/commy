@@ -9,7 +9,11 @@ machine can additionally map service files directly. There is no supported multi
 Every setting can be an environment variable or a key in a TOML file (`COMMY_CONFIG`, else
 `./commy.toml`; example: `commy.example.toml`). The environment overrides the file, which overrides
 the default. An unknown key stops the start-up. Secrets and the development-authentication switch are
-refused in the file.
+refused in the file. A running server re-reads the file every 5 seconds and applies the changed
+values of `fill_timeout_ms`, `drain_timeout_ms`, `rotation_min_interval_ms`, `max_service_size`,
+`audit_max_events` and `grant_compact_after`; the others (addresses, TLS, directories) need a
+restart. A file with an error is rejected whole and the old values stay. Each change and each
+rejection is in the audit log.
 
 | Variable (key) | Meaning | Default |
 |---|---|---|

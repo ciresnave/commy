@@ -147,6 +147,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start token cleanup task (auth-framework handles this internally)
     wss_server.start_token_cleanup_task(300); // Check every 5 minutes
 
+    // Hot reload (R26): a change to the live settings in the file is applied while serving.
+    if let Some(path) = settings.source() {
+        commy::config::watch(Arc::clone(&server), path.to_path_buf(), settings.clone(), commy::config::RELOAD_POLL);
+    }
+
     println!("[Commy] ✓ Server initialized, starting WSS listener...");
     println!(
         "[Commy] Remote clients connect to: wss://{}:{}",

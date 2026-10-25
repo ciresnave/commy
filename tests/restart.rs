@@ -240,3 +240,56 @@ async fn a_killed_server_with_a_compacted_grant_log_keeps_every_grant_and_revoke
 
     let _ = std::fs::remove_dir_all(work.path().join(format!("tenant_{tenant}")));
 }
+
+fn audit_text(state: &Path) -> String {
+    fn walk(d: &Path, out: &mut String) {
+        if let Ok(rd) = std::fs::read_dir(d) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if let Ok(t) = std::fs::read_to_string(&p) {
+                    out.push_str(&t);
+                }
+            }
+        }
+    }
+    let mut s = String::new();
+    walk(&state.join("audit"), &mut s);
+    s
+}
+
+#[tokio::test]
+async fn a_running_server_applies_a_changed_config_file_and_rejects_a_bad_one() {
+    let work = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let certs = self_signed(work.path());
+    let cfg = work.path().join("commy.toml");
+    std::fs::write(&cfg, "fill_timeout_ms = 111
+").unwrap();
+    let cfg_s = cfg.to_string_lossy().into_owned();
+    let server = Server::start_with(work.path(), state.path(), &certs, &[("COMMY_CONFIG", cfg_s.as_str())]);
+    let _ = connect(server.port, &certs).await; // it is serving
+
+    let wait_for = |needle: &'static str| {
+        let state = state.path().to_path_buf();
+        async move {
+            for _ in 0..400 {
+                if audit_text(&state).contains(needle) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            panic!("the audit log never said {needle:?}: {}", audit_text(&state));
+        }
+    };
+    std::fs::write(&cfg, "fill_timeout_ms = 222
+").unwrap();
+    wait_for("config: fill_timeout_ms 111 -> 222").await;
+    std::fs::write(&cfg, "fill_timeout_ms = 333
+bogus_key = 1
+").unwrap();
+    wait_for("reload rejected").await;
+    assert!(!audit_text(state.path()).contains("-> 333"), "a rejected file applies none of its lines");
+    server.kill();
+}
