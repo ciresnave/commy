@@ -54,7 +54,7 @@ in the working directory.
   retained events, but not truncation: a log cut at the front or the tail verifies unless you recorded
   its head elsewhere (`Server::audit_head`). Events are appended under
   `<state dir>/audit/`; a write that fails is counted in `Server::audit_failures` and never blocks the
-  operation it describes). The grant operation log is not compacted.
+  operation it describes). The grant operation log is folded into a snapshot every 1000 changes (`COMMY_GRANT_COMPACT_AFTER`).
 - Basic and custom credentials are refused; mTLS is later work.
 - Markdown files outside `README.md`, `ROADMAP.md`, `CHANGELOG.md` and `docs/` may still describe the
   removed variable model (`tests/README.md` is about the storage-backend tests). Trust this README and

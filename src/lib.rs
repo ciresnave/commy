@@ -191,6 +191,9 @@ pub struct Server {
     pub max_service_size: u64,
     /// How many audit events to keep (`COMMY_AUDIT_MAX_EVENTS`); `None` keeps the store's default.
     pub audit_max_events: Option<u64>,
+    /// Fold the stored grant operations into a snapshot once this many have piled up
+    /// (`COMMY_GRANT_COMPACT_AFTER`, default 1000; 0 turns it off).
+    pub grant_compact_after: u64,
     /// The next `file_id` to hand out.
     pub next_file_id: u32,
     /// Who is on which file, for range forwarding.
@@ -239,6 +242,22 @@ pub const PAGE_SIZE: u64 = 4096;
 
 /// Default largest service file a client may ask for: 10 MiB.
 pub const DEFAULT_MAX_SERVICE_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Stored grant operations that trigger a compaction (R23).
+pub const DEFAULT_GRANT_COMPACT_AFTER: u64 = 1000;
+
+/// Apply one stored grant operation to `store`, as start-up and compaction both replay it.
+fn apply_grant_op(store: &dyn server::grants::GrantStore, op: &persist::GrantOp) -> Result<(), server::grants::GrantError> {
+    let specs = op
+        .permissions
+        .iter()
+        .map(|n| server::grants::parse_permission(n))
+        .collect::<Result<Vec<_>, _>>()?;
+    match op.kind {
+        persist::OpKind::Grant => store.grant(&op.tenant, &op.client, op.service.as_deref(), &specs),
+        persist::OpKind::Revoke => store.revoke(&op.tenant, &op.client, op.service.as_deref(), &specs),
+    }
+}
 
 /// Interim way to set the maximum service size (bytes) until config-file support exists.
 pub const MAX_SERVICE_SIZE_ENV: &str = "COMMY_MAX_SERVICE_SIZE";
@@ -341,6 +360,10 @@ impl Server {
             audit_max_events: std::env::var("COMMY_AUDIT_MAX_EVENTS")
                 .ok()
                 .and_then(|v| v.parse().ok()),
+            grant_compact_after: std::env::var("COMMY_GRANT_COMPACT_AFTER")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(DEFAULT_GRANT_COMPACT_AFTER),
         }
     }
 
@@ -358,6 +381,9 @@ impl Server {
         }
         if let Some(keep) = settings.get_parsed::<u64>("COMMY_AUDIT_MAX_EVENTS") {
             self.audit_max_events = Some(keep);
+        }
+        if let Some(n) = settings.get_parsed::<u64>("COMMY_GRANT_COMPACT_AFTER") {
+            self.grant_compact_after = n;
         }
     }
 
@@ -399,18 +425,13 @@ impl Server {
     /// As [`Server::enable_persistence`] on a store you opened (tests use memory and fault fakes).
     pub fn use_persistence(&mut self, p: persist::Persistence) -> Result<StateReport, persist::PersistError> {
         let mut report = StateReport::default();
-        // Grants first: they do not depend on anything else.
-        for op in p.load_grant_ops()? {
-            let specs: Result<Vec<_>, _> = op
-                .permissions
-                .iter()
-                .map(|n| server::grants::parse_permission(n))
-                .collect();
-            let applied = specs.and_then(|specs| match op.kind {
-                persist::OpKind::Grant => self.grants.grant(&op.tenant, &op.client, op.service.as_deref(), &specs),
-                persist::OpKind::Revoke => self.grants.revoke(&op.tenant, &op.client, op.service.as_deref(), &specs),
-            });
-            match applied {
+        // Grants first: they do not depend on anything else. The snapshot, then the operations after it.
+        let stored = p.load_grants()?;
+        if let Some(snap) = &stored.snapshot {
+            self.grants.restore(&snap.rows).map_err(|e| persist::PersistError(e.to_string()))?;
+        }
+        for op in stored.ops {
+            match apply_grant_op(self.grants.as_ref(), &op) {
                 Ok(()) => report.grant_ops_replayed += 1,
                 Err(e) => {
                     report.grant_ops_skipped += 1;
@@ -449,6 +470,9 @@ impl Server {
             p.set_audit_limit(keep);
         }
         self.persistence = Some(p);
+        if let Err(e) = self.compact_grants_if_due() {
+            self.audit(&format!("state: grant compaction failed, the log is kept: {e}"));
+        }
         self.audit(&format!(
             "server STARTED state: {} service(s) loaded, {} skipped (file missing), {} grant change(s) replayed, {} skipped",
             report.services_loaded,
@@ -510,6 +534,39 @@ impl Server {
         self.change_grants(persist::OpKind::Revoke, tenant, client, service, specs)
     }
 
+    /// Fold the stored grant operations into a snapshot and remove them (R23), so start-up replays
+    /// a snapshot instead of every grant ever made. Returns how many operations were folded; 0
+    /// (doing nothing) without persistence or without operations. Safe to call at any time: the
+    /// snapshot is written before anything is removed and a failure leaves the log as it was.
+    pub fn compact_grants(&self) -> Result<usize, persist::PersistError> {
+        use server::grants::GrantStore as _;
+        let Some(p) = &self.persistence else { return Ok(0) };
+        let _order = self.grant_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let stored = p.load_grants()?;
+        let Some(last) = stored.last_seq else { return Ok(0) };
+        // Replay into a scratch store, not the live one: the live store also holds what sessions
+        // imported at authentication, and that must not outlive the session in a snapshot.
+        let scratch = server::grants::RoleSystemGrants::new();
+        if let Some(snap) = &stored.snapshot {
+            scratch.restore(&snap.rows).map_err(|e| persist::PersistError(e.to_string()))?;
+        }
+        for op in &stored.ops {
+            // an operation that cannot be applied was skipped at start-up too
+            let _ = apply_grant_op(&scratch, op);
+        }
+        p.compact_grants(&persist::GrantSnapshot { through: last, rows: scratch.snapshot() })?;
+        Ok(stored.ops.len())
+    }
+
+    fn compact_grants_if_due(&self) -> Result<(), persist::PersistError> {
+        match &self.persistence {
+            Some(p) if self.grant_compact_after > 0 && p.pending_grant_ops() >= self.grant_compact_after => {
+                self.compact_grants().map(|_| ())
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn change_grants(
         &self,
         kind: persist::OpKind,
@@ -534,10 +591,16 @@ impl Server {
             })
             .map_err(|e| GrantError::Backend(e.to_string()))?;
         }
-        match kind {
+        let applied = match kind {
             persist::OpKind::Grant => self.grants.grant(tenant, client, service, specs),
             persist::OpKind::Revoke => self.grants.revoke(tenant, client, service, specs),
+        };
+        drop(_order);
+        // The change is recorded and applied; a compaction that fails costs only log length.
+        if let Err(e) = self.compact_grants_if_due() {
+            self.audit(&format!("state: grant compaction failed, the log is kept: {e}"));
         }
+        applied
     }
 
     /// Set how long a resize waits for SDKs to drain.
