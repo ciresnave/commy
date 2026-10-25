@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.26.3
+- CI only: the `portfolio` job is repinned to `ciresnave/coderipper` `ee9c3950` (0.9.24; was `d14a22b6`, 0.9.14). 0.9.24 adds the patent-index match and lockfile reading; a transitive match is at most Medium and cannot fail the gate. No code change.
 ## 0.26.2
 - CI config only: `.coderipper.toml` waives the `licence` finding "LICENSE names a person as the copyright holder" (holder is CireSnave until the entities exist, board 272, 2026-10-24). The `SEC-002` finding at `src/bin/gen_certs.rs` is waived as history only (the key embedded before 0.22.0). Tests only: the three bare `Rotations::finish` calls in `rotation.rs` tests now `assert!` that a rotation was running (CodeRipper `unused-return-values`).
 ## 0.26.1
