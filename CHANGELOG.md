@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.8
+- **Docs: patent sweep, EP 2897051 B1.** Reads all 15 claims from the EPO publication server (outside unless one hash serves as both entry hash and summary hash) and records the PM's findings on US 8,127,174 B1, US 10,310,754 B1 and US 9,338,013 B2. No code change.
+
 ## 0.27.7
 - auth-framework 0.6.0-rc150.
 
