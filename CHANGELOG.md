@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.7
+- auth-framework 0.6.0-rc150.
+
 ## 0.27.6
 - **Docs: patent sweep, third pass.** Reads the claims of US 10,878,079 (all independents), US 7,792,802 and three of the five clustering patents (US 10,282,261, US 7,480,823, US 12,189,653): none overlap. US 9,830,333 and US 12,724,678 could not be fetched and stay marked unverified. No code change.
 
