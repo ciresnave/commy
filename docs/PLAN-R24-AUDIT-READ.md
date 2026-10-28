@@ -1,6 +1,6 @@
 # R24: a wire message to read the audit log
 
-**Status: design note, awaiting the PM's [READY] ack.** CireSnave ruled R24 GO on 2026-10-28 (read-only, admin-only, before the `commy-wire` freeze). Ant-first applies: the audit log stays commy's own durable log on PersistAnt (R6, R13); this adds a reader, not a new audit tool.
+**Status: option A accepted by the PM (2026-10-28); implementation waits on the `commy-wire` PR.** CireSnave ruled R24 GO on 2026-10-28 (read-only, admin-only, before the `commy-wire` freeze). Ant-first applies: the audit log stays commy's own durable log on PersistAnt (R6, R13); this adds a reader, not a new audit tool.
 
 ## What exists
 
@@ -16,7 +16,7 @@ The log is **server-wide and free text**. Its lines mix tenants (`grant GRANTED 
 | B | A server-operator session: a session authenticated into one configured operator tenant reads everything. | New config key in `src/config.rs` and a new role concept; more hand-rolled config and authorisation. Ant-first says avoid. |
 | C | Dev-auth admin only. | Dev auth is refused on a reachable server; useless in production. |
 
-Recommendation: **A**. It needs no new role, leaks nothing across tenants, and "admin-only" holds (`TenantAdmin` of that tenant). Operators who want the whole log keep the Rust API and the files.
+Decision: **A** (PM, 2026-10-28). There is no server-wide read over the wire. **Events written before tagging carry no tenant and return no rows to tenant admins: there is no backfill and no guessing a tenant from the line text.** Recommendation was: **A**. It needs no new role, leaks nothing across tenants, and "admin-only" holds (`TenantAdmin` of that tenant). Operators who want the whole log keep the Rust API and the files.
 
 ## Messages (all JSON text frames, `commy-wire`)
 
@@ -32,7 +32,7 @@ A tenant-filtered view has gaps, so the client **cannot** re-run the whole chain
 ## What each repo changes
 
 1. **commy-wire** (next minor, 0.6.0; the layout is still unfrozen): `ReadAudit`, `AuditEvents`, `AuditEntry`, `AuditHead` in `src/lib.rs`; `spec/audit.md`; `schema/control.schema.json`; golden vectors (a request, a reply with `more`, an empty reply). The enum is `#[non_exhaustive]`, so this is additive in Rust; an old server answers `INVALID_REQUEST`. Publish before commy depends on it (crates.io only, portfolio rule).
-2. **commy** (minor, the PM allocates the number): the tenant tag on tenant-scoped audit calls, the `ws_handler` arm, tests (admin sees own tenant only; non-admin refused; other tenant's events absent; `more`/`after` paging; clamp; no persistence; no secret in any returned line), README and `docs/AUTHENTICATION.md` lines.
+2. **commy** (minor, the PM allocates the number): the tenant tag on tenant-scoped audit calls, the `ws_handler` arm, tests (admin sees own tenant only; **tenant A's admin cannot read tenant B's events, a test with two tenants and one event each**; an untagged pre-tagging event is returned to nobody; non-admin refused; other tenant's events absent; `more`/`after` paging; clamp; no persistence; no secret in any returned line), README and `docs/AUTHENTICATION.md` lines.
 3. **SDKs**: a follow-up row each, none required to ship the server side.
 
 ## Order and gates
