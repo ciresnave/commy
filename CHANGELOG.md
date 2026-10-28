@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.9
+- **Docs: patent sweep, fourth pass.** Finds the correct number of the hit 14 Amazon patent (US 9,830,333 B1, the B1 kind code; B2 returned 404) and reads claim 1: it needs geographic-region data stores that communicate only through message queues, per-region vector clock values and a least-upper-bound meta clock, none of which commy has. US 12,724,678 still unresolved. No code change.
+
 ## 0.27.8
 - **Docs: patent sweep, EP 2897051 B1.** Reads all 15 claims from the EPO publication server (outside unless one hash serves as both entry hash and summary hash) and records the PM's findings on US 8,127,174 B1, US 10,310,754 B1 and US 9,338,013 B2. No code change.
 
