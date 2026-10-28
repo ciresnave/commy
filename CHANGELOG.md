@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.11
+- **Docs: R24 design note.** `docs/PLAN-R24-AUDIT-READ.md` designs a read-only, admin-only wire message for the audit log (CireSnave: go, 2026-10-28). R25 and R27 move from held to scheduled for slow time after urgent work. No code change.
+
 ## 0.27.10
 - **CI: check the SPDX licence lines.** `python3 tools/spdx.py --check` runs in the Linux and macOS test jobs, so a tracked source file without its `SPDX-License-Identifier` line fails the build. No code change.
 
