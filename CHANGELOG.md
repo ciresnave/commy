@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.10
+- **CI: check the SPDX licence lines.** `python3 tools/spdx.py --check` runs in the Linux and macOS test jobs, so a tracked source file without its `SPDX-License-Identifier` line fails the build. No code change.
+
 ## 0.27.9
 - **Docs: patent sweep, fourth pass.** Finds the correct number of the hit 14 Amazon patent (US 9,830,333 B1, the B1 kind code; B2 returned 404) and reads claim 1: it needs geographic-region data stores that communicate only through message queues, per-region vector clock values and a least-upper-bound meta clock, none of which commy has. US 12,724,678 still unresolved. No code change.
 
