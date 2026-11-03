@@ -225,9 +225,9 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auth-framework"
-version = "0.6.0-rc150"
+version = "0.6.0-rc202"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e03c6952bea54833f8d37301de149769846f7483734b840d3cdeb8e68667ed30"
+checksum = "026a0a8b6a61567739f3d6275688149fc48634370a71b709c67215f6620af2e5"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "commy"
-version = "0.27.11"
+version = "0.27.12"
 dependencies = [
  "auth-framework",
  "chrono",
