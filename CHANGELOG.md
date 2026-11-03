@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.12
+- auth-framework 0.6.0-rc202 (was =0.6.0-rc150). Picks up the DPoP and bound-JWT (A18) fixes; `cargo check --all-targets` is clean.
+
 ## 0.27.11
 - **Docs: R24 design note.** `docs/PLAN-R24-AUDIT-READ.md` designs a read-only, admin-only wire message for the audit log (CireSnave: go, 2026-10-28). R25 and R27 move from held to scheduled for slow time after urgent work. No code change.
 
