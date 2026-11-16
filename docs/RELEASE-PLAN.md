@@ -5,13 +5,13 @@ One release number for Commy and every SDK, so a developer knows which versions 
 portfolio PM allocates the number. `commy-wire` takes the same number as the Commy release it
 belongs to, because it is Commy's contract.
 
-State below is as read on 2026-10-20 at Commy `main` 0.18.2 (this release: 0.19.0); the SDK and dirty-ranges rows are those lanes' to correct.
+State below is as read on 2026-10-20 at Commy `main` 0.18.2, except where a line says otherwise; the Commy server row and the known-gaps list were corrected on 2026-11-16 at 0.27.12. The SDK and dirty-ranges rows are those lanes' to correct, and the 2026-10-23 gate status below is not re-read.
 
 ## What is in place
 
 | Piece | Version read | Where |
 |-------|--------------|-------|
-| Commy server | 0.18.2 on `main` (crates.io had 0.4.1 when last searched; the PM publishes) | this repo |
+| Commy server | 0.27.12 on `main` as read 2026-11-16 (crates.io had 0.27.7 per the lane HANDOFF of 2026-10-28; not re-read; the PM publishes) | this repo |
 | `commy-wire` | 0.4.0 published; 0.5.0 (drops `RotationCommit.generation`) is what this release speaks, published by the PM first | crates.io |
 | `dirty-ranges` | 0.1.2 published | crates.io |
 | `role-system` | 1.3.0 (used for grants) | crates.io |
@@ -64,7 +64,7 @@ Every step is its own PR with a version line; none merges before the previous on
 
 - Authentication is API key or JWT checked by `auth-framework`, one database per tenant; creating tenants, users and keys is that framework's tooling, not Commy's (`docs/AUTHENTICATION.md`). Basic and custom credentials are refused, mTLS is later. The old MessagePack protocol was removed in 0.21.0 (R12).
 - The grant operation log is compacted into a snapshot (R23); the audit log keeps its newest events (`COMMY_AUDIT_MAX_EVENTS`). The audit log is hash-chained: it detects modification, insertion and reordering, not truncation (a cut tail or front is found only against a head recorded elsewhere).
-- Settings come from environment variables or a TOML file (`COMMY_CONFIG`, `commy.example.toml`); no hot reload, and the verifier and rotation interval are not file settings. (R7, R26)
+- Settings come from environment variables or a TOML file (`COMMY_CONFIG`, `commy.example.toml`). Six settings reload live, including the rotation interval (R26, 0.27.1 and 0.27.3); the verifier is not a file setting (waits on R25). (R7, R26)
 - Service files carry no per-file permissions; the unlisted tenant directory and a random name are the
   barrier on the server's machine. (R8)
 - The tenant-directory ACL was checked with a second real Windows account on 2026-10-23 (R9; `tests/windows_second_account.rs`, needs AntSpawn's account setup, so GitHub CI does not run it); antivirus was not checked.
