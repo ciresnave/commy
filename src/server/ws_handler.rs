@@ -6325,6 +6325,27 @@ mod credential_verifier_tests {
         cleanup(&t);
     }
 
+    /// README: "Basic and custom credentials are refused". The wire carries them; the verifier answers
+    /// `UnsupportedMethod` and the client gets `AuthenticationResult { success: false }` and no session
+    /// (`framework_verifier::methods_other_than_api_key_and_jwt_are_unsupported` tests the verifier).
+    #[tokio::test]
+    async fn basic_and_custom_credentials_are_refused_and_never_echoed() {
+        let t = tenant();
+        let server = production(&t);
+        for (name, bad) in [
+            ("basic", json!({"request_id":"b","protocol_version":1,"tenant_id":t,"method":"basic","username":"alice","password":"pw-alice-secret"})),
+            ("custom", json!({"request_id":"c","protocol_version":1,"tenant_id":t,"method":"custom","data":{"secret":"pw-alice-secret"}})),
+        ] {
+            let mut s = ClientSession::new();
+            let r = call(&server, &mut s, json!({"type":"Authenticate","data":bad})).await;
+            assert_ne!(r["data"]["success"], true, "{name}: {r}");
+            assert_eq!(r["data"]["success"], false, "{name}: {r}");
+            assert!(s.token.is_none(), "{name}: a session was opened");
+            assert!(!r.to_string().contains("pw-alice-secret"), "{name}: the reply echoes a credential");
+        }
+        cleanup(&t);
+    }
+
     #[tokio::test]
     async fn a_malformed_request_is_invalid_and_its_content_is_never_echoed() {
         let t = tenant();

@@ -761,6 +761,18 @@ mod tests {
     }
 
     #[test]
+    fn two_events_swapped_into_each_others_slots_are_found() {
+        let p = five();
+        let k1 = "audit/00000000000000000001";
+        let k2 = "audit/00000000000000000002";
+        let e1 = p.audit_store.get_record::<AuditEvent>(k1).unwrap().unwrap();
+        let e2 = p.audit_store.get_record::<AuditEvent>(k2).unwrap().unwrap();
+        p.audit_store.put_record(k1, &e2).unwrap();
+        p.audit_store.put_record(k2, &e1).unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, Some(1));
+    }
+
+    #[test]
     fn the_chain_continues_across_a_reopen() {
         let dir = tempfile::tempdir().unwrap();
         {

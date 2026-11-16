@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.27.13
+- **Tests and docs from the README claim audit (pm-ants, 2026-11-16).** New tests: two audit events swapped into each other's slots are detected by `verify_audit`; Basic and custom credentials are refused at `Authenticate` and never echoed. The other tamper cases (edit, remove, copy, cut tail) and the verifier-level credential refusal already had tests. `docs/RELEASE-PLAN.md` no longer says there is no hot reload or that Commy is at 0.18.2. No behaviour change.
+
 ## 0.27.12
 - auth-framework 0.6.0-rc202 (was =0.6.0-rc150). Picks up the DPoP and bound-JWT (A18) fixes; `cargo check --all-targets` is clean.
 
