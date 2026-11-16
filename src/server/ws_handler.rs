@@ -607,7 +607,7 @@ async fn handle_local_mapping(
                         crate::server::grants::Action::Admin,
                     )
                 {
-                    guard.audit(&format!(
+                    guard.audit_service(&req.service_id, &format!(
                         "local mapping REFUSED service={} enabled={} by={who}",
                         req.service_id, req.enabled
                     ));
@@ -620,7 +620,7 @@ async fn handle_local_mapping(
             }
             let mut guard = server.write().await;
             if let Err(e) = guard.set_trusted_local_recorded(&req.service_id, req.enabled) {
-                guard.audit(&format!(
+                guard.audit_service(&req.service_id, &format!(
                     "local mapping REFUSED service={} enabled={} by={who}: cannot record it: {e}",
                     req.service_id, req.enabled
                 ));
@@ -630,7 +630,7 @@ async fn handle_local_mapping(
                     rid,
                 ));
             }
-            guard.audit(&format!(
+            guard.audit_service(&req.service_id, &format!(
                 "local mapping {} service={} by={who}",
                 if req.enabled { "OPENED" } else { "CLOSED" },
                 req.service_id
@@ -958,7 +958,7 @@ fn rotation_refused(
     code: commy_wire::ErrorCode,
     why: &str,
 ) -> serde_json::Value {
-    guard.audit(&format!(
+    guard.audit_service(&req.service_id, &format!(
         "rotation REFUSED service={} by={} reason={:?}: {}",
         req.service_id, who, req.reason, why
     ));
@@ -978,7 +978,7 @@ async fn handle_rotate(
         .clone()
         .unwrap_or_else(|| session.session_id.clone());
     let guard = server.read().await;
-    guard.audit(&format!(
+    guard.audit_service(&req.service_id, &format!(
         "rotation REQUESTED service={} by={} reason={:?}",
         req.service_id, who, req.reason
     ));
@@ -1087,7 +1087,7 @@ async fn handle_rotate(
     let mut active = active;
     active.requester_session = Some(session.session_id.clone());
     active.requester_tx = session.outbound.clone();
-    guard.audit(&format!(
+    guard.audit_service(&req.service_id, &format!(
         "rotation GRANTED rotation_id={} service={} by={} reason={:?}",
         active.rotation_id, req.service_id, who, req.reason
     ));
@@ -1240,11 +1240,11 @@ async fn run_rotation(
         // The rotation's final state is not needed once the result is in hand; ending it is idempotent.
         let _ = g.rotations.finish(&service_id);
         match &result {
-            Ok(sw) => g.audit(&format!(
+            Ok(sw) => g.audit_service(&service_id, &format!(
                 "rotation COMMITTED rotation_id={} service={} old_file={} new_file={} size={}",
                 active.rotation_id, service_id, sw.old_file_id, sw.new_file_id, sw.size
             )),
-            Err(e) => g.audit(&format!(
+            Err(e) => g.audit_service(&service_id, &format!(
                 "rotation FAILED rotation_id={} service={}: {e}",
                 active.rotation_id, service_id
             )),
@@ -1330,7 +1330,7 @@ async fn abort_rotation(
         }
         // The rotation's final state is not needed here; ending it is idempotent.
         let _ = g.rotations.finish(service_id);
-        g.audit(&format!(
+        g.audit_service(&service_id, &format!(
             "rotation ABORTED rotation_id={} service={} reason={:?}",
             active.rotation_id, service_id, why
         ));
@@ -1456,14 +1456,64 @@ fn switch_to_copy(g: &mut Server, service_id: &str) -> Result<Switch, String> {
 /// Why a grant message was refused: audited, then answered with the wire error.
 fn grant_refused(
     guard: &Server,
+    tenant: &str,
     who: &str,
     what: &str,
     code: commy_wire::ErrorCode,
     why: &str,
     rid: &str,
 ) -> serde_json::Value {
-    guard.audit(&format!("grant REFUSED {what} by={who}: {why}"));
+    guard.audit_in(tenant, &format!("grant REFUSED {what} by={who}: {why}"));
     wire_error(code, why, Some(rid))
+}
+
+/// `ReadAudit` (R24): the audit events that concern the caller's own tenant, readable by its
+/// `TenantAdmin` only. Events with no tenant tag (server-wide ones, and every event written before
+/// tagging) are never returned, and no other tenant's event is.
+async fn handle_read_audit(
+    message: serde_json::Value,
+    session: &ClientSession,
+    server: &Arc<RwLock<Server>>,
+) -> serde_json::Value {
+    use commy_wire::{AuditEntry, AuditEvents, AuditHead, ControlMessage, ErrorCode};
+
+    let req = match serde_json::from_value::<ControlMessage>(message) {
+        Ok(ControlMessage::ReadAudit(r)) => r,
+        _ => return wire_error(ErrorCode::InvalidRequest, "malformed ReadAudit", None),
+    };
+    let rid = Some(req.request_id.as_str());
+    let Some(tenant) = session.tenant_id.as_deref() else {
+        return wire_error(ErrorCode::Unauthenticated, "Not authenticated", rid);
+    };
+    if let Some(refusal) = require_own_tenant_admin(session, tenant) {
+        let mut refusal = refusal;
+        if let Some(data) = refusal.get_mut("data").and_then(|d| d.as_object_mut()) {
+            data.insert("request_id".into(), serde_json::Value::String(req.request_id.clone()));
+        }
+        return refusal;
+    }
+    if let Err(why) = req.validate() {
+        return wire_error(ErrorCode::InvalidRequest, why, rid);
+    }
+    let guard = server.read().await;
+    let read = guard
+        .audit_history_for_tenant(tenant, req.after, req.effective_limit() as usize)
+        .and_then(|(rows, more)| Ok((rows, more, guard.audit_head()?)));
+    match read {
+        Ok((rows, more, head)) => wire_json(&ControlMessage::AuditEvents(AuditEvents {
+            request_id: req.request_id.clone(),
+            entries: rows
+                .into_iter()
+                .map(|(seq, e)| AuditEntry { seq, ts_ms: e.ts_ms, line: e.line, prev: e.prev, hash: e.hash })
+                .collect(),
+            head: head.map(|(seq, hash)| AuditHead { seq, hash }),
+            more,
+        })),
+        Err(e) => {
+            guard.audit(&format!("audit read failed: {e}"));
+            wire_error(ErrorCode::InternalError, "The audit log could not be read", rid)
+        }
+    }
 }
 
 /// A grant error that is the server's fault (it could not record the change) is an internal error;
@@ -1507,7 +1557,7 @@ fn spawn_revocation_rotation(
                     std::time::Instant::now(),
                 ) {
                     Ok(active) => {
-                        g.audit(&format!(
+                        g.audit_service(&service_id, &format!(
                             "rotation GRANTED rotation_id={} service={} by={} reason=Revocation (access revoked from {})",
                             active.rotation_id, service_id, who, client_id
                         ));
@@ -1530,7 +1580,7 @@ fn spawn_revocation_rotation(
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        server.read().await.audit(&format!(
+        server.read().await.audit_service(&service_id, &format!(
             "rotation FAILED service={service_id}: another rotation never finished; access revoked from {client_id} but the file was not moved"
         ));
     });
@@ -1555,20 +1605,20 @@ async fn handle_grants(
             let what = format!("Grant client={} service={:?} {:?}", req.client_id, req.service_id, req.permissions);
             let guard = server.read().await;
             if let Err(why) = req.validate() {
-                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, why, &rid);
+                return grant_refused(&guard, &tenant, &who, &what, ErrorCode::InvalidRequest, why, &rid);
             }
             let specs = match parse_specs(&req.permissions) {
                 Ok(s) => s,
-                Err(e) => return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e, &rid),
+                Err(e) => return grant_refused(&guard, &tenant, &who, &what, ErrorCode::InvalidRequest, &e, &rid),
             };
             ensure_imported(&guard, session);
             if let Err(e) = authorise_grant_change(&guard, session, &tenant, &who, req.service_id.as_deref(), &specs) {
-                return grant_refused(&guard, &who, &what, e.0, e.1, &rid);
+                return grant_refused(&guard, &tenant, &who, &what, e.0, e.1, &rid);
             }
             if let Err(e) = guard.grant(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
-                return grant_refused(&guard, &who, &what, grant_error_code(&e), &e.to_string(), &rid);
+                return grant_refused(&guard, &tenant, &who, &what, grant_error_code(&e), &e.to_string(), &rid);
             }
-            guard.audit(&format!("grant GRANTED {what} by={who}"));
+            guard.audit_in(&tenant, &format!("grant GRANTED {what} by={who}"));
             wire_json(&ControlMessage::GrantAck(commy_wire::GrantAck { request_id: rid }))
         }
         ControlMessage::Revoke(req) => {
@@ -1576,15 +1626,15 @@ async fn handle_grants(
             let what = format!("Revoke client={} service={:?} {:?}", req.client_id, req.service_id, req.permissions);
             let guard = server.read().await;
             if let Err(why) = req.validate() {
-                return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, why, &rid);
+                return grant_refused(&guard, &tenant, &who, &what, ErrorCode::InvalidRequest, why, &rid);
             }
             let specs = match parse_specs(&req.permissions) {
                 Ok(s) => s,
-                Err(e) => return grant_refused(&guard, &who, &what, ErrorCode::InvalidRequest, &e, &rid),
+                Err(e) => return grant_refused(&guard, &tenant, &who, &what, ErrorCode::InvalidRequest, &e, &rid),
             };
             ensure_imported(&guard, session);
             if let Err(e) = authorise_grant_change(&guard, session, &tenant, &who, req.service_id.as_deref(), &specs) {
-                return grant_refused(&guard, &who, &what, e.0, e.1, &rid);
+                return grant_refused(&guard, &tenant, &who, &what, e.0, e.1, &rid);
             }
             // Which of this tenant's services could the client reach before?
             let reach = |g: &Server| -> Vec<String> {
@@ -1600,10 +1650,10 @@ async fn handle_grants(
             };
             let before = reach(&guard);
             if let Err(e) = guard.revoke(&tenant, &req.client_id, req.service_id.as_deref(), &specs) {
-                return grant_refused(&guard, &who, &what, grant_error_code(&e), &e.to_string(), &rid);
+                return grant_refused(&guard, &tenant, &who, &what, grant_error_code(&e), &e.to_string(), &rid);
             }
             let after = reach(&guard);
-            guard.audit(&format!("grant REVOKED {what} by={who}"));
+            guard.audit_in(&tenant, &format!("grant REVOKED {what} by={who}"));
             // Every service the client lost access to moves to a new file.
             let lost: Vec<String> = before.into_iter().filter(|id| !after.contains(id)).collect();
             drop(guard);
@@ -1703,7 +1753,7 @@ async fn handle_sdk_message(
         // id, which nothing can match) echo the request's id.
         let echoes = matches!(
             r.get("type").and_then(|t| t.as_str()),
-            Some("Error" | "Result" | "Service" | "TenantResult")
+            Some("Error" | "Result" | "Service" | "TenantResult" | "Heartbeat")
         );
         if echoes {
             if let Some(data) = r.get_mut("data").and_then(|d| d.as_object_mut()) {
@@ -1796,7 +1846,7 @@ async fn handle_sdk_message_inner(
             let verified = match verified {
                 Ok(v) => v,
                 Err(crate::server::verify::VerifyError::Backend(e)) => {
-                    server.read().await.audit(&format!(
+                    server.read().await.audit_in(&tenant_id, &format!(
                         "authentication ERROR tenant={tenant_id} method={method}: {e}"
                     ));
                     return Some(wire_error(
@@ -1807,7 +1857,7 @@ async fn handle_sdk_message_inner(
                 }
                 Err(refusal) => {
                     // Say no more than "no": never which part was wrong, never the credential.
-                    server.read().await.audit(&format!(
+                    server.read().await.audit_in(&tenant_id, &format!(
                         "authentication REFUSED tenant={tenant_id} method={method} ({refusal:?})"
                     ));
                     return Some(wire_json(&commy_wire::ControlMessage::AuthenticationResult(
@@ -1848,7 +1898,7 @@ async fn handle_sdk_message_inner(
             {
                 let mut server_guard = server.write().await;
                 let _ = server_guard.get_tenant(&tenant_id);
-                server_guard.audit(&format!(
+                server_guard.audit_in(&tenant_id, &format!(
                     "authentication ACCEPTED client={} tenant={tenant_id} method={method}{}",
                     verified.client_id,
                     if dev { " (development authentication)" } else { "" }
@@ -2202,7 +2252,7 @@ async fn handle_sdk_message_inner(
             // Record the deletion first and refuse if that fails: a service that was removed but
             // is still stored would come back, with its file gone, after a restart.
             if let Err(e) = guard.forget_row(&service_id) {
-                guard.audit(&format!(
+                guard.audit_in(tenant_id, &format!(
                     "service delete REFUSED service={service_id} by={who}: cannot record it: {e}"
                 ));
                 return Some(wire_error(
@@ -2232,14 +2282,14 @@ async fn handle_sdk_message_inner(
             clients.dedup();
             for client in clients {
                 if let Err(e) = guard.revoke(tenant_id, &client, Some(&service_id), &[]) {
-                    guard.audit(&format!(
+                    guard.audit_in(tenant_id, &format!(
                         "service delete: could not drop {client}'s grants on {service_id}: {e}"
                     ));
                 }
             }
             // Everyone on the file is told and dropped; unflushed writes are lost, not replayed.
             let members = guard.forwarder.take_file(record.file_id);
-            guard.audit(&format!(
+            guard.audit_in(tenant_id, &format!(
                 "service DELETED service={service_id} name={} tenant={tenant_id} by={who}",
                 record.service_name
             ));
@@ -2255,7 +2305,7 @@ async fn handle_sdk_message_inner(
             }
             // Best effort: a local client may still have the file mapped (Windows then refuses).
             if let Err(e) = std::fs::remove_file(&record.file_path) {
-                guard.audit(&format!(
+                guard.audit_in(tenant_id, &format!(
                     "service delete: could not remove {}: {e}",
                     record.file_path
                 ));
@@ -2379,6 +2429,8 @@ async fn handle_sdk_message_inner(
         "GetServiceFilePath" | "ConfirmLocal" | "Resync" | "RangesChanged" | "FlushEnd" | "RotateRequest" | "RotationDrained" | "RotationFilled" | "RotationAbort" | "Grant" | "Revoke" | "ListGrants" | "SetLocalMapping" => {
             handle_local_mapping(message, session, &server).await
         }
+
+        "ReadAudit" => Some(handle_read_audit(message, session, &server).await),
 
         "Disconnect" => {
             session.drop_pending_nonces();
@@ -6146,6 +6198,127 @@ mod audit_log_tests {
         let l = lines(&s);
         assert_eq!(l, ["event 15", "event 16", "event 17", "event 18", "event 19"]);
         cleanup(&t);
+    }
+
+    fn read_audit(rid: &str, extra: serde_json::Value) -> serde_json::Value {
+        let mut data = json!({"request_id": rid});
+        for (k, v) in extra.as_object().unwrap() {
+            data[k] = v.clone();
+        }
+        json!({"type":"ReadAudit","data":data})
+    }
+
+    fn entry_lines(r: &serde_json::Value) -> Vec<String> {
+        r["data"]["entries"].as_array().unwrap().iter().map(|e| e["line"].as_str().unwrap().to_string()).collect()
+    }
+
+    async fn two_tenants_with_one_grant_each() -> (Arc<RwLock<Server>>, String, String, ClientSession, ClientSession) {
+        let (ta, tb) = (tenant(), tenant());
+        let mut s = Server::with_dev_auth(true);
+        s.use_persistence(Persistence::open_with(persistant::Config::Memory).unwrap()).unwrap();
+        let server = Arc::new(RwLock::new(s));
+        let mut a = admin(&server, &ta).await;
+        let mut b = admin(&server, &tb).await;
+        call(&server, &mut a, json!({"type":"Grant","data":{"request_id":"g","client_id":"alice-in-a","permissions":["service:read"]}})).await;
+        call(&server, &mut b, json!({"type":"Grant","data":{"request_id":"g","client_id":"bob-in-b","permissions":["service:read"]}})).await;
+        (server, ta, tb, a, b)
+    }
+
+    /// R24: tenant A's administrator cannot read tenant B's events, and the other way round.
+    #[tokio::test]
+    async fn a_tenant_admin_reads_its_own_tenants_events_and_nobody_elses() {
+        let (server, ta, tb, mut a, mut b) = two_tenants_with_one_grant_each().await;
+        let ra = call(&server, &mut a, read_audit("r1", json!({}))).await;
+        assert_eq!(ra["type"], "AuditEvents", "{ra}");
+        assert_eq!(ra["data"]["request_id"], "r1");
+        let la = entry_lines(&ra);
+        assert!(la.iter().any(|l| l.contains("alice-in-a")), "A sees its own grant: {la:#?}");
+        assert!(la.iter().all(|l| !l.contains("bob-in-b") && !l.contains(&tb)), "A saw B's events: {la:#?}");
+        let rb = call(&server, &mut b, read_audit("r2", json!({}))).await;
+        let lb = entry_lines(&rb);
+        assert!(lb.iter().any(|l| l.contains("bob-in-b")), "B sees its own grant: {lb:#?}");
+        assert!(lb.iter().all(|l| !l.contains("alice-in-a") && !l.contains(&ta)), "B saw A's events: {lb:#?}");
+        assert!(ra["data"]["head"]["seq"].is_u64() && ra["data"]["head"]["hash"].is_string(), "{ra}");
+        cleanup(&ta);
+        cleanup(&tb);
+    }
+
+    /// Server-wide events (and, by the same rule, events written before tagging) carry no tenant and
+    /// go to nobody.
+    #[tokio::test]
+    async fn untagged_events_are_returned_to_nobody() {
+        let (server, ta, tb, mut a, _b) = two_tenants_with_one_grant_each().await;
+        server.read().await.audit("server-wide event nobody on the wire may read");
+        server.read().await.audit(&format!("untagged event that names {ta}"));
+        let r = call(&server, &mut a, read_audit("r1", json!({"limit": 1000}))).await;
+        let l = entry_lines(&r);
+        assert!(l.iter().all(|x| !x.contains("nobody on the wire") && !x.contains("untagged event") && !x.contains("server STARTED")), "{l:#?}");
+        assert!(!l.is_empty());
+        cleanup(&ta);
+        cleanup(&tb);
+    }
+
+    #[tokio::test]
+    async fn read_audit_pages_clamps_and_refuses_what_it_should() {
+        let t = tenant();
+        let mut s = Server::with_dev_auth(true);
+        s.use_persistence(Persistence::open_with(persistant::Config::Memory).unwrap()).unwrap();
+        let server = Arc::new(RwLock::new(s));
+        let mut a = admin(&server, &t).await;
+        for i in 0..5 {
+            server.read().await.audit_in(&t, &format!("event {i}"));
+        }
+        let first = call(&server, &mut a, read_audit("p1", json!({"limit": 3}))).await;
+        assert_eq!(entry_lines(&first).len(), 3, "{first}");
+        assert_eq!(first["data"]["more"], true);
+        let last = first["data"]["entries"][2]["seq"].as_u64().unwrap();
+        let second = call(&server, &mut a, read_audit("p2", json!({"after": last, "limit": 1000}))).await;
+        assert_eq!(second["data"]["more"], false, "{second}");
+        assert!(second["data"]["entries"].as_array().unwrap().iter().all(|e| e["seq"].as_u64().unwrap() > last));
+        let huge = call(&server, &mut a, read_audit("p3", json!({"limit": 4_000_000_000u64}))).await;
+        assert_eq!(huge["type"], "AuditEvents", "an oversized limit is clamped, not refused: {huge}");
+        let zero = call(&server, &mut a, read_audit("p4", json!({"limit": 0}))).await;
+        assert_eq!((zero["type"].as_str(), zero["data"]["code"].as_str()), (Some("Error"), Some("INVALID_REQUEST")), "{zero}");
+        let unknown = call(&server, &mut a, read_audit("p5", json!({"tenant_id": "someone-else"}))).await;
+        assert_eq!(unknown["data"]["code"], "INVALID_REQUEST", "a tenant cannot be named: {unknown}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn read_audit_needs_tenant_admin() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut reader = ClientSession::new();
+        let r = call(&server, &mut reader, json!({"type":"Authenticate","data":{"tenant_id":t,"request_id":"a","protocol_version":1,"method":"api_key","key":"x","client_id":"reader","dev_scopes":["service:read"]}})).await;
+        assert_eq!(r["data"]["success"], true, "{r}");
+        let r = call(&server, &mut reader, read_audit("n1", json!({}))).await;
+        assert_eq!(r["data"]["code"], "PERMISSION_DENIED", "{r}");
+        assert_eq!(r["data"]["request_id"], "n1");
+        let mut nobody = ClientSession::new();
+        let r = call(&server, &mut nobody, read_audit("n2", json!({}))).await;
+        assert_eq!(r["data"]["code"], "UNAUTHENTICATED", "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn read_audit_without_persistence_is_empty() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = admin(&server, &t).await;
+        let r = call(&server, &mut a, read_audit("e1", json!({}))).await;
+        assert_eq!(r["type"], "AuditEvents", "{r}");
+        assert_eq!((r["data"]["entries"].as_array().unwrap().len(), r["data"]["more"].clone()), (0, json!(false)));
+        assert!(r["data"].get("head").is_none(), "{r}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn a_heartbeat_echoes_its_request_id() {
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut s = ClientSession::new();
+        let r = call(&server, &mut s, json!({"type":"Heartbeat","data":{"request_id":"h1"}})).await;
+        assert_eq!((r["type"].as_str(), r["data"]["request_id"].as_str()), (Some("Heartbeat"), Some("h1")), "{r}");
+        assert!(r["data"]["timestamp"].is_string());
     }
 
     #[tokio::test]

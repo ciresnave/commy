@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "commy"
-version = "0.27.13"
+version = "0.27.14"
 dependencies = [
  "auth-framework",
  "chrono",
@@ -652,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "commy-wire"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97872a6cdfa28bb976229ceb01979a9e8be30f9ce2b37541b4933506ad9fd4be"
+checksum = "980842a89a87f2f6ee983a2f4856bdd8efe8e5d74d67c82ff4ac5d16df8292ac"
 dependencies = [
  "serde",
  "serde_json",

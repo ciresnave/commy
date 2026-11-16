@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.27.14
+- **R24: read the audit log over the wire.** `ReadAudit` / `AuditEvents` (`commy-wire` 0.5.1, `spec/audit.md`). A `TenantAdmin` reads only the events tagged with its own tenant, oldest first, `limit` default 100 and clamped to 1000, `more` and `after` to page, `head` for an off-machine anchor. Audit events now carry an optional tenant tag (`AuditEvent.tenant`, `Server::audit_in`, `Server::audit_service`) on every grant, rotation, local-mapping, authentication and service event; server-wide events (`state:`, `config:`) and every event written before this version have no tag and are returned to nobody. The tag is **not** covered by the hash chain (the published formula is over `seq`, `ts_ms`, `prev`, `line`), so someone who can write the store can re-tag an event without `verify_audit` noticing. No per-session rate limit on `ReadAudit` yet (the read is admin-only and clamped); the design note proposed reusing one.
+- A `Heartbeat` reply now echoes the request's `request_id` (the other administration replies already did).
+- Depends on `commy-wire` 0.5.1 (the typed administration messages and `ReadAudit`; old request shapes stay accepted).
+
 ## 0.27.13
 - **Tests and docs from the README claim audit (pm-ants, 2026-11-16).** New tests: two audit events swapped into each other's slots are detected by `verify_audit`; Basic and custom credentials are refused at `Authenticate` and never echoed. The other tamper cases (edit, remove, copy, cut tail) and the verifier-level credential refusal already had tests. `docs/RELEASE-PLAN.md` no longer says there is no hot reload or that Commy is at 0.18.2. No behaviour change.
 
