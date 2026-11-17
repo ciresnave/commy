@@ -1,6 +1,6 @@
 # R24: a wire message to read the audit log
 
-**Status: option A accepted by the PM (2026-10-28); implementation waits on the `commy-wire` PR.** CireSnave ruled R24 GO on 2026-10-28 (read-only, admin-only, before the `commy-wire` freeze). Ant-first applies: the audit log stays commy's own durable log on PersistAnt (R6, R13); this adds a reader, not a new audit tool.
+**Status: done. `commy-wire` 0.5.1 carries the messages; commy 0.27.14 serves them (option A, PM 2026-10-28). Not done from this note: the per-session rate limit, and SDK support (a row each).** CireSnave ruled R24 GO on 2026-10-28 (read-only, admin-only, before the `commy-wire` freeze). Ant-first applies: the audit log stays commy's own durable log on PersistAnt (R6, R13); this adds a reader, not a new audit tool.
 
 ## What exists
 

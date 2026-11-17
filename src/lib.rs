@@ -677,6 +677,24 @@ impl Server {
     /// counted ([`Server::audit_failures`]) and printed; it never blocks the operation it describes
     /// (the changes that matter are recorded fail-closed by the state store itself).
     pub fn audit(&self, line: &str) {
+        self.audit_tagged(None, line);
+    }
+
+    /// [`Server::audit`] for an event that concerns `tenant`: a tenant administrator can read it
+    /// over the wire (`ReadAudit`). Use it for every event about one tenant's clients or services.
+    pub fn audit_in(&self, tenant: &str, line: &str) {
+        self.audit_tagged(Some(tenant), line);
+    }
+
+    /// [`Server::audit_in`] for an event about a service, tagged with the service's tenant. A service
+    /// that is not registered (any more) leaves the event untagged, so it is never served to a tenant:
+    /// use `audit_in` where the tenant is known.
+    pub fn audit_service(&self, service_id: &str, line: &str) {
+        let tenant = self.service_registry.get(service_id).map(|r| r.tenant_name.clone());
+        self.audit_tagged(tenant.as_deref(), line);
+    }
+
+    fn audit_tagged(&self, tenant: Option<&str>, line: &str) {
         eprintln!("[audit] {line}");
         {
             let mut log = self.audit_log.lock().unwrap_or_else(|e| e.into_inner());
@@ -686,7 +704,7 @@ impl Server {
             log.push(line.to_string());
         }
         if let Some(p) = &self.persistence {
-            if let Err(e) = p.append_audit(line) {
+            if let Err(e) = p.append_audit_tagged(line, tenant) {
                 self.audit_failures
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 eprintln!("[audit] NOT RECORDED in the durable log: {e}");
@@ -718,6 +736,20 @@ impl Server {
         match &self.persistence {
             Some(p) => p.load_audit(after, limit),
             None => Ok(Vec::new()),
+        }
+    }
+
+    /// The durable audit events tagged with `tenant`, oldest first, and whether more follow (`ReadAudit`).
+    /// Empty without persistence.
+    pub fn audit_history_for_tenant(
+        &self,
+        tenant: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> Result<(Vec<(u64, persist::AuditEvent)>, bool), persist::PersistError> {
+        match &self.persistence {
+            Some(p) => p.load_audit_for_tenant(tenant, after, limit),
+            None => Ok((Vec::new(), false)),
         }
     }
 

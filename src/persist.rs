@@ -86,6 +86,12 @@ pub struct AuditEvent {
     /// written before the chain existed.
     #[serde(default)]
     pub hash: String,
+    /// The tenant this event concerns; `None` for server-wide events and for every event written
+    /// before tagging existed (they are never served over the wire; R24). **Not covered by `hash`**:
+    /// the published `commy-wire` formula is over `(seq, ts_ms, prev, line)`, so a tag can be
+    /// changed by someone who can write the store without breaking the chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
 }
 
 /// The hash that chains an audit event to the one before it. The sequence number is inside it, so an
@@ -404,6 +410,11 @@ impl Persistence {
     /// Append an audit event; returns its sequence number once it is durable. Old events past the
     /// limit are removed afterwards (a failure to remove one is harmless: the next append retries).
     pub fn append_audit(&self, line: &str) -> Result<u64, PersistError> {
+        self.append_audit_tagged(line, None)
+    }
+
+    /// [`Persistence::append_audit`] for an event that concerns `tenant` (`None`: server-wide).
+    pub fn append_audit_tagged(&self, line: &str, tenant: Option<&str>) -> Result<u64, PersistError> {
         let ts_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -420,6 +431,7 @@ impl Persistence {
                     line: line.to_string(),
                     prev,
                     hash: hash.clone(),
+                    tenant: tenant.map(str::to_string),
                 },
             )
             .map_err(err)?;
@@ -453,6 +465,33 @@ impl Persistence {
             }
         }
         Ok(out)
+    }
+
+    /// The stored events tagged with `tenant` and a sequence number above `after`, oldest first, at
+    /// most `limit`; the flag is true when more matching events follow. Untagged events are never
+    /// returned.
+    pub fn load_audit_for_tenant(
+        &self,
+        tenant: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> Result<(Vec<(u64, AuditEvent)>, bool), PersistError> {
+        let mut out = Vec::new();
+        for key in Self::keys_in(&self.audit_store, "audit/")? {
+            let seq = audit_seq_of(&key);
+            if after.is_some_and(|a| seq <= a) {
+                continue;
+            }
+            if let Some(e) = self.audit_store.get_record::<AuditEvent>(&key).map_err(err)? {
+                if e.tenant.as_deref() == Some(tenant) {
+                    if out.len() >= limit {
+                        return Ok((out, true));
+                    }
+                    out.push((seq, e));
+                }
+            }
+        }
+        Ok((out, false))
     }
 
     /// Check the hash chain over every stored audit event. An edited line, a removed or copied event
@@ -770,6 +809,22 @@ mod tests {
         p.audit_store.put_record(k1, &e2).unwrap();
         p.audit_store.put_record(k2, &e1).unwrap();
         assert_eq!(p.verify_audit().unwrap().first_bad, Some(1));
+    }
+
+    #[test]
+    fn tenant_reads_skip_untagged_and_other_tenants_events_and_page() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        p.append_audit("untagged").unwrap();
+        p.append_audit_tagged("a1", Some("a")).unwrap();
+        p.append_audit_tagged("b1", Some("b")).unwrap();
+        p.append_audit_tagged("a2", Some("a")).unwrap();
+        p.append_audit_tagged("a3", Some("a")).unwrap();
+        let (rows, more) = p.load_audit_for_tenant("a", None, 2).unwrap();
+        assert_eq!((rows.iter().map(|r| r.1.line.as_str()).collect::<Vec<_>>(), more), (vec!["a1", "a2"], true));
+        let (rows, more) = p.load_audit_for_tenant("a", Some(rows[1].0), 2).unwrap();
+        assert_eq!((rows.iter().map(|r| r.1.line.as_str()).collect::<Vec<_>>(), more), (vec!["a3"], false));
+        assert!(p.load_audit_for_tenant("nobody", None, 10).unwrap().0.is_empty());
+        assert_eq!(p.verify_audit().unwrap().first_bad, None, "tagging does not disturb the chain");
     }
 
     #[test]
