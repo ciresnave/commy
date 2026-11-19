@@ -40,7 +40,9 @@ Three pieces.
    with `x509-parser` (or whatever `auth-framework` already uses), not by hand.
 3. **Wire.** A client still sends `Authenticate`. It needs a credential that says "use my
    certificate": a new `Credentials::Mtls` (no fields), tag `mtls`. **That is a `commy-wire` change
-   and must land before the R1 freeze**, in the same release train as R30 (0.5.2). The server then
+   and must land before the R1 freeze**, as a **Breaking** release (0.6.0; `Credentials` is not
+   `#[non_exhaustive]`) in the next commy-wire PR after 0.5.2 (R30's release, already published; Mtls is
+   not in it). The server then
    passes the peer identity into `VerifyRequest` (new optional field `peer_cert`), and a
    `Credentials::Mtls` with no verified certificate on the connection is `Rejected`.
 
@@ -78,7 +80,7 @@ a file. Restart-only (not a live key), because it changes what the listener acce
 1. Is the SAN-URI identity scheme (`commy://<tenant>/<client_id>`) acceptable, or does CireSnave want
    a mapping table (certificate fingerprint to client id)? **Recommend the URI.**
 2. Confirm `Custom` stays refused in the binary. **Recommend yes.**
-3. Confirm the wire minor for `Credentials::Mtls` can ride with R30 (0.5.2) or the next one before the
-   freeze.
+3. ~~Confirm the wire release for `Credentials::Mtls`.~~ Decided 2026-11-19 (pm-ants): the next
+   commy-wire PR (opened 2026-11-20 UTC or later), Breaking 0.6.0, before the freeze.
 
 — lane: commy

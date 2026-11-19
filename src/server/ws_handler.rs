@@ -6293,6 +6293,13 @@ mod audit_log_tests {
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut a = admin(&server, &t).await;
         let mut other = admin(&server, &t).await;
+        // Same burst as production, but one token an hour, so no read in this test can be
+        // replenished by a slow machine (governor has no injectable clock on this limiter type).
+        a.audit_reads = Arc::new(governor::RateLimiter::direct(
+            governor::Quota::per_hour(std::num::NonZeroU32::new(1).unwrap())
+                .allow_burst(std::num::NonZeroU32::new(crate::protocol::AUDIT_READ_BURST).unwrap()),
+        ));
+        assert_eq!((crate::protocol::AUDIT_READ_BURST, crate::protocol::AUDIT_READS_PER_MINUTE), (10, 30));
         let mut limited = None;
         for i in 0..11 {
             let r = call(&server, &mut a, read_audit(&format!("l{i}"), json!({}))).await;

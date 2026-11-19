@@ -1,5 +1,7 @@
 # R24: a wire message to read the audit log
 
+**Update 2026-11-19 (R30, R31): the shipped contract differs from this note in two places.** (1) Entries hashed since R30 carry `v2:<hex>` hashes that cover the tenant tag: recompute with `commy_wire::verify_audit_entry(entry, your_tenant)` (commy-wire 0.5.2, `spec/audit.md` "Hash versions"); the `(seq, ts_ms, prev, line)` input in this note is the v1 formula, still right for bare-hex hashes. A hash with an unknown prefix must be refused. (2) A session may call `ReadAudit` in a burst of 10, then 30 a minute; the next call is `RATE_LIMITED` with the request's `request_id`. The server also refuses (`INTERNAL_ERROR`, audited) to serve a tenant row that fails its own hash.
+
 **Status: done. `commy-wire` 0.5.1 carries the messages; commy 0.27.14 serves them (option A, PM 2026-10-28). Not done from this note: the per-session rate limit, and SDK support (a row each).** CireSnave ruled R24 GO on 2026-10-28 (read-only, admin-only, before the `commy-wire` freeze). Ant-first applies: the audit log stays commy's own durable log on PersistAnt (R6, R13); this adds a reader, not a new audit tool.
 
 ## What exists
@@ -27,7 +29,7 @@ Errors (existing codes only, no new `ErrorCode`): `UNAUTHENTICATED` before `Auth
 
 ## Verification
 
-A tenant-filtered view has gaps, so the client **cannot** re-run the whole chain; each entry's `hash` is still recomputable from `(seq, ts_ms, prev, line)`, which proves an entry was not edited, and `head` plus an off-machine anchor (R13) proves the log was not truncated. Full-chain verification stays the operator's (`Server::verify_audit`). The spec says so plainly.
+A tenant-filtered view has gaps, so the client **cannot** re-run the whole chain; each entry's `hash` is still recomputable (see the 2026-11-19 update at the top for the v2 inputs), which proves an entry was not edited, and `head` plus an off-machine anchor (R13) proves the log was not truncated. Full-chain verification stays the operator's (`Server::verify_audit`). The spec says so plainly.
 
 ## What each repo changes
 

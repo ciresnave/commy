@@ -463,7 +463,11 @@ impl Persistence {
 
     /// The stored events tagged with `tenant` and a sequence number above `after`, oldest first, at
     /// most `limit`; the flag is true when more matching events follow. Untagged events are never
-    /// returned.
+    /// returned. **Every row is verified against its own hash for `tenant` before it is returned**
+    /// (R30): a row that fails (edited, re-tagged under a v2 hash, unknown hash version) makes the
+    /// read fail rather than be served. A v1 hash does not cover the tag, so a v1 event written by a
+    /// 0.27.14 server can still be re-tagged undetected; that is the cost of keeping old events
+    /// readable.
     pub fn load_audit_for_tenant(
         &self,
         tenant: &str,
@@ -478,6 +482,16 @@ impl Persistence {
             }
             if let Some(e) = self.audit_store.get_record::<AuditEvent>(&key).map_err(err)? {
                 if e.tenant.as_deref() == Some(tenant) {
+                    let entry = commy_wire::AuditEntry {
+                        seq,
+                        ts_ms: e.ts_ms,
+                        line: e.line.clone(),
+                        prev: e.prev.clone(),
+                        hash: e.hash.clone(),
+                    };
+                    if let Err(why) = commy_wire::verify_audit_entry(&entry, Some(tenant)) {
+                        return Err(PersistError(format!("audit event {seq} failed verification: {why:?}")));
+                    }
                     if out.len() >= limit {
                         return Ok((out, true));
                     }
@@ -820,6 +834,45 @@ mod tests {
         p.audit_store.put_record(&key, &e).unwrap();
         let c = p.verify_audit().unwrap();
         assert_eq!((c.events, c.chained, c.first_bad), (3, 3, None));
+    }
+
+    #[test]
+    fn a_retagged_v2_event_is_never_served_to_the_other_tenant() {
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        let seq = p.append_audit_tagged("grant secret=1", Some("acme")).unwrap();
+        let key = format!("audit/{seq:020}");
+        let mut e = p.audit_store.get_record::<AuditEvent>(&key).unwrap().unwrap();
+        e.tenant = Some("globex".into());
+        p.audit_store.put_record(&key, &e).unwrap();
+        let r = p.load_audit_for_tenant("globex", None, 10);
+        assert!(r.is_err(), "a row that fails its hash is refused, not served: {r:?}");
+        let r = p.load_audit_for_tenant("acme", None, 10).unwrap();
+        assert!(r.0.is_empty(), "and it is no longer acme's either");
+    }
+
+    #[test]
+    fn a_tagged_v1_event_from_a_0_27_server_is_still_served() {
+        // The legacy formula, written out here (not through commy-wire) so the fixture does not
+        // depend on the code under test.
+        use sha2::{Digest, Sha256};
+        let (seq, ts, line) = (0u64, 1_700_000_000_000u64, "grant");
+        let mut h = Sha256::new();
+        h.update(b"commy-audit-v1 ");
+        h.update(seq.to_le_bytes());
+        h.update(ts.to_le_bytes());
+        h.update(0u64.to_le_bytes());
+        h.update(line.as_bytes());
+        let hash: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        let p = Persistence::open_with(Config::Memory).unwrap();
+        p.audit_store
+            .put_record(
+                "audit/00000000000000000000",
+                &AuditEvent { ts_ms: ts, line: line.into(), prev: String::new(), hash, tenant: Some("acme".into()) },
+            )
+            .unwrap();
+        assert_eq!(p.verify_audit().unwrap().first_bad, None);
+        let (rows, _) = p.load_audit_for_tenant("acme", None, 10).unwrap();
+        assert_eq!(rows.len(), 1);
     }
 
     #[test]

@@ -65,6 +65,19 @@ pub struct ClientSession {
     pub audit_reads: std::sync::Arc<governor::DefaultDirectRateLimiter>,
 }
 
+/// `ReadAudit` calls a session may make in a burst (R31).
+pub const AUDIT_READ_BURST: u32 = 10;
+/// `ReadAudit` calls a session may make per minute once the burst is spent (R31).
+pub const AUDIT_READS_PER_MINUTE: u32 = 30;
+
+/// A fresh per-session `ReadAudit` limiter: [`AUDIT_READ_BURST`], then [`AUDIT_READS_PER_MINUTE`].
+pub fn audit_read_limiter() -> std::sync::Arc<governor::DefaultDirectRateLimiter> {
+    std::sync::Arc::new(governor::RateLimiter::direct(
+        governor::Quota::per_minute(std::num::NonZeroU32::new(AUDIT_READS_PER_MINUTE).unwrap())
+            .allow_burst(std::num::NonZeroU32::new(AUDIT_READ_BURST).unwrap()),
+    ))
+}
+
 impl ClientSession {
     /// Create a new client session
     pub fn new() -> Self {
@@ -85,10 +98,7 @@ impl ClientSession {
             outbound: None,
             pending_flush: std::collections::HashMap::new(),
             grants_imported: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            audit_reads: std::sync::Arc::new(governor::RateLimiter::direct(
-                governor::Quota::per_minute(std::num::NonZeroU32::new(30).unwrap())
-                    .allow_burst(std::num::NonZeroU32::new(10).unwrap()),
-            )),
+            audit_reads: audit_read_limiter(),
         }
     }
 
