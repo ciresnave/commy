@@ -69,7 +69,7 @@ a file. Restart-only (not a live key), because it changes what the listener acce
 
 | Change | Repo | When |
 |---|---|---|
-| `Credentials::Mtls`, spec + schema + vector | commy-wire | before the R1 freeze; minor |
+| `Credentials::Mtls`, spec + schema + vector | commy-wire | before the R1 freeze; **Breaking (0.6.0)**: `Credentials` is not `#[non_exhaustive]`, so a new variant breaks exhaustive matches in SDKs. Next commy-wire PR, opened 2026-11-20 UTC or later, fresh branch after #15 merges (PM decision 2026-11-19: SAN-URI identity chosen) |
 | `client_auth_ca`, `auth_methods`, `peer_cert` in `VerifyRequest`, Basic arm, mTLS mapping | commy | one PR |
 | `[NOTICE]` to each SDK for `Credentials::Mtls` | lane | when the wire minor is cut |
 
