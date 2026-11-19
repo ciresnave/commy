@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (version allocated by pm-assist at gate)
+- **R30: the audit tenant tag is inside the hash chain.** New events use the `commy-audit-v2` hash (`commy-wire` 0.5.2, `spec/audit.md` "Hash versions"; `v2:` prefix), which covers the tenant tag, so re-tagging or un-tagging a stored event breaks `verify_audit`. Events written by older servers keep verifying under v1, a log may mix both, and a hash with an unknown prefix is refused, never skipped. Depends on `commy-wire` 0.5.2.
+- **R31: per-session rate limit on `ReadAudit`** (`governor` 0.10.4): a burst of 10, then 30 a minute; the next read is `RATE_LIMITED` with its `request_id`.
+- Docs: `docs/PLAN-R25-AUTH-METHODS.md` (mTLS, Basic, custom credentials; design only, SAN-URI identity decided by pm-ants 2026-11-19).
+
 ## 0.27.14
 - **R24: read the audit log over the wire.** `ReadAudit` / `AuditEvents` (`commy-wire` 0.5.1, `spec/audit.md`). A `TenantAdmin` reads only the events tagged with its own tenant, oldest first, `limit` default 100 and clamped to 1000, `more` and `after` to page, `head` for an off-machine anchor. Audit events now carry an optional tenant tag (`AuditEvent.tenant`, `Server::audit_in`, `Server::audit_service`) on every grant, rotation, local-mapping, authentication and service event; server-wide events (`state:`, `config:`) and every event written before this version have no tag and are returned to nobody. The tag is **not** covered by the hash chain (the published formula is over `seq`, `ts_ms`, `prev`, `line`), so someone who can write the store can re-tag an event without `verify_audit` noticing. No per-session rate limit on `ReadAudit` yet (the read is admin-only and clamped); the design note proposed reusing one. Both are ROADMAP rows with an owner (R30, R31).
 - A `Heartbeat` reply now echoes the request's `request_id` (the other administration replies already did).

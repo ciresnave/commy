@@ -21,7 +21,7 @@
     # Exact pin: Cargo orders pre-release rcN as text, so rc97 > rc126 and a bare lower bound would admit yanked builds.
     auth-framework    = { version = "=0.6.0-rc202", features = ["sqlite-storage"] }
     chrono            = { version = "0.4", features = ["serde"] }
-commy-wire = "0.5.1"
+commy-wire = "0.5.2"
     futures           = "0.3"
 hkdf = "0.13"
     memmap2           = "0.9"
