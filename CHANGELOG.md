@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (version allocated by pm-assist at gate)
+- **Breaking (library callers; pm-ants ruling 2026-11-19):** `persist::audit_hash` gained a `tenant: Option<&str>` argument (it now returns the v2 hash), and `ClientSession` gained the public field `audit_reads`. Wire behaviour for clients is unchanged apart from the new `v2:` hash form.
 - **R30: the audit tenant tag is inside the hash chain.** New events use the `commy-audit-v2` hash (`commy-wire` 0.5.2, `spec/audit.md` "Hash versions"; `v2:` prefix), which covers the tenant tag, so re-tagging or un-tagging a stored event breaks `verify_audit`. Events written by older servers keep verifying under v1, a log may mix both, and a hash with an unknown prefix is refused, never skipped. Depends on `commy-wire` 0.5.2.
 - **R31: per-session rate limit on `ReadAudit`** (`governor` 0.10.4): a burst of 10, then 30 a minute; the next read is `RATE_LIMITED` with its `request_id`.
 - Docs: `docs/PLAN-R25-AUTH-METHODS.md` (mTLS, Basic, custom credentials; design only, SAN-URI identity decided by pm-ants 2026-11-19).
