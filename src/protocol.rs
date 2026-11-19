@@ -61,6 +61,8 @@ pub struct ClientSession {
     pub pending_flush: std::collections::HashMap<u32, Vec<commy_wire::ByteRange>>,
     /// Whether this session's authentication permissions were imported into the grant store.
     pub grants_imported: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Limits how often this session may call `ReadAudit` (R31): a burst of 10, then 30 a minute.
+    pub audit_reads: std::sync::Arc<governor::DefaultDirectRateLimiter>,
 }
 
 impl ClientSession {
@@ -83,6 +85,10 @@ impl ClientSession {
             outbound: None,
             pending_flush: std::collections::HashMap::new(),
             grants_imported: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            audit_reads: std::sync::Arc::new(governor::RateLimiter::direct(
+                governor::Quota::per_minute(std::num::NonZeroU32::new(30).unwrap())
+                    .allow_burst(std::num::NonZeroU32::new(10).unwrap()),
+            )),
         }
     }
 

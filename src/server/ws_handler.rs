@@ -1495,6 +1495,9 @@ async fn handle_read_audit(
     if let Err(why) = req.validate() {
         return wire_error(ErrorCode::InvalidRequest, why, rid);
     }
+    if session.audit_reads.check().is_err() {
+        return wire_error(ErrorCode::RateLimited, "Too many audit reads; slow down", rid);
+    }
     let guard = server.read().await;
     let read = guard
         .audit_history_for_tenant(tenant, req.after, req.effective_limit() as usize)
@@ -6281,6 +6284,27 @@ mod audit_log_tests {
         assert_eq!((zero["type"].as_str(), zero["data"]["code"].as_str()), (Some("Error"), Some("INVALID_REQUEST")), "{zero}");
         let unknown = call(&server, &mut a, read_audit("p5", json!({"tenant_id": "someone-else"}))).await;
         assert_eq!(unknown["data"]["code"], "INVALID_REQUEST", "a tenant cannot be named: {unknown}");
+        cleanup(&t);
+    }
+
+    #[tokio::test]
+    async fn read_audit_is_rate_limited_per_session() {
+        let t = tenant();
+        let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
+        let mut a = admin(&server, &t).await;
+        let mut other = admin(&server, &t).await;
+        let mut limited = None;
+        for i in 0..11 {
+            let r = call(&server, &mut a, read_audit(&format!("l{i}"), json!({}))).await;
+            if r["type"] == "Error" {
+                limited = Some((i, r));
+                break;
+            }
+        }
+        let (i, r) = limited.expect("the eleventh read in a burst is refused");
+        assert_eq!((i, r["data"]["code"].as_str(), r["data"]["request_id"].as_str()), (10, Some("RATE_LIMITED"), Some("l10")), "{r}");
+        let r = call(&server, &mut other, read_audit("o1", json!({}))).await;
+        assert_eq!(r["type"], "AuditEvents", "another session has its own allowance: {r}");
         cleanup(&t);
     }
 
