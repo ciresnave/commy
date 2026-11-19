@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased (version allocated by pm-assist at gate)
+- **R32: tests no longer leave `tenant_<id>/` directories.** The `ws_handler` test modules now take their tenant ids from `leak_guard::tracked_tenant`, which removes `tenant_<id>/` when the test's thread ends, even after a failed assertion. `/tenant_*/` is in `.gitignore`. Test-only; no library change.
+
 ## 0.28.0 (breaking, library callers; allocated by pm-assist 2026-11-19 per pm-ants)
 - **Breaking (library callers; pm-ants ruling 2026-11-19):** `persist::audit_hash` gained a `tenant: Option<&str>` argument (it now returns the v2 hash), and `ClientSession` gained the public field `audit_reads`. Wire behaviour for clients is unchanged apart from the new `v2:` hash form.
 - **R30: the audit tenant tag is inside the hash chain.** New events use the `commy-audit-v2` hash (`commy-wire` 0.5.2, `spec/audit.md` "Hash versions"; `v2:` prefix), which covers the tenant tag, so re-tagging or un-tagging a stored event breaks `verify_audit`. Events written by older servers keep verifying under v1, a log may mix both, and a hash with an unknown prefix is refused, never skipped. Depends on `commy-wire` 0.5.2.
