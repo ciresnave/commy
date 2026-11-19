@@ -23,3 +23,7 @@ commy_output.txt
 *.pfx
 *.pem
 commy_state/
+
+# Test output: the server writes tenant_<id>/ (service files) under the working directory, and
+# tests that fail before their cleanup leave them behind.
+/tenant_*/
