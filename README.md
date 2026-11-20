@@ -56,7 +56,7 @@ in the working directory.
   its head elsewhere (`Server::audit_head`). Events are appended under
   `<state dir>/audit/`; a write that fails is counted in `Server::audit_failures` and never blocks the
   operation it describes). A tenant administrator can read its own tenant's events over the wire (`ReadAudit`, `commy-wire` `spec/audit.md`): only events tagged with that tenant are served, events written before tagging and server-wide events never are, and the tag is covered by the hash chain for events written since R30 (`commy-audit-v2`; older events carry a v1 hash that does not cover it). The grant operation log is folded into a snapshot every 1000 changes (`COMMY_GRANT_COMPACT_AFTER`).
-- Basic and custom credentials are refused; mTLS is later work.
+- Credential methods (`auth_methods`, default `api_key,jwt`): `basic` (user and password through `auth-framework`) and `mtls` (a TLS client certificate naming `commy://<tenant>/<client_id>`, `tls_client_ca_path` + `tls_client_auth`) are opt-in; `custom` is never offered by the binary. See `docs/AUTHENTICATION.md`.
 - Markdown files outside `README.md`, `ROADMAP.md`, `CHANGELOG.md` and `docs/` may still describe the
   removed variable model (`tests/README.md` is about the storage-backend tests). Trust this README and
   `CHANGELOG.md`.

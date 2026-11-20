@@ -62,9 +62,9 @@ Every step is its own PR with a version line; none merges before the previous on
 
 ## Known gaps to state in the release notes
 
-- Authentication is API key or JWT checked by `auth-framework`, one database per tenant; creating tenants, users and keys is that framework's tooling, not Commy's (`docs/AUTHENTICATION.md`). Basic and custom credentials are refused, mTLS is later. The old MessagePack protocol was removed in 0.21.0 (R12).
+- Authentication is API key or JWT checked by `auth-framework`, one database per tenant; creating tenants, users and keys is that framework's tooling, not Commy's (`docs/AUTHENTICATION.md`). `basic` and `mtls` are opt-in (`auth_methods`); custom credentials are refused. The old MessagePack protocol was removed in 0.21.0 (R12).
 - The grant operation log is compacted into a snapshot (R23); the audit log keeps its newest events (`COMMY_AUDIT_MAX_EVENTS`). The audit log is hash-chained: it detects modification, insertion and reordering, not truncation (a cut tail or front is found only against a head recorded elsewhere).
-- Settings come from environment variables or a TOML file (`COMMY_CONFIG`, `commy.example.toml`). Six settings reload live, including the rotation interval (R26, 0.27.1 and 0.27.3); the verifier is not a file setting (waits on R25). (R7, R26)
+- Settings come from environment variables or a TOML file (`COMMY_CONFIG`, `commy.example.toml`). Six settings reload live, including the rotation interval (R26, 0.27.1 and 0.27.3); the accepted credential methods (`auth_methods`) and client certificates (`tls_client_ca_path`, `tls_client_auth`) are file settings read at start-up (R25). (R7, R26)
 - Service files carry no per-file permissions; the unlisted tenant directory and a random name are the
   barrier on the server's machine. (R8)
 - The tenant-directory ACL was checked with a second real Windows account on 2026-10-23 (R9; `tests/windows_second_account.rs`, needs AntSpawn's account setup, so GitHub CI does not run it); antivirus was not checked.

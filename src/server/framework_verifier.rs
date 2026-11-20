@@ -221,6 +221,16 @@ impl CredentialVerifier for FrameworkVerifier {
                         _ => return Err(VerifyError::Rejected),
                     }
                 }
+                Credentials::Mtls => {
+                    // The TLS handshake already verified the certificate against the configured CA;
+                    // what it names is `commy://<tenant>/<client_id>` (`server::mtls`). It must name
+                    // the tenant being asked for. A certificate carries no tenant-level scope: what
+                    // the identity may do is its grants.
+                    match request.peer_identity {
+                        Some(p) if p.tenant == request.tenant_id => (p.client_id.clone(), Vec::new()),
+                        _ => return Err(VerifyError::Rejected),
+                    }
+                }
                 _ => return Err(VerifyError::UnsupportedMethod),
             };
             if !valid_subject(&subject) {
@@ -341,6 +351,50 @@ mod tests {
 
     fn basic(u: &str, p: &str) -> Credentials {
         Credentials::Basic { username: u.to_string(), password: p.to_string() }
+    }
+
+    async fn check_peer(
+        v: &FrameworkVerifier,
+        tenant: &str,
+        peer: Option<&crate::server::mtls::PeerIdentity>,
+    ) -> Result<Verified, VerifyError> {
+        v.verify(VerifyRequest {
+            tenant_id: tenant,
+            credentials: &Credentials::Mtls,
+            client_id_hint: Some("root"),
+            dev_scopes: Some(&["admin".to_string()]),
+            session_id: "s",
+            peer_identity: peer,
+        })
+        .await
+    }
+
+    fn peer(tenant: &str, client: &str) -> crate::server::mtls::PeerIdentity {
+        crate::server::mtls::PeerIdentity { tenant: tenant.into(), client_id: client.into() }
+    }
+
+    #[tokio::test]
+    async fn a_certificate_naming_this_tenant_is_that_identity_with_no_tenant_scopes() {
+        let (v, _d) = verifier(&["acme"]).await;
+        let got = check_peer(&v, "acme", Some(&peer("acme", "alice@example.com"))).await.unwrap();
+        assert_eq!(got.client_id, "alice@example.com", "identity = the certificate's, not the hint 'root'");
+        assert!(got.scopes.is_empty(), "a certificate carries no tenant-level scope; grants do the rest");
+    }
+
+    #[tokio::test]
+    async fn mtls_is_rejected_without_a_certificate_for_another_tenant_and_for_an_unknown_one() {
+        let (v, _d) = verifier(&["acme", "globex"]).await;
+        assert_eq!(check_peer(&v, "acme", None).await.unwrap_err(), VerifyError::Rejected, "no certificate");
+        assert_eq!(
+            check_peer(&v, "acme", Some(&peer("globex", "alice"))).await.unwrap_err(),
+            VerifyError::Rejected,
+            "the certificate names globex, the request says acme"
+        );
+        assert_eq!(
+            check_peer(&v, "nope", Some(&peer("nope", "alice"))).await.unwrap_err(),
+            VerifyError::Rejected,
+            "a tenant with no database"
+        );
     }
 
     #[tokio::test]
