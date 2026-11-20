@@ -24,6 +24,7 @@ pub mod forwarding;
 pub mod framework_verifier;
 pub mod grants;
 pub mod local_mapping;
+pub mod mtls;
 pub mod rotation;
 pub mod session_manager;
 pub mod tls;
