@@ -256,6 +256,7 @@ mod tests {
             client_id_hint: Some("root"),
             dev_scopes: Some(&["admin".to_string()]),
             session_id: "s",
+            peer_identity: None,
         })
         .await
     }

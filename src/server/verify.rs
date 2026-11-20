@@ -21,6 +21,9 @@ pub struct VerifyRequest<'a> {
     pub dev_scopes: Option<&'a [String]>,
     /// The connection's session id (the fallback identity of a development client).
     pub session_id: &'a str,
+    /// The identity the connection's verified TLS client certificate names (R25); `None` when the
+    /// client presented no certificate or one that names no Commy identity.
+    pub peer_identity: Option<&'a crate::server::mtls::PeerIdentity>,
 }
 
 /// An authenticated identity.
