@@ -225,6 +225,51 @@ pub async fn handle_connection(
     Ok(())
 }
 
+/// Test support: a tenant id whose `tenant_<id>/` directory (the server creates it under the working
+/// directory) is removed when the test's thread ends, even if the test failed before its own cleanup
+/// (R32). Each test runs on its own thread, so the thread-local drops when that test is over.
+#[cfg(test)]
+pub(crate) mod leak_guard {
+    use std::cell::RefCell;
+
+    struct Dirs(Vec<String>);
+
+    impl Drop for Dirs {
+        fn drop(&mut self) {
+            for id in &self.0 {
+                let _ = std::fs::remove_dir_all(format!("tenant_{id}"));
+            }
+        }
+    }
+
+    thread_local! {
+        static DIRS: RefCell<Dirs> = const { RefCell::new(Dirs(Vec::new())) };
+    }
+
+    /// A fresh tenant id `<prefix>_<32 hex>`, registered for removal at the end of this thread.
+    pub(crate) fn tracked_tenant(prefix: &str) -> String {
+        let id = format!("{prefix}_{}", uuid::Uuid::new_v4().simple());
+        DIRS.with(|d| d.borrow_mut().0.push(id.clone()));
+        id
+    }
+
+    #[test]
+    fn a_failing_test_does_not_leave_its_tenant_directory() {
+        let dir = std::thread::spawn(|| {
+            let id = tracked_tenant("lg");
+            let dir = format!("tenant_{id}");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(format!("{dir}/service_x.mem"), b"x").unwrap();
+            let guard = std::panic::catch_unwind(|| panic!("the test failed before its cleanup"));
+            assert!(guard.is_err());
+            dir
+        })
+        .join()
+        .unwrap();
+        assert!(!std::path::Path::new(&dir).exists(), "{dir} was left behind");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2520,7 +2565,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_authenticate_sets_session_state() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -2533,7 +2578,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_authenticate_creates_tenant_in_server() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -2548,7 +2593,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_create_service_returns_service_id() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -2569,7 +2614,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_get_service_not_found_returns_error() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -2587,7 +2632,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_get_service_after_create_returns_same_id() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -2650,7 +2695,7 @@ mod sdk_tests {
     #[tokio::test]
     async fn test_sdk_create_service_without_auth_returns_error() {
         // CreateService for a different tenant than the authenticated one must be rejected.
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -2720,7 +2765,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_delete_service_cross_tenant_returns_unauthorized() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -2756,7 +2801,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_create_tenant_success() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         // CreateTenant needs TenantAdmin on the session's own tenant.
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
@@ -2794,7 +2839,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_delete_service_needs_service_admin_on_that_service() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut admin = make_authed_session(Arc::clone(&server), &tenant_id).await;
         let service_id = create_service(Arc::clone(&server), &mut admin, &tenant_id, "svc").await;
@@ -2832,7 +2877,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_delete_service_of_an_unknown_name_is_not_found() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
         let resp = handle_sdk_message(
@@ -2849,7 +2894,7 @@ mod sdk_tests {
     // GetService names a service by name: it must not hand out the id of one the client cannot reach.
     #[tokio::test]
     async fn test_sdk_get_service_hides_services_the_client_has_no_access_to() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut admin = make_authed_session(Arc::clone(&server), &tenant_id).await;
         let _id = create_service(Arc::clone(&server), &mut admin, &tenant_id, "secret").await;
@@ -2912,7 +2957,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_delete_tenant_success() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
         assert!(server.read().await.tenants.contains_key(&tenant_id));
@@ -2970,7 +3015,7 @@ mod sdk_tests {
 
     #[tokio::test]
     async fn test_sdk_disconnect_sets_disconnected_state() {
-        let tenant_id = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let tenant_id = crate::server::ws_handler::leak_guard::tracked_tenant("t");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut session = make_authed_session(Arc::clone(&server), &tenant_id).await;
 
@@ -3058,8 +3103,8 @@ mod audit_tests {
 
     #[tokio::test]
     async fn e_other_tenant_cannot_use_a_service_it_does_not_own() {
-        let ta = format!("a_{}", uuid::Uuid::new_v4().simple());
-        let tb = format!("b_{}", uuid::Uuid::new_v4().simple());
+        let ta = crate::server::ws_handler::leak_guard::tracked_tenant("a");
+        let tb = crate::server::ws_handler::leak_guard::tracked_tenant("b");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut a = authed(&server, &ta).await;
         let sid = make_service(&server, &mut a, &ta).await;
@@ -3179,7 +3224,7 @@ mod removed_variable_support_tests {
     /// an authenticated admin on a service it owns.
     #[tokio::test]
     async fn the_named_variable_messages_are_gone() {
-        let t = format!("rv_{}", uuid::Uuid::new_v4().simple());
+        let t = crate::server::ws_handler::leak_guard::tracked_tenant("rv");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut a = authed(&server, &t).await;
         let r = call(&server, &mut a, json!({"type":"CreateService","data":{"tenant_id":t,"service_name":"svc","size":4096}})).await;
@@ -3208,7 +3253,7 @@ mod removed_variable_support_tests {
     /// whatever its type, before a handler sees it.
     #[tokio::test]
     async fn the_guard_refuses_any_message_naming_a_service_without_access() {
-        let t = format!("rv_{}", uuid::Uuid::new_v4().simple());
+        let t = crate::server::ws_handler::leak_guard::tracked_tenant("rv");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut admin = authed(&server, &t).await;
         admin.client_id = Some("admin".into());
@@ -3265,7 +3310,7 @@ mod service_size_tests {
     }
 
     fn tenant() -> String {
-        format!("sz_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("sz")
     }
 
     #[test]
@@ -3418,7 +3463,7 @@ mod local_mapping_tests {
     }
 
     fn tenant() -> String {
-        format!("lm_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("lm")
     }
 
     fn cleanup(tenant: &str) {
@@ -3726,7 +3771,7 @@ mod resync_tests {
     }
 
     fn tenant() -> String {
-        format!("rs_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("rs")
     }
 
     fn cleanup(tenant: &str) {
@@ -3915,7 +3960,7 @@ mod forwarding_tests {
     }
 
     fn tenant() -> String {
-        format!("fw_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("fw")
     }
 
     fn cleanup(tenant: &str) {
@@ -4257,7 +4302,7 @@ mod rotation_tests {
     }
 
     fn tenant() -> String {
-        format!("ro_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("ro")
     }
 
     fn cleanup(tenant: &str) {
@@ -4757,7 +4802,7 @@ mod scoped_access_tests {
     }
 
     fn tenant() -> String {
-        format!("sa_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("sa")
     }
 
     fn cleanup(tenant: &str) {
@@ -4943,7 +4988,7 @@ mod grant_message_tests {
     }
 
     fn tenant() -> String {
-        format!("gm_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("gm")
     }
 
     fn cleanup(tenant: &str) {
@@ -5235,7 +5280,7 @@ mod dev_auth_identity_tests {
     }
 
     fn tenant() -> String {
-        format!("di_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("di")
     }
 
     fn cleanup(t: &str) {
@@ -5379,7 +5424,7 @@ mod set_local_mapping_tests {
     }
 
     fn tenant() -> String {
-        format!("sl_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("sl")
     }
 
     fn cleanup(t: &str) {
@@ -5499,7 +5544,7 @@ mod persistence_tests {
     }
 
     fn tenant() -> String {
-        format!("pe_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("pe")
     }
 
     fn cleanup(t: &str) {
@@ -5776,7 +5821,7 @@ mod delete_service_tests {
     }
 
     fn tenant() -> String {
-        format!("ds_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("ds")
     }
 
     fn cleanup(t: &str) {
@@ -5992,7 +6037,7 @@ mod wire_error_code_tests {
     /// ones that came with a `request_id` echo it.
     #[tokio::test]
     async fn every_error_reply_uses_the_wire_spelling_and_echoes_the_request_id() {
-        let t = format!("ec_{}", uuid::Uuid::new_v4().simple());
+        let t = crate::server::ws_handler::leak_guard::tracked_tenant("ec");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut anon = ClientSession::new();
         let mut admin = ClientSession::new();
@@ -6002,7 +6047,7 @@ mod wire_error_code_tests {
         let mut nobody = ClientSession::new();
         call(&server, &mut nobody, json!({"type":"Authenticate","data":{"tenant_id":t,"request_id":"a","protocol_version":1,"method":"api_key","key":"x","client_id":"nobody","dev_scopes":[]}})).await;
         let mut other = ClientSession::new();
-        let other_t = format!("ec_{}", uuid::Uuid::new_v4().simple());
+        let other_t = crate::server::ws_handler::leak_guard::tracked_tenant("ec");
         call(&server, &mut other, json!({"type":"Authenticate","data":{"tenant_id":other_t,"request_id":"a","protocol_version":1,"method":"api_key","key":"x"}})).await;
 
         // 0 = anonymous, 1 = admin, 2 = a client with no grant, 3 = a client of another tenant
@@ -6040,7 +6085,7 @@ mod wire_error_code_tests {
     /// `Result` used to carry a fresh random id instead).
     #[tokio::test]
     async fn success_replies_echo_the_request_id() {
-        let t = format!("er_{}", uuid::Uuid::new_v4().simple());
+        let t = crate::server::ws_handler::leak_guard::tracked_tenant("er");
         let server = Arc::new(RwLock::new(Server::with_dev_auth(true)));
         let mut admin = ClientSession::new();
         call(&server, &mut admin, json!({"type":"Authenticate","data":{"tenant_id":t,"request_id":"a","protocol_version":1,"method":"api_key","key":"x","client_id":"admin"}})).await;
@@ -6102,7 +6147,7 @@ mod audit_log_tests {
     }
 
     fn tenant() -> String {
-        format!("au_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("au")
     }
 
     fn cleanup(t: &str) {
@@ -6369,7 +6414,7 @@ mod credential_verifier_tests {
     use serde_json::json;
 
     fn tenant() -> String {
-        format!("cv_{}", uuid::Uuid::new_v4().simple())
+        crate::server::ws_handler::leak_guard::tracked_tenant("cv")
     }
 
     async fn call(server: &Arc<RwLock<Server>>, s: &mut ClientSession, v: serde_json::Value) -> serde_json::Value {
