@@ -208,6 +208,19 @@ impl CredentialVerifier for FrameworkVerifier {
                         .collect();
                     (claims.sub, scopes)
                 }
+                Credentials::Basic { username, password } => {
+                    // The framework's own password login (bcrypt, its rate limit and constant
+                    // minimum time). Anything but a plain success (a wrong password, a deactivated
+                    // user, MFA required: Commy cannot run an MFA challenge) is "rejected".
+                    use auth_framework::authentication::credentials::Credential;
+                    match framework
+                        .authenticate("password", Credential::password(username.as_str(), password.as_str()))
+                        .await
+                    {
+                        Ok(auth_framework::AuthResult::Success(token)) => (token.user_id.clone(), token.scopes.0.clone()),
+                        _ => return Err(VerifyError::Rejected),
+                    }
+                }
                 _ => return Err(VerifyError::UnsupportedMethod),
             };
             if !valid_subject(&subject) {
@@ -324,6 +337,43 @@ mod tests {
         let got = check(&v, "acme", key(&ak)).await.unwrap();
         assert_eq!(got.client_id, aid);
         assert_eq!(got.scopes, ["admin", "service:create"]);
+    }
+
+    fn basic(u: &str, p: &str) -> Credentials {
+        Credentials::Basic { username: u.to_string(), password: p.to_string() }
+    }
+
+    #[tokio::test]
+    async fn a_right_user_and_password_is_the_users_identity() {
+        let (v, _d) = verifier(&["acme"]).await;
+        let f = v.framework("acme").await.unwrap();
+        let (id, _) = user_with_key(&f, "alice", "user", None).await;
+        let got = check(&v, "acme", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap();
+        assert_eq!(got.client_id, id, "identity = the user id, not the hint 'root'");
+    }
+
+    #[tokio::test]
+    async fn a_wrong_password_an_unknown_user_and_another_tenants_user_are_rejected() {
+        let (v, _d) = verifier(&["acme", "globex"]).await;
+        let f = v.framework("acme").await.unwrap();
+        user_with_key(&f, "alice", "user", None).await;
+        assert_eq!(check(&v, "acme", basic("alice", "wrong")).await.unwrap_err(), VerifyError::Rejected);
+        assert_eq!(check(&v, "acme", basic("nobody", "S3cur3-P@ssw0rd!x")).await.unwrap_err(), VerifyError::Rejected);
+        assert_eq!(
+            check(&v, "globex", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap_err(),
+            VerifyError::Rejected,
+            "alice exists only in acme"
+        );
+        assert_eq!(check(&v, "nope", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap_err(), VerifyError::Rejected);
+    }
+
+    #[tokio::test]
+    async fn a_deactivated_user_cannot_log_in_with_a_password() {
+        let (v, _d) = verifier(&["acme"]).await;
+        let f = v.framework("acme").await.unwrap();
+        let (id, _) = user_with_key(&f, "alice", "user", None).await;
+        f.set_user_active(&id, false).await.unwrap();
+        assert_eq!(check(&v, "acme", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap_err(), VerifyError::Rejected);
     }
 
     #[tokio::test]
@@ -444,10 +494,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn methods_other_than_api_key_and_jwt_are_unsupported() {
+    async fn custom_credentials_are_unsupported() {
         let (v, _d) = verifier(&["acme"]).await;
-        let basic = Credentials::Basic { username: "a".into(), password: "b".into() };
-        assert_eq!(check(&v, "acme", basic).await.err(), Some(VerifyError::UnsupportedMethod));
         let custom = Credentials::Custom { data: serde_json::json!({}) };
         assert_eq!(check(&v, "acme", custom).await.err(), Some(VerifyError::UnsupportedMethod));
     }
