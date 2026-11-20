@@ -44,6 +44,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let use_tls = cert_path.is_some() && key_path.is_some();
 
+    // Client certificates and the accepted credential methods (R25). A bad value stops the start.
+    let client_ca_path = settings.get("COMMY_TLS_CLIENT_CA_PATH");
+    let client_auth = match settings.get("COMMY_TLS_CLIENT_AUTH") {
+        Some(v) => commy::config::parse_client_auth(&v).unwrap_or_else(|e| {
+            eprintln!("[Commy] cannot start: {e}");
+            std::process::exit(1);
+        }),
+        None => None,
+    };
+    let auth_methods = match settings.get("COMMY_AUTH_METHODS") {
+        Some(v) => commy::config::parse_auth_methods(&v).unwrap_or_else(|e| {
+            eprintln!("[Commy] cannot start: {e}");
+            std::process::exit(1);
+        }),
+        None => commy::config::DEFAULT_AUTH_METHODS.iter().map(|m| m.to_string()).collect(),
+    };
+    if auth_methods.iter().any(|m| m == "mtls") && client_auth.is_none() {
+        eprintln!("[Commy] cannot start: auth_methods names mtls but tls_client_auth is off");
+        std::process::exit(1);
+    }
+
     println!("[Commy] ════════════════════════════════════════════");
     println!("[Commy] Initializing Commy Server");
     println!("[Commy] ════════════════════════════════════════════");
@@ -101,7 +122,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match commy::server::framework_verifier::FrameworkVerifier::from_env(&auth_dir) {
             Ok(v) => {
                 println!("[Commy] Authentication: auth-framework, tenant databases in {}", auth_dir.display());
-                server_value = server_value.with_verifier(Arc::new(v));
+                println!("[Commy] Accepted credential methods: {}", auth_methods.join(", "));
+                server_value = server_value.with_verifier(Arc::new(
+                    commy::server::verify::MethodFilter::new(v, auth_methods.clone()),
+                ));
             }
             Err(e) => {
                 eprintln!("[Commy] cannot start: {e}");
@@ -117,6 +141,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         port: listen_port,
         cert_path: cert_path.clone(),
         key_path: key_path.clone(),
+        client_ca_path: client_ca_path.clone(),
+        client_auth,
         max_connections: 1000,
         buffer_size: 65536,
     };

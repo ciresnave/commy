@@ -57,6 +57,28 @@ pub trait CredentialVerifier: Send + Sync {
     fn verify<'a>(&'a self, request: VerifyRequest<'a>) -> VerifyFuture<'a>;
 }
 
+/// Lets only the named credential methods through to the verifier it wraps (R25 `auth_methods`).
+/// Any other method is [`VerifyError::UnsupportedMethod`] and the inner verifier is never asked.
+pub struct MethodFilter<V> {
+    inner: V,
+    allowed: Vec<String>,
+}
+
+impl<V> MethodFilter<V> {
+    pub fn new(inner: V, allowed: Vec<String>) -> Self {
+        MethodFilter { inner, allowed }
+    }
+}
+
+impl<V: CredentialVerifier> CredentialVerifier for MethodFilter<V> {
+    fn verify<'a>(&'a self, request: VerifyRequest<'a>) -> VerifyFuture<'a> {
+        if !self.allowed.iter().any(|m| m == request.credentials.method()) {
+            return Box::pin(async { Err(VerifyError::UnsupportedMethod) });
+        }
+        self.inner.verify(request)
+    }
+}
+
 /// Development and test verifier: accepts any credential. The client names itself (or gets its
 /// session id) and gets administrator permissions unless it asks for exactly some scopes.
 pub struct DevVerifier;
@@ -147,5 +169,55 @@ impl CredentialVerifier for StaticApiKeys {
                 None => Err(VerifyError::Rejected),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// Accepts everything and counts how often it was asked.
+    struct Counting(Arc<AtomicUsize>);
+
+    impl CredentialVerifier for Counting {
+        fn verify<'a>(&'a self, _r: VerifyRequest<'a>) -> VerifyFuture<'a> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                Ok(Verified {
+                    client_id: "c".into(),
+                    permissions: PermissionSet::from_scopes(&[]),
+                    scopes: vec![],
+                    expires_in_seconds: None,
+                })
+            })
+        }
+    }
+
+    async fn ask(v: &impl CredentialVerifier, c: Credentials) -> Result<Verified, VerifyError> {
+        v.verify(VerifyRequest {
+            tenant_id: "acme",
+            credentials: &c,
+            client_id_hint: None,
+            dev_scopes: None,
+            session_id: "s",
+            peer_identity: None,
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn the_filter_passes_only_the_allowed_methods_and_never_asks_the_inner_verifier_for_others() {
+        let asked = Arc::new(AtomicUsize::new(0));
+        let f = MethodFilter::new(Counting(asked.clone()), vec!["api_key".into(), "jwt".into()]);
+        assert!(ask(&f, Credentials::ApiKey { key: "k".into() }).await.is_ok());
+        assert!(ask(&f, Credentials::Jwt { token: "t".into() }).await.is_ok());
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
+        let basic = Credentials::Basic { username: "u".into(), password: "p".into() };
+        assert_eq!(ask(&f, basic).await.unwrap_err(), VerifyError::UnsupportedMethod);
+        let custom = Credentials::Custom { data: serde_json::json!({}) };
+        assert_eq!(ask(&f, custom).await.unwrap_err(), VerifyError::UnsupportedMethod);
+        assert_eq!(asked.load(Ordering::SeqCst), 2, "refused methods never reached the inner verifier");
     }
 }

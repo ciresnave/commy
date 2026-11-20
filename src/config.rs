@@ -28,6 +28,9 @@ pub const KEYS: &[&str] = &[
     "cluster_nodes",
     "tls_cert_path",
     "tls_key_path",
+    "tls_client_ca_path",
+    "tls_client_auth",
+    "auth_methods",
     "state_dir",
     "auth_dir",
     "max_service_size",
@@ -37,6 +40,42 @@ pub const KEYS: &[&str] = &[
     "grant_compact_after",
     "rotation_min_interval_ms",
 ];
+
+/// The credential methods `auth_methods` may name (R25). `custom` is not offered: a verifier is
+/// installed by an embedder in code, never loaded by name.
+pub const AUTH_METHODS: &[&str] = &["api_key", "jwt", "basic", "mtls"];
+
+/// What `auth_methods` allows when it is not set.
+pub const DEFAULT_AUTH_METHODS: &[&str] = &["api_key", "jwt"];
+
+/// Parse `auth_methods`: a comma-separated list of [`AUTH_METHODS`], at least one. An unknown name
+/// is an error (it fails like an unknown key), never ignored.
+pub fn parse_auth_methods(text: &str) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in text.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        if !AUTH_METHODS.contains(&name) {
+            return Err(format!("auth_methods: unknown method `{name}` (known: {})", AUTH_METHODS.join(", ")));
+        }
+        if !out.iter().any(|m| m == name) {
+            out.push(name.to_string());
+        }
+    }
+    if out.is_empty() {
+        return Err("auth_methods: name at least one method".to_string());
+    }
+    Ok(out)
+}
+
+/// Parse `tls_client_auth`: `off` (the default), `optional` or `required`.
+pub fn parse_client_auth(text: &str) -> Result<Option<crate::server::tls::ClientAuth>, String> {
+    use crate::server::tls::ClientAuth;
+    match text.trim() {
+        "off" | "" => Ok(None),
+        "optional" => Ok(Some(ClientAuth::Optional)),
+        "required" => Ok(Some(ClientAuth::Required)),
+        other => Err(format!("tls_client_auth: `{other}` is not off, optional or required")),
+    }
+}
 
 /// The keys a running server applies when the file changes (R26); every other key is read once, at
 /// start-up, and a change to it waits for a restart.
@@ -358,5 +397,33 @@ database_url = \"x\"
         until(|| server.try_read().map(|g| g.fill_timeout.as_millis() == 5).unwrap_or(false)).await;
         assert_eq!(drain(&server), 5000, "drain_timeout_ms is gone from the file: default");
         h.abort();
+    }
+
+    #[test]
+    fn auth_methods_parse_known_names_and_refuse_unknown_ones() {
+        assert_eq!(parse_auth_methods("api_key, jwt ,basic").unwrap(), ["api_key", "jwt", "basic"]);
+        assert_eq!(parse_auth_methods("mtls,mtls").unwrap(), ["mtls"], "no duplicates");
+        for bad in ["", " , ", "api_key,custom", "oauth", "API_KEY"] {
+            assert!(parse_auth_methods(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(DEFAULT_AUTH_METHODS, ["api_key", "jwt"], "Basic and mtls are opt-in");
+    }
+
+    #[test]
+    fn client_auth_parses_three_words() {
+        use crate::server::tls::ClientAuth;
+        assert_eq!(parse_client_auth("off").unwrap(), None);
+        assert_eq!(parse_client_auth("optional").unwrap(), Some(ClientAuth::Optional));
+        assert_eq!(parse_client_auth("required").unwrap(), Some(ClientAuth::Required));
+        assert!(parse_client_auth("yes").is_err());
+    }
+
+    #[test]
+    fn the_new_keys_are_accepted_in_the_file() {
+        let s = Settings::parse("tls_client_ca_path = \"ca.pem\"
+tls_client_auth = \"required\"
+auth_methods = \"api_key,mtls\"
+").unwrap();
+        assert_eq!(s.file_value("auth_methods"), Some("api_key,mtls"));
     }
 }
