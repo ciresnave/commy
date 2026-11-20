@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (version allocated by pm-assist at gate)
+## 0.28.1 (R32 test leak fix + persistant 0.18.30; no public API change; allocated by pm-assist 2026-11-20)
 - **`persistant` 0.9.24 -> 0.18.30** (dependencies rule; pm-ants 2026-11-20), on a fresh lockfile (`cargo update`, about 200 packages moved). No source change was needed: `cargo check --all-targets` is clean and `cargo test --all --locked` passes (340 lib tests and the integration tests, including the restart and grant-compaction tests that reopen the stores) against persistant 0.18.30. Commy does not use `Lease`, so the 0.18.30 behaviour change (10 s claim hold, zero ttl refused) does not reach it. persistant's storage matrix refuses an SQLite, opendal or server version nobody recorded (0.18.29); commy opens its stores through `persistant::Store` and the tests above opened them, but an operator on an unusual bundled SQLite should expect that refusal at open. I read persistant's changelog for 0.18.23 to 0.18.30 only; the earlier minors were not read, the test suite is the evidence for them.
 - **R32: tests no longer leave `tenant_<id>/` directories.** The `ws_handler` test modules now take their tenant ids from `leak_guard::tracked_tenant`, which removes `tenant_<id>/` when the test's thread ends, even after a failed assertion. `/tenant_*/` is in `.gitignore`. Test-only; no library change.
 
