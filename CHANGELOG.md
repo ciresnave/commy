@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Configuration (R26): `commy.schema.toml` declares every file setting (type, range, choices, environment variable, restart-or-live) and the published `configurant` 0.7.2 checks a file against it. A wrong type, an out-of-range port or an unknown `tls_client_auth` word now fails at load with a named error; `LIVE_KEYS` must equal the schema's non-restart keys (test). Secrets and the dev-auth switch are still refused first. New dependency `configurant`. Not yet: environment values still go through the old parsers.
 - CI: the GitHub Release is created only from a pushed `v*` tag (the PM's annotated tag, pushed after the crates.io publish read-back), no longer on every merge to `main`. Existing tags and releases are untouched. Note: `v0.28.1` was released on GitHub but never published to crates.io.
 
 ## 0.29.0 (R25: Basic and mTLS credentials; **Breaking**; allocated by pm-assist 2026-11-21)

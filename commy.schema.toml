@@ -1,0 +1,149 @@
+# Schema of commy.toml, read by the `configurant` crate (R26). The environment variable of each key is
+# COMMY_ plus the upper-case key and beats the file. Secrets (auth_master_secret, database_url) and
+# the development-auth switch are refused in a file by Commy itself, before this schema is consulted.
+[project]
+name = "commy"
+version = "1"
+summary = "Commy shared-memory coordination server"
+schema_version = 1
+
+[[value]]
+key = "server_id"
+type = "string"
+default = "node-1"
+description = "identifier of this server in logs"
+env = "COMMY_SERVER_ID"
+restart = true
+
+[[value]]
+key = "listen_addr"
+type = "string"
+default = "0.0.0.0"
+description = "address the client listener binds"
+env = "COMMY_LISTEN_ADDR"
+restart = true
+
+[[value]]
+key = "listen_port"
+type = "int"
+default = 8443
+min = 1
+max = 65535
+description = "port the client listener binds"
+env = "COMMY_LISTEN_PORT"
+restart = true
+
+[[value]]
+key = "cluster_enabled"
+type = "bool"
+default = false
+description = "experimental, ignored: Commy has no supported multi-server mode"
+env = "COMMY_CLUSTER_ENABLED"
+restart = true
+
+[[value]]
+key = "cluster_nodes"
+type = "string"
+description = "experimental, ignored: comma-separated node list"
+env = "COMMY_CLUSTER_NODES"
+restart = true
+
+[[value]]
+key = "tls_cert_path"
+type = "path"
+description = "TLS certificate chain (with tls_key_path turns TLS on)"
+env = "COMMY_TLS_CERT_PATH"
+restart = true
+
+[[value]]
+key = "tls_key_path"
+type = "path"
+description = "TLS private key (with tls_cert_path turns TLS on)"
+env = "COMMY_TLS_KEY_PATH"
+restart = true
+
+[[value]]
+key = "tls_client_ca_path"
+type = "path"
+description = "CA bundle that client certificates must chain to"
+env = "COMMY_TLS_CLIENT_CA_PATH"
+restart = true
+
+[[value]]
+key = "tls_client_auth"
+type = "enum"
+default = "off"
+choices = ["off", "optional", "required"]
+description = "whether clients present a TLS certificate"
+env = "COMMY_TLS_CLIENT_AUTH"
+restart = true
+
+[[value]]
+key = "auth_methods"
+type = "string"
+default = "api_key,jwt"
+description = "comma-separated credential methods accepted: api_key, jwt, basic, mtls (mtls needs tls_client_auth)"
+env = "COMMY_AUTH_METHODS"
+restart = true
+
+[[value]]
+key = "state_dir"
+type = "string"
+default = "commy_state"
+description = "directory of durable state; the word off keeps everything in memory"
+env = "COMMY_STATE_DIR"
+restart = true
+
+[[value]]
+key = "auth_dir"
+type = "path"
+description = "directory of the authentication stores"
+env = "COMMY_AUTH_DIR"
+restart = true
+
+[[value]]
+key = "max_service_size"
+type = "int"
+default = 10485760
+min = 1
+description = "largest service file, in bytes"
+env = "COMMY_MAX_SERVICE_SIZE"
+
+[[value]]
+key = "drain_timeout_ms"
+type = "int"
+default = 5000
+min = 0
+description = "time a rotation waits for clients to drain"
+env = "COMMY_DRAIN_TIMEOUT_MS"
+
+[[value]]
+key = "fill_timeout_ms"
+type = "int"
+default = 30000
+min = 0
+description = "time a client has to fill a new service"
+env = "COMMY_FILL_TIMEOUT_MS"
+
+[[value]]
+key = "audit_max_events"
+type = "int"
+min = 1
+description = "audit events kept; older ones are pruned"
+env = "COMMY_AUDIT_MAX_EVENTS"
+
+[[value]]
+key = "grant_compact_after"
+type = "int"
+default = 1000
+min = 0
+description = "stored grant changes before the log is folded; 0 = never"
+env = "COMMY_GRANT_COMPACT_AFTER"
+
+[[value]]
+key = "rotation_min_interval_ms"
+type = "int"
+default = 1000
+min = 0
+description = "least time between two rotations of one service"
+env = "COMMY_ROTATION_MIN_INTERVAL_MS"

@@ -133,6 +133,15 @@ pub fn watch(
     })
 }
 
+/// The schema of the file (`commy.schema.toml`): each key's type, range, choices, environment variable
+/// and whether a change needs a restart. `configurant` checks a file against it ([`Settings::parse`]).
+pub const SCHEMA: &str = include_str!("../commy.schema.toml");
+
+fn schema() -> &'static configurant::Schema {
+    static CELL: std::sync::OnceLock<configurant::Schema> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| configurant::Schema::parse(SCHEMA).expect("commy.schema.toml is a valid schema"))
+}
+
 /// Keys that are refused in the file, with the reason.
 const FORBIDDEN: &[(&str, &str)] = &[
     ("auth_master_secret", "secrets belong in the environment (COMMY_AUTH_MASTER_SECRET), never in a file that gets copied and committed"),
@@ -153,6 +162,9 @@ pub enum ConfigError {
     Forbidden(String, &'static str),
     /// A value that is not a string, integer or boolean.
     BadValue(String),
+    /// A value the schema ([`SCHEMA`], checked by `configurant`) refuses: wrong type, out of range, or
+    /// not one of the choices. The text names the key and never carries a secret (the file holds none).
+    Invalid(String),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -165,6 +177,7 @@ impl std::fmt::Display for ConfigError {
             }
             ConfigError::Forbidden(k, why) => write!(f, "`{k}` must not be in the configuration file: {why}"),
             ConfigError::BadValue(k) => write!(f, "`{k}` must be a string, an integer or true/false"),
+            ConfigError::Invalid(e) => write!(f, "the configuration file is invalid: {e}"),
         }
     }
 }
@@ -203,6 +216,12 @@ impl Settings {
             };
             file.insert(key, text);
         }
+        // Types, ranges and choices: the schema's. Only the file is given (no environment), so what
+        // is checked is what the file says; the environment is read, and parsed, where it is used.
+        configurant::Loader::new(schema())
+            .file("commy.toml", text)
+            .build()
+            .map_err(|e| ConfigError::Invalid(e.to_string()))?;
         Ok(Settings { file, source: None })
     }
 
@@ -303,8 +322,54 @@ mod tests {
 
     #[test]
     fn every_documented_key_is_accepted() {
-        let all: String = KEYS.iter().map(|k| format!("{k} = \"1\"\n")).collect();
-        assert!(Settings::parse(&all).is_ok());
+        // Every key at its schema default where there is one, else a plausible value.
+        let all: String = KEYS
+            .iter()
+            .map(|k| match *k {
+                "cluster_nodes" | "tls_cert_path" | "tls_key_path" | "tls_client_ca_path" | "auth_dir" => format!("{k} = \"x\"\n"),
+                "audit_max_events" => format!("{k} = 5\n"),
+                _ => {
+                    let d = schema().values().iter().find(|v| v.key == *k).and_then(|v| v.default.clone()).unwrap();
+                    format!("{k} = {d}\n")
+                }
+            })
+            .collect();
+        assert!(Settings::parse(&all).is_ok(), "{:?}", Settings::parse(&all).err());
+    }
+
+    #[test]
+    fn the_schema_and_the_key_lists_agree() {
+        let mut declared: Vec<&str> = schema().values().iter().map(|v| v.key.as_str()).collect();
+        let mut keys = KEYS.to_vec();
+        declared.sort_unstable();
+        keys.sort_unstable();
+        assert_eq!(declared, keys, "KEYS and commy.schema.toml name the same settings");
+        let mut live: Vec<&str> = schema().values().iter().filter(|v| !v.restart).map(|v| v.key.as_str()).collect();
+        let mut want = LIVE_KEYS.to_vec();
+        live.sort_unstable();
+        want.sort_unstable();
+        assert_eq!(live, want, "LIVE_KEYS is the set the schema does not mark restart");
+        for v in schema().values() {
+            assert_eq!(v.env.as_deref(), Some(format!("COMMY_{}", v.key.to_ascii_uppercase()).as_str()), "{}", v.key);
+        }
+    }
+
+    #[test]
+    fn the_schema_refuses_a_value_of_the_wrong_kind_or_range() {
+        for bad in [
+            "listen_port = 0\n",
+            "listen_port = 70000\n",
+            "listen_port = \"https\"\n",
+            "tls_client_auth = \"sometimes\"\n",
+            "cluster_enabled = \"yes\"\n",
+            "max_service_size = 0\n",
+            "audit_max_events = -1\n",
+        ] {
+            assert!(matches!(Settings::parse(bad), Err(ConfigError::Invalid(_))), "{bad:?}: {:?}", Settings::parse(bad));
+        }
+        for good in ["listen_port = 65535\n", "tls_client_auth = \"required\"\n", "max_service_size = 1\n"] {
+            assert!(Settings::parse(good).is_ok(), "control {good:?}: {:?}", Settings::parse(good).err());
+        }
     }
 
     #[test]
