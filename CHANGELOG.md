@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (R25: Basic and mTLS credentials; **Breaking**, version to be allocated by pm-assist)
+## 0.29.0 (R25: Basic and mTLS credentials; **Breaking**; allocated by pm-assist 2026-11-21)
 - **Breaking (library callers):** `ClientSession` gains the public field `peer_identity`; `VerifyRequest` gains `peer_identity`; `WssServerConfig` gains `client_ca_path` and `client_auth`; `commy-wire` 0.6.0 (`Credentials::Mtls`; `Authenticate` now refuses a second method or an unknown field at parse time, so a client that sent stray fields is refused).
 - **mTLS.** `tls_client_ca_path` and `tls_client_auth` (`off` default, `optional`, `required`): rustls `WebPkiClientVerifier` checks the client certificate in the handshake. A certificate names an identity with exactly one SAN URI `commy://<tenant>/<client_id>` (none, two or a malformed one names nothing); an `mtls` `Authenticate` succeeds only when the certificate names the requested tenant, and the identity holds no tenant-level scope (grants only). New dependency `x509-parser`. Tests: unit (identity, handshake both modes, verifier) and `tests/mtls_loopback.rs` (real TLS + WebSocket + `FrameworkVerifier`). No revocation yet.
 - **Basic.** `Credentials::Basic` goes through `auth-framework`'s password login (bcrypt, its rate limit); wrong password, unknown or deactivated user, other tenant's user and MFA-required are `Rejected`.
