@@ -3,6 +3,8 @@ name: CI & Release
 on:
   push:
     branches: ["**"]
+    # The PM's annotated tag v<version>, pushed after the crates.io publish read-back, creates the release.
+    tags: ["v*"]
   pull_request:
     branches: ["**"]
 
@@ -82,8 +84,9 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
-    # Only attempt a release on pushes to main
-    if: "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    # Release only from a pushed v* tag (the PM pushes it after the publish read-back); a merge to main
+    # creates no tag and no release.
+    if: "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
 
     steps:
       - name: Checkout repository
@@ -103,6 +106,10 @@ jobs:
             exit 1
           }
           $tag = "v$version"
+          if ($tag -ne "${{ github.ref_name }}") {
+            Write-Error "Tag ${{ github.ref_name }} does not match Cargo.toml version $version"
+            exit 1
+          }
           Write-Host "Detected version: $version (tag: $tag)"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
