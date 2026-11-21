@@ -114,29 +114,12 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Check whether this version is already released
-        id: check_release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ steps.version.outputs.tag }}"
-          # gh release view exits non-zero when the release does not exist;
-          # capture output to suppress it and reset exit code so the step doesn't fail.
-          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
-          $exists = ($LASTEXITCODE -eq 0)
-          $global:LASTEXITCODE = 0
-          Write-Host "Release $tag exists: $exists"
-          "release_exists=$($exists.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
       - name: Install Rust toolchain
-        if: steps.check_release.outputs.release_exists == 'false'
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
 
       - name: Cache Cargo registry and build artifacts
-        if: steps.check_release.outputs.release_exists == 'false'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -150,11 +133,9 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build release binary
-        if: steps.check_release.outputs.release_exists == 'false'
         run: cargo build --release --locked --bin commy
 
       - name: Create GitHub Release
-        if: steps.check_release.outputs.release_exists == 'false'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
