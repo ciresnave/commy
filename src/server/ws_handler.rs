@@ -28,6 +28,21 @@ pub async fn handle_connection(
     sessions: Arc<RwLock<HashMap<String, ClientSession>>>,
     _config: super::WssServerConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // The TLS handshake has already verified any client certificate against the configured CA; read
+    // which Commy identity it names (R25). A certificate that names none is no identity.
+    let peer_identity = stream
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(|certs| certs.first())
+        .and_then(|leaf| match crate::server::mtls::identity_from_certificate(leaf.as_ref()) {
+            Ok(id) => Some(id),
+            Err(e) => {
+                eprintln!("Client certificate from {peer_addr} names no Commy identity: {e:?}");
+                None
+            }
+        });
+
     // Perform WebSocket handshake (HTTP upgrade to WebSocket)
     let ws_stream = match accept_async(stream).await {
         Ok(ws) => ws,
@@ -39,6 +54,7 @@ pub async fn handle_connection(
 
     // Create initial client session
     let mut session = ClientSession::new();
+    session.peer_identity = peer_identity;
 
     println!(
         "WebSocket connection established from {} (session_id: {})",
@@ -1889,6 +1905,7 @@ async fn handle_sdk_message_inner(
                     client_id_hint: request.client_id.as_deref(),
                     dev_scopes: request.dev_scopes.as_deref(),
                     session_id: &session.session_id,
+                    peer_identity: session.peer_identity.as_ref(),
                 })
                 .await;
             let verified = match verified {

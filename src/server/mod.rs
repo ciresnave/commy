@@ -24,6 +24,7 @@ pub mod forwarding;
 pub mod framework_verifier;
 pub mod grants;
 pub mod local_mapping;
+pub mod mtls;
 pub mod rotation;
 pub mod session_manager;
 pub mod tls;
@@ -50,6 +51,11 @@ pub struct WssServerConfig {
     pub cert_path: Option<String>,
     /// Path to TLS key file for WSS (PEM format)
     pub key_path: Option<String>,
+    /// PEM file of the CAs whose client certificates are trusted (mTLS, R25); needed when
+    /// `client_auth` is set.
+    pub client_ca_path: Option<String>,
+    /// Ask clients for a certificate: `None` (the default) does not.
+    pub client_auth: Option<tls::ClientAuth>,
     /// Maximum concurrent connections
     pub max_connections: usize,
     /// Message buffer size per client
@@ -63,6 +69,8 @@ impl Default for WssServerConfig {
             port: 8443,
             cert_path: None,
             key_path: None,
+            client_ca_path: None,
+            client_auth: None,
             max_connections: 1000,
             buffer_size: 65536,
         }
@@ -111,7 +119,16 @@ impl WssServer {
     /// Initialize TLS from certificate and key files
     pub fn initialize_tls(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(cert_path), Some(key_path)) = (&self.config.cert_path, &self.config.key_path) {
-            let tls_config = TlsConfiguration::from_files(cert_path, key_path)?;
+            let tls_config = match (self.config.client_auth, &self.config.client_ca_path) {
+                (None, _) => TlsConfiguration::from_files(cert_path, key_path)?,
+                (Some(mode), Some(ca)) => {
+                    println!("TLS client certificates: {mode:?}, trusted CAs from {ca}");
+                    TlsConfiguration::from_files_with_client_auth(cert_path, key_path, ca, mode)?
+                }
+                (Some(_), None) => {
+                    return Err("tls_client_auth is set but tls_client_ca_path is not".into());
+                }
+            };
             self.tls_acceptor = Some(TlsAcceptor::from(tls_config.config));
             println!("TLS initialized: cert={}, key={}", cert_path, key_path);
             Ok(())
@@ -226,6 +243,8 @@ mod tests {
             port: 9443,
             cert_path: Some("cert.pem".to_string()),
             key_path: Some("key.pem".to_string()),
+            client_ca_path: None,
+            client_auth: None,
             max_connections: 5000,
             buffer_size: 131072,
         };
@@ -264,6 +283,19 @@ mod tests {
         };
         let result = config.validate_tls();
         assert!(result.is_err(), "expected error when files do not exist");
+    }
+
+    #[tokio::test]
+    async fn client_auth_without_a_client_ca_path_is_refused_at_start() {
+        let config = WssServerConfig {
+            cert_path: Some("cert.pem".to_string()),
+            key_path: Some("key.pem".to_string()),
+            client_auth: Some(tls::ClientAuth::Required),
+            ..WssServerConfig::default()
+        };
+        let mut s = WssServer::new(config, Arc::new(RwLock::new(Server::new())));
+        let e = s.initialize_tls().unwrap_err().to_string();
+        assert!(e.contains("tls_client_ca_path"), "{e}");
     }
 
     // ─── WssServer::initialize_tls ────────────────────────────────────────────

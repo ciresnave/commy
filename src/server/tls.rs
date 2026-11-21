@@ -57,6 +57,15 @@ fn pem_error(e: rustls::pki_types::pem::Error, what: &str, make: fn(String) -> T
     }
 }
 
+/// Whether the server asks clients for a certificate (R25).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClientAuth {
+    /// A client may send a certificate; one without is accepted.
+    Optional,
+    /// A client without a valid certificate is refused at the handshake.
+    Required,
+}
+
 /// Loads and validates TLS certificates and keys
 pub struct TlsConfiguration {
     /// The loaded Rustls ServerConfig
@@ -75,9 +84,55 @@ impl TlsConfiguration {
     ///
     /// Returns `TlsError` if certificate or key cannot be loaded or parsed
     pub fn from_files<P: AsRef<Path>>(cert_path: P, key_path: P) -> Result<Self, TlsError> {
-        let cert_path = cert_path.as_ref();
-        let key_path = key_path.as_ref();
+        Self::load(cert_path.as_ref(), key_path.as_ref(), None)
+    }
 
+    /// [`TlsConfiguration::from_files`] plus client certificates (mTLS, R25): a client certificate is
+    /// verified against the CAs in `client_ca_path` (PEM) by rustls's own `WebPkiClientVerifier`.
+    /// With [`ClientAuth::Required`] a connection without a valid certificate fails its handshake; with
+    /// [`ClientAuth::Optional`] one without a certificate is accepted (and may use another credential
+    /// method), but a certificate that is presented and invalid still fails the handshake.
+    pub fn from_files_with_client_auth<P: AsRef<Path>>(
+        cert_path: P,
+        key_path: P,
+        client_ca_path: P,
+        mode: ClientAuth,
+    ) -> Result<Self, TlsError> {
+        let ca_path = client_ca_path.as_ref();
+        if !ca_path.exists() {
+            return Err(TlsError::CertificateNotFound(ca_path.to_string_lossy().to_string()));
+        }
+        let mut roots = rustls::RootCertStore::empty();
+        for cert in CertificateDer::pem_file_iter(ca_path)
+            .map_err(|e| pem_error(e, "client CA certificates", TlsError::InvalidCertificate))?
+        {
+            let cert = cert.map_err(|_| {
+                TlsError::InvalidCertificate("Failed to parse PEM client CA certificates".to_string())
+            })?;
+            roots
+                .add(cert)
+                .map_err(|e| TlsError::InvalidCertificate(format!("Bad client CA certificate: {e:?}")))?;
+        }
+        if roots.is_empty() {
+            return Err(TlsError::InvalidCertificate("No client CA certificates found in file".to_string()));
+        }
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let mut builder =
+            rustls::server::WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider);
+        if mode == ClientAuth::Optional {
+            builder = builder.allow_unauthenticated();
+        }
+        let verifier = builder
+            .build()
+            .map_err(|e| TlsError::InvalidCertificate(format!("Failed to build the client verifier: {e:?}")))?;
+        Self::load(cert_path.as_ref(), key_path.as_ref(), Some(verifier))
+    }
+
+    fn load(
+        cert_path: &Path,
+        key_path: &Path,
+        client_verifier: Option<Arc<dyn rustls::server::danger::ClientCertVerifier>>,
+    ) -> Result<Self, TlsError> {
         // Verify files exist
         if !cert_path.exists() {
             return Err(TlsError::CertificateNotFound(
@@ -118,12 +173,16 @@ impl TlsConfiguration {
         // aws-lc-rs and ring backends, so rustls cannot pick a process-level default on its own and
         // `ServerConfig::builder()` would panic.
         let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-        let config = ServerConfig::builder_with_provider(provider)
+        let builder = ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
             .map_err(|e| {
                 TlsError::InvalidCertificate(format!("Failed to select TLS versions: {:?}", e))
-            })?
-            .with_no_client_auth()
+            })?;
+        let builder = match client_verifier {
+            Some(v) => builder.with_client_cert_verifier(v),
+            None => builder.with_no_client_auth(),
+        };
+        let config = builder
             .with_single_cert(certificates, private_key)
             .map_err(|e| {
                 TlsError::InvalidCertificate(format!("Failed to build config: {:?}", e))
@@ -271,5 +330,127 @@ mod tests {
         let other = tempfile::tempdir().unwrap();
         let (_, other_key) = pems(other.path());
         assert!(TlsConfiguration::from_files(&cert, &other_key).is_err());
+    }
+
+    // ── client certificates (R25) ────────────────────────────────────────────────────────────────
+
+    mod client_auth {
+        use super::super::*;
+        use crate::server::mtls::test_pki::{ca, leaf, Ca, Leaf};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        struct Setup {
+            _dir: tempfile::TempDir,
+            config: Arc<ServerConfig>,
+            server_ca: Ca,
+        }
+
+        fn setup(mode: ClientAuth) -> (Setup, Ca) {
+            let server_ca = ca("server ca");
+            let client_ca = ca("client ca");
+            let server = leaf(&server_ca, &["dns:localhost"]);
+            let dir = tempfile::tempdir().unwrap();
+            let p = |n: &str| dir.path().join(n);
+            std::fs::write(p("cert.pem"), &server.cert_pem).unwrap();
+            std::fs::write(p("key.pem"), &server.key_pem).unwrap();
+            std::fs::write(p("ca.pem"), &client_ca.pem).unwrap();
+            let config = TlsConfiguration::from_files_with_client_auth(
+                p("cert.pem"),
+                p("key.pem"),
+                p("ca.pem"),
+                mode,
+            )
+            .unwrap()
+            .config;
+            (Setup { _dir: dir, config, server_ca }, client_ca)
+        }
+
+        /// Run one handshake; the server's result and the peer's leaf certificate it saw.
+        async fn handshake(s: &Setup, client_cert: Option<&Leaf>) -> Result<Option<Vec<u8>>, String> {
+            let mut roots = rustls::RootCertStore::empty();
+            for c in CertificateDer::pem_slice_iter(s.server_ca.pem.as_bytes()) {
+                roots.add(c.unwrap()).unwrap();
+            }
+            let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+            let builder = rustls::ClientConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_root_certificates(roots);
+            let client_config = match client_cert {
+                Some(l) => builder
+                    .with_client_auth_cert(
+                        CertificateDer::pem_slice_iter(l.cert_pem.as_bytes()).collect::<Result<_, _>>().unwrap(),
+                        PrivateKeyDer::from_pem_slice(l.key_pem.as_bytes()).unwrap(),
+                    )
+                    .unwrap(),
+                None => builder.with_no_client_auth(),
+            };
+            let (c_end, s_end) = tokio::io::duplex(64 * 1024);
+            let acceptor = tokio_rustls::TlsAcceptor::from(s.config.clone());
+            let connector = tokio_rustls::TlsConnector::from(Arc::new(client_config));
+            let server = async move {
+                let mut tls = acceptor.accept(s_end).await.map_err(|e| e.to_string())?;
+                let peer = tls
+                    .get_ref()
+                    .1
+                    .peer_certificates()
+                    .and_then(|c| c.first())
+                    .map(|c| c.as_ref().to_vec());
+                let _ = tls.write_all(b"x").await;
+                let _ = tls.shutdown().await;
+                Ok(peer)
+            };
+            let client = async move {
+                if let Ok(mut tls) = connector.connect("localhost".try_into().unwrap(), c_end).await {
+                    let mut b = [0u8; 1];
+                    let _ = tls.read(&mut b).await;
+                }
+            };
+            let (r, _) = tokio::join!(server, client);
+            r
+        }
+
+        #[tokio::test]
+        async fn a_certificate_from_the_trusted_ca_is_accepted_and_seen_by_the_server() {
+            let (s, client_ca) = setup(ClientAuth::Required);
+            let l = leaf(&client_ca, &["uri:commy://acme/alice"]);
+            let seen = handshake(&s, Some(&l)).await.unwrap().expect("the server saw a certificate");
+            assert_eq!(seen, l.der);
+        }
+
+        #[tokio::test]
+        async fn required_refuses_a_client_with_no_certificate() {
+            let (s, _) = setup(ClientAuth::Required);
+            assert!(handshake(&s, None).await.is_err());
+        }
+
+        #[tokio::test]
+        async fn a_certificate_from_another_ca_is_refused_in_both_modes() {
+            for mode in [ClientAuth::Required, ClientAuth::Optional] {
+                let (s, _) = setup(mode);
+                let stranger = leaf(&ca("stranger ca"), &["uri:commy://acme/alice"]);
+                assert!(handshake(&s, Some(&stranger)).await.is_err(), "{mode:?}");
+            }
+        }
+
+        #[tokio::test]
+        async fn optional_accepts_a_client_with_no_certificate() {
+            let (s, _) = setup(ClientAuth::Optional);
+            assert_eq!(handshake(&s, None).await.unwrap(), None);
+        }
+
+        #[test]
+        fn a_missing_or_empty_client_ca_file_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let server = leaf(&ca("server ca"), &["dns:localhost"]);
+            let p = |n: &str| dir.path().join(n);
+            std::fs::write(p("cert.pem"), &server.cert_pem).unwrap();
+            std::fs::write(p("key.pem"), &server.key_pem).unwrap();
+            std::fs::write(p("empty.pem"), "").unwrap();
+            let r = TlsConfiguration::from_files_with_client_auth(p("cert.pem"), p("key.pem"), p("nope.pem"), ClientAuth::Required);
+            assert!(matches!(r, Err(TlsError::CertificateNotFound(_))));
+            let r = TlsConfiguration::from_files_with_client_auth(p("cert.pem"), p("key.pem"), p("empty.pem"), ClientAuth::Required);
+            assert!(r.is_err());
+        }
     }
 }

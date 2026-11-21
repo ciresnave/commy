@@ -63,6 +63,9 @@ pub struct ClientSession {
     pub grants_imported: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Limits how often this session may call `ReadAudit` (R31): a burst of 10, then 30 a minute.
     pub audit_reads: std::sync::Arc<governor::DefaultDirectRateLimiter>,
+    /// The identity named by the TLS client certificate the handshake verified (R25), if the client
+    /// presented one that names a Commy identity (`commy://<tenant>/<client_id>`). `None` otherwise.
+    pub peer_identity: Option<crate::server::mtls::PeerIdentity>,
 }
 
 /// `ReadAudit` calls a session may make in a burst (R31).
@@ -99,6 +102,7 @@ impl ClientSession {
             pending_flush: std::collections::HashMap::new(),
             grants_imported: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             audit_reads: audit_read_limiter(),
+            peer_identity: None,
         }
     }
 

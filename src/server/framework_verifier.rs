@@ -208,6 +208,29 @@ impl CredentialVerifier for FrameworkVerifier {
                         .collect();
                     (claims.sub, scopes)
                 }
+                Credentials::Basic { username, password } => {
+                    // The framework's own password login (bcrypt, its rate limit and constant
+                    // minimum time). Anything but a plain success (a wrong password, a deactivated
+                    // user, MFA required: Commy cannot run an MFA challenge) is "rejected".
+                    use auth_framework::authentication::credentials::Credential;
+                    match framework
+                        .authenticate("password", Credential::password(username.as_str(), password.as_str()))
+                        .await
+                    {
+                        Ok(auth_framework::AuthResult::Success(token)) => (token.user_id.clone(), token.scopes.0.clone()),
+                        _ => return Err(VerifyError::Rejected),
+                    }
+                }
+                Credentials::Mtls => {
+                    // The TLS handshake already verified the certificate against the configured CA;
+                    // what it names is `commy://<tenant>/<client_id>` (`server::mtls`). It must name
+                    // the tenant being asked for. A certificate carries no tenant-level scope: what
+                    // the identity may do is its grants.
+                    match request.peer_identity {
+                        Some(p) if p.tenant == request.tenant_id => (p.client_id.clone(), Vec::new()),
+                        _ => return Err(VerifyError::Rejected),
+                    }
+                }
                 _ => return Err(VerifyError::UnsupportedMethod),
             };
             if !valid_subject(&subject) {
@@ -256,6 +279,7 @@ mod tests {
             client_id_hint: Some("root"),
             dev_scopes: Some(&["admin".to_string()]),
             session_id: "s",
+            peer_identity: None,
         })
         .await
     }
@@ -323,6 +347,87 @@ mod tests {
         let got = check(&v, "acme", key(&ak)).await.unwrap();
         assert_eq!(got.client_id, aid);
         assert_eq!(got.scopes, ["admin", "service:create"]);
+    }
+
+    fn basic(u: &str, p: &str) -> Credentials {
+        Credentials::Basic { username: u.to_string(), password: p.to_string() }
+    }
+
+    async fn check_peer(
+        v: &FrameworkVerifier,
+        tenant: &str,
+        peer: Option<&crate::server::mtls::PeerIdentity>,
+    ) -> Result<Verified, VerifyError> {
+        v.verify(VerifyRequest {
+            tenant_id: tenant,
+            credentials: &Credentials::Mtls,
+            client_id_hint: Some("root"),
+            dev_scopes: Some(&["admin".to_string()]),
+            session_id: "s",
+            peer_identity: peer,
+        })
+        .await
+    }
+
+    fn peer(tenant: &str, client: &str) -> crate::server::mtls::PeerIdentity {
+        crate::server::mtls::PeerIdentity { tenant: tenant.into(), client_id: client.into() }
+    }
+
+    #[tokio::test]
+    async fn a_certificate_naming_this_tenant_is_that_identity_with_no_tenant_scopes() {
+        let (v, _d) = verifier(&["acme"]).await;
+        let got = check_peer(&v, "acme", Some(&peer("acme", "alice@example.com"))).await.unwrap();
+        assert_eq!(got.client_id, "alice@example.com", "identity = the certificate's, not the hint 'root'");
+        assert!(got.scopes.is_empty(), "a certificate carries no tenant-level scope; grants do the rest");
+    }
+
+    #[tokio::test]
+    async fn mtls_is_rejected_without_a_certificate_for_another_tenant_and_for_an_unknown_one() {
+        let (v, _d) = verifier(&["acme", "globex"]).await;
+        assert_eq!(check_peer(&v, "acme", None).await.unwrap_err(), VerifyError::Rejected, "no certificate");
+        assert_eq!(
+            check_peer(&v, "acme", Some(&peer("globex", "alice"))).await.unwrap_err(),
+            VerifyError::Rejected,
+            "the certificate names globex, the request says acme"
+        );
+        assert_eq!(
+            check_peer(&v, "nope", Some(&peer("nope", "alice"))).await.unwrap_err(),
+            VerifyError::Rejected,
+            "a tenant with no database"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_right_user_and_password_is_the_users_identity() {
+        let (v, _d) = verifier(&["acme"]).await;
+        let f = v.framework("acme").await.unwrap();
+        let (id, _) = user_with_key(&f, "alice", "user", None).await;
+        let got = check(&v, "acme", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap();
+        assert_eq!(got.client_id, id, "identity = the user id, not the hint 'root'");
+    }
+
+    #[tokio::test]
+    async fn a_wrong_password_an_unknown_user_and_another_tenants_user_are_rejected() {
+        let (v, _d) = verifier(&["acme", "globex"]).await;
+        let f = v.framework("acme").await.unwrap();
+        user_with_key(&f, "alice", "user", None).await;
+        assert_eq!(check(&v, "acme", basic("alice", "wrong")).await.unwrap_err(), VerifyError::Rejected);
+        assert_eq!(check(&v, "acme", basic("nobody", "S3cur3-P@ssw0rd!x")).await.unwrap_err(), VerifyError::Rejected);
+        assert_eq!(
+            check(&v, "globex", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap_err(),
+            VerifyError::Rejected,
+            "alice exists only in acme"
+        );
+        assert_eq!(check(&v, "nope", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap_err(), VerifyError::Rejected);
+    }
+
+    #[tokio::test]
+    async fn a_deactivated_user_cannot_log_in_with_a_password() {
+        let (v, _d) = verifier(&["acme"]).await;
+        let f = v.framework("acme").await.unwrap();
+        let (id, _) = user_with_key(&f, "alice", "user", None).await;
+        f.set_user_active(&id, false).await.unwrap();
+        assert_eq!(check(&v, "acme", basic("alice", "S3cur3-P@ssw0rd!x")).await.unwrap_err(), VerifyError::Rejected);
     }
 
     #[tokio::test]
@@ -443,10 +548,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn methods_other_than_api_key_and_jwt_are_unsupported() {
+    async fn custom_credentials_are_unsupported() {
         let (v, _d) = verifier(&["acme"]).await;
-        let basic = Credentials::Basic { username: "a".into(), password: "b".into() };
-        assert_eq!(check(&v, "acme", basic).await.err(), Some(VerifyError::UnsupportedMethod));
         let custom = Credentials::Custom { data: serde_json::json!({}) };
         assert_eq!(check(&v, "acme", custom).await.err(), Some(VerifyError::UnsupportedMethod));
     }
