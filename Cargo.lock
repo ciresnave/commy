@@ -716,9 +716,9 @@ dependencies = [
 
 [[package]]
 name = "configurant"
-version = "0.7.2"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d74e0463d2a71f61262b040f5335203bd10f9bcce23635b2da515336918cfe8"
+checksum = "bf9f8fd4b55d1ea5c0efd0c943e157ed5eb62beb6ea3c8739db0c419b5a11d21"
 dependencies = [
  "clap",
  "redactant",
