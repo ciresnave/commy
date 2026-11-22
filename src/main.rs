@@ -16,6 +16,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     };
+    // The environment over the file, checked against the schema: a bad COMMY_* value stops start-up.
+    if let Err(e) = settings.check_environment() {
+        eprintln!("[Commy] cannot start: {e}");
+        std::process::exit(1);
+    }
     match settings.source() {
         Some(p) => println!("[Commy] Configuration file: {}", p.display()),
         None => println!("[Commy] No configuration file (COMMY_CONFIG or ./commy.toml): environment and defaults"),
