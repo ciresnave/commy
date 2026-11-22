@@ -9,6 +9,7 @@
 # tls_cert_path = "certs/server.pem"
 # tls_key_path = "certs/server.key"
 # tls_client_ca_path = "certs/clients-ca.pem"   # CAs whose client certificates are trusted (mTLS)
+# tls_client_crl_path = "certs/clients.crl.pem" # CRLs (one per trusted CA) for client certificates; read at start-up
 # tls_client_auth = "off"                       # off | optional | required
 # auth_methods = "api_key,jwt"                  # also: basic, mtls (mtls needs tls_client_auth)
 # state_dir = "commy_state"            # "off" keeps nothing on disk

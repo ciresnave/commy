@@ -29,6 +29,7 @@ pub const KEYS: &[&str] = &[
     "tls_cert_path",
     "tls_key_path",
     "tls_client_ca_path",
+    "tls_client_crl_path",
     "tls_client_auth",
     "auth_methods",
     "state_dir",
@@ -352,7 +353,7 @@ mod tests {
         let all: String = KEYS
             .iter()
             .map(|k| match *k {
-                "cluster_nodes" | "tls_cert_path" | "tls_key_path" | "tls_client_ca_path" | "auth_dir" => format!("{k} = \"x\"\n"),
+                "cluster_nodes" | "tls_cert_path" | "tls_key_path" | "tls_client_ca_path" | "tls_client_crl_path" | "auth_dir" => format!("{k} = \"x\"\n"),
                 "audit_max_events" => format!("{k} = 5\n"),
                 _ => {
                     let d = schema().values().iter().find(|v| v.key == *k).and_then(|v| v.default.clone()).unwrap();

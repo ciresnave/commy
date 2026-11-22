@@ -51,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Client certificates and the accepted credential methods (R25). A bad value stops the start.
     let client_ca_path = settings.get("COMMY_TLS_CLIENT_CA_PATH");
+    let client_crl_path = settings.get("COMMY_TLS_CLIENT_CRL_PATH");
     let client_auth = match settings.get("COMMY_TLS_CLIENT_AUTH") {
         Some(v) => commy::config::parse_client_auth(&v).unwrap_or_else(|e| {
             eprintln!("[Commy] cannot start: {e}");
@@ -147,6 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cert_path: cert_path.clone(),
         key_path: key_path.clone(),
         client_ca_path: client_ca_path.clone(),
+        client_crl_path: client_crl_path.clone(),
         client_auth,
         max_connections: 1000,
         buffer_size: 65536,

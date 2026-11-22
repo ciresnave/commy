@@ -94,7 +94,12 @@ or a malformed one names nothing. The client then sends `Authenticate` with `met
 tenant has a database. The identity is the `client_id`. **A certificate carries no tenant-level scope**
 (no `service:create`, no `admin`): what the identity may do is its grants (`Grant` / `Revoke`).
 
-Not done: revocation. Use short-lived certificates; a CRL file for the verifier is future work.
+Revocation (R33): `tls_client_crl_path` is a PEM file of CRLs handed to the same verifier, so a client
+certificate listed in its issuer's CRL fails the handshake. Supply one CRL per trusted CA: with any CRL
+configured, rustls refuses a certificate whose issuer has none in the file (status unknown). The file is read
+once at start-up, so a new CRL needs a restart; a missing, empty or unparsable file, or a CRL path without
+`tls_client_auth`, stops start-up rather than leaving revocation off. Not done: OCSP, and reloading the CRL
+without a restart. Short-lived certificates are still the better first defence.
 
 ## Not covered
 

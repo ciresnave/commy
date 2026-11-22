@@ -98,6 +98,22 @@ impl TlsConfiguration {
         client_ca_path: P,
         mode: ClientAuth,
     ) -> Result<Self, TlsError> {
+        Self::from_files_with_client_auth_and_crl(cert_path, key_path, client_ca_path, mode, None)
+    }
+
+    /// [`TlsConfiguration::from_files_with_client_auth`] plus certificate revocation (R33): `crl_path` is
+    /// a PEM file of one or more CRLs, handed to the same `WebPkiClientVerifier`, so a client certificate
+    /// listed in its issuer's CRL fails the handshake. With a CRL given, rustls refuses a certificate
+    /// whose issuer has no CRL in the file (status unknown), so supply one CRL per trusted CA. A missing,
+    /// empty or unparsable file stops start-up; revocation is never silently off. The file is read once,
+    /// at start-up (a new CRL needs a restart). OCSP is not supported.
+    pub fn from_files_with_client_auth_and_crl<P: AsRef<Path>>(
+        cert_path: P,
+        key_path: P,
+        client_ca_path: P,
+        mode: ClientAuth,
+        crl_path: Option<&Path>,
+    ) -> Result<Self, TlsError> {
         let ca_path = client_ca_path.as_ref();
         if !ca_path.exists() {
             return Err(TlsError::CertificateNotFound(ca_path.to_string_lossy().to_string()));
@@ -121,6 +137,19 @@ impl TlsConfiguration {
             rustls::server::WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider);
         if mode == ClientAuth::Optional {
             builder = builder.allow_unauthenticated();
+        }
+        if let Some(crl_path) = crl_path {
+            if !crl_path.exists() {
+                return Err(TlsError::CertificateNotFound(crl_path.to_string_lossy().to_string()));
+            }
+            let crls = rustls::pki_types::CertificateRevocationListDer::pem_file_iter(crl_path)
+                .map_err(|e| pem_error(e, "client certificate revocation lists", TlsError::InvalidCertificate))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| TlsError::InvalidCertificate("Failed to parse PEM revocation lists".to_string()))?;
+            if crls.is_empty() {
+                return Err(TlsError::InvalidCertificate("No revocation lists found in file".to_string()));
+            }
+            builder = builder.with_crls(crls);
         }
         let verifier = builder
             .build()
@@ -346,6 +375,11 @@ mod tests {
         }
 
         fn setup(mode: ClientAuth) -> (Setup, Ca) {
+            setup_with_crl(mode, |_| None)
+        }
+
+        /// `crl` makes the CRL file's PEM from the client CA, or none.
+        fn setup_with_crl(mode: ClientAuth, crl: impl FnOnce(&Ca) -> Option<String>) -> (Setup, Ca) {
             let server_ca = ca("server ca");
             let client_ca = ca("client ca");
             let server = leaf(&server_ca, &["dns:localhost"]);
@@ -354,11 +388,16 @@ mod tests {
             std::fs::write(p("cert.pem"), &server.cert_pem).unwrap();
             std::fs::write(p("key.pem"), &server.key_pem).unwrap();
             std::fs::write(p("ca.pem"), &client_ca.pem).unwrap();
-            let config = TlsConfiguration::from_files_with_client_auth(
+            let crl_file = crl(&client_ca).map(|pem| {
+                std::fs::write(p("crl.pem"), pem).unwrap();
+                p("crl.pem")
+            });
+            let config = TlsConfiguration::from_files_with_client_auth_and_crl(
                 p("cert.pem"),
                 p("key.pem"),
                 p("ca.pem"),
                 mode,
+                crl_file.as_deref(),
             )
             .unwrap()
             .config;
@@ -437,6 +476,57 @@ mod tests {
         async fn optional_accepts_a_client_with_no_certificate() {
             let (s, _) = setup(ClientAuth::Optional);
             assert_eq!(handshake(&s, None).await.unwrap(), None);
+        }
+
+        #[tokio::test]
+        async fn a_revoked_certificate_is_refused_and_a_valid_one_still_accepted() {
+            for mode in [ClientAuth::Required, ClientAuth::Optional] {
+                // Build the leaves first: the CRL names the serial of one of them.
+                let revoked_leaf = std::cell::RefCell::new(None);
+                let valid_leaf = std::cell::RefCell::new(None);
+                let (s, _) = setup_with_crl(mode, |client_ca| {
+                    let revoked = leaf(client_ca, &["uri:commy://acme/mallory"]);
+                    let valid = leaf(client_ca, &["uri:commy://acme/alice"]);
+                    let pem = client_ca.crl_pem(&[revoked.serial]);
+                    *revoked_leaf.borrow_mut() = Some(revoked);
+                    *valid_leaf.borrow_mut() = Some(valid);
+                    Some(pem)
+                });
+                let revoked = revoked_leaf.borrow_mut().take().unwrap();
+                let valid = valid_leaf.borrow_mut().take().unwrap();
+                let seen = handshake(&s, Some(&valid)).await.unwrap().expect("the valid certificate is seen");
+                assert_eq!(seen, valid.der, "{mode:?}: control, a certificate not in the CRL is accepted");
+                assert!(handshake(&s, Some(&revoked)).await.is_err(), "{mode:?}: the revoked certificate must fail");
+            }
+        }
+
+        #[tokio::test]
+        async fn without_a_crl_the_same_certificate_is_accepted() {
+            // The control for the revocation test: the revoked certificate's only difference is the CRL.
+            let (s, client_ca) = setup(ClientAuth::Required);
+            let l = leaf(&client_ca, &["uri:commy://acme/mallory"]);
+            assert!(handshake(&s, Some(&l)).await.is_ok());
+        }
+
+        #[test]
+        fn a_missing_empty_or_garbled_crl_file_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let client_ca = ca("client ca");
+            let server = leaf(&ca("server ca"), &["dns:localhost"]);
+            let p = |n: &str| dir.path().join(n);
+            std::fs::write(p("cert.pem"), &server.cert_pem).unwrap();
+            std::fs::write(p("key.pem"), &server.key_pem).unwrap();
+            std::fs::write(p("ca.pem"), &client_ca.pem).unwrap();
+            std::fs::write(p("empty.pem"), "").unwrap();
+            std::fs::write(p("garbled.pem"), "-----BEGIN X509 CRL-----
+not base64!
+-----END X509 CRL-----
+").unwrap();
+            for name in ["nope.pem", "empty.pem", "garbled.pem"] {
+                let r = TlsConfiguration::from_files_with_client_auth_and_crl(
+                    p("cert.pem"), p("key.pem"), p("ca.pem"), ClientAuth::Required, Some(&p(name)));
+                assert!(r.is_err(), "{name} must stop start-up");
+            }
         }
 
         #[test]
