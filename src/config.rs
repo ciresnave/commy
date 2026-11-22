@@ -117,7 +117,8 @@ pub fn watch(
                     }
                     Ok(new) => {
                         let mut s = server.write().await;
-                        for key in KEYS.iter().filter(|k| !LIVE_KEYS.contains(k)) {
+                        // The schema says which keys need a restart (`restart = true`), not a list kept here.
+                        for key in schema().values().iter().filter(|v| v.restart).map(|v| v.key.as_str()) {
                             if current.file_value(key) != new.file_value(key) {
                                 s.audit(&format!("config: {key} changed in the file; it takes effect after a restart"));
                             }
