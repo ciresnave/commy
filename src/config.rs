@@ -29,6 +29,7 @@ pub const KEYS: &[&str] = &[
     "tls_cert_path",
     "tls_key_path",
     "tls_client_ca_path",
+    "tls_client_crl_path",
     "tls_client_auth",
     "auth_methods",
     "state_dir",
@@ -117,7 +118,8 @@ pub fn watch(
                     }
                     Ok(new) => {
                         let mut s = server.write().await;
-                        for key in KEYS.iter().filter(|k| !LIVE_KEYS.contains(k)) {
+                        // The schema says which keys need a restart (`restart = true`), not a list kept here.
+                        for key in schema().values().iter().filter(|v| v.restart).map(|v| v.key.as_str()) {
                             if current.file_value(key) != new.file_value(key) {
                                 s.audit(&format!("config: {key} changed in the file; it takes effect after a restart"));
                             }
@@ -189,6 +191,8 @@ impl std::error::Error for ConfigError {}
 pub struct Settings {
     file: HashMap<String, String>,
     source: Option<PathBuf>,
+    /// The text the file settings came from, so the environment can be checked against the schema with it.
+    text: String,
 }
 
 impl Settings {
@@ -222,7 +226,7 @@ impl Settings {
             .file("commy.toml", text)
             .build()
             .map_err(|e| ConfigError::Invalid(e.to_string()))?;
-        Ok(Settings { file, source: None })
+        Ok(Settings { file, source: None, text: text.to_string() })
     }
 
     /// Read and parse the file at `path`.
@@ -232,6 +236,29 @@ impl Settings {
         let mut s = Self::parse(&text)?;
         s.source = Some(path.to_path_buf());
         Ok(s)
+    }
+
+    /// Check the settings in the process environment (the `COMMY_` variables the schema declares) layered
+    /// over this file, with the schema's types, ranges and choices: `COMMY_LISTEN_PORT=abc` is an error
+    /// naming the setting, not a silent default. Start-up calls it; the reload task does not, since the
+    /// environment cannot change under a running server. Secrets are not in the schema and not read here.
+    pub fn check_environment(&self) -> Result<(), ConfigError> {
+        let declared: std::collections::BTreeMap<String, String> = schema()
+            .values()
+            .iter()
+            .filter_map(|v| v.env.as_deref())
+            .filter_map(|name| std::env::var(name).ok().map(|val| (name.to_string(), val)))
+            .collect();
+        self.check_environment_with(declared)
+    }
+
+    fn check_environment_with(&self, env: std::collections::BTreeMap<String, String>) -> Result<(), ConfigError> {
+        configurant::Loader::new(schema())
+            .file("commy.toml", &self.text)
+            .env(env)
+            .build()
+            .map(|_| ())
+            .map_err(|e| ConfigError::Invalid(e.to_string()))
     }
 
     /// The file named by `COMMY_CONFIG` (it must exist), else `./commy.toml` if present, else nothing.
@@ -326,7 +353,7 @@ mod tests {
         let all: String = KEYS
             .iter()
             .map(|k| match *k {
-                "cluster_nodes" | "tls_cert_path" | "tls_key_path" | "tls_client_ca_path" | "auth_dir" => format!("{k} = \"x\"\n"),
+                "cluster_nodes" | "tls_cert_path" | "tls_key_path" | "tls_client_ca_path" | "tls_client_crl_path" | "auth_dir" => format!("{k} = \"x\"\n"),
                 "audit_max_events" => format!("{k} = 5\n"),
                 _ => {
                     let d = schema().values().iter().find(|v| v.key == *k).and_then(|v| v.default.clone()).unwrap();
@@ -352,6 +379,22 @@ mod tests {
         for v in schema().values() {
             assert_eq!(v.env.as_deref(), Some(format!("COMMY_{}", v.key.to_ascii_uppercase()).as_str()), "{}", v.key);
         }
+    }
+
+    #[test]
+    fn the_environment_is_checked_against_the_schema_over_the_file() {
+        use std::collections::BTreeMap;
+        let s = Settings::parse("listen_port = 9000
+").unwrap();
+        let env = |k: &str, v: &str| BTreeMap::from([(k.to_string(), v.to_string())]);
+        assert!(s.check_environment_with(env("COMMY_LISTEN_PORT", "8081")).is_ok(), "control: a valid value");
+        for (k, v) in [("COMMY_LISTEN_PORT", "abc"), ("COMMY_LISTEN_PORT", "0"), ("COMMY_TLS_CLIENT_AUTH", "sometimes")] {
+            match s.check_environment_with(env(k, v)) {
+                Err(ConfigError::Invalid(m)) => assert!(m.to_ascii_lowercase().contains(&k[6..].to_ascii_lowercase()), "{k}: {m}"),
+                other => panic!("{k}={v}: {other:?}"),
+            }
+        }
+        assert!(Settings::empty().check_environment_with(BTreeMap::new()).is_ok(), "no file, no environment");
     }
 
     #[test]

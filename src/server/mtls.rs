@@ -80,8 +80,12 @@ pub fn identity_from_certificate(der: &[u8]) -> Result<PeerIdentity, MtlsError> 
 pub(crate) mod test_pki {
     //! Throwaway certificates for tests.
     use rcgen::{
-        BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair, SanType,
+        BasicConstraints, CertificateParams, CertificateRevocationListParams, IsCa, Issuer, KeyIdMethod, KeyPair,
+        RevokedCertParams, SanType, SerialNumber,
     };
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_SERIAL: AtomicU64 = AtomicU64::new(1000);
 
     pub struct Ca {
         pub pem: String,
@@ -93,6 +97,35 @@ pub(crate) mod test_pki {
         pub cert_pem: String,
         pub key_pem: String,
         pub der: Vec<u8>,
+        /// The serial number, so a CRL can name it.
+        pub serial: u64,
+    }
+
+    impl Ca {
+        /// A CRL (PEM) signed by this CA revoking the certificates with these serials.
+        pub fn crl_pem(&self, revoked: &[u64]) -> String {
+            let issuer = Issuer::new(self.params.clone(), &self.key);
+            CertificateRevocationListParams {
+                this_update: rcgen::date_time_ymd(2020, 1, 1),
+                next_update: rcgen::date_time_ymd(2099, 1, 1),
+                crl_number: SerialNumber::from(1),
+                issuing_distribution_point: None,
+                revoked_certs: revoked
+                    .iter()
+                    .map(|s| RevokedCertParams {
+                        serial_number: SerialNumber::from(*s),
+                        revocation_time: rcgen::date_time_ymd(2024, 1, 1),
+                        reason_code: None,
+                        invalidity_date: None,
+                    })
+                    .collect(),
+                key_identifier_method: KeyIdMethod::Sha256,
+            }
+            .signed_by(&issuer)
+            .unwrap()
+            .pem()
+            .unwrap()
+        }
     }
 
     pub fn ca(name: &str) -> Ca {
@@ -118,10 +151,12 @@ pub(crate) mod test_pki {
             .collect::<Vec<_>>();
         let mut params = CertificateParams::new(vec![]).unwrap();
         params.subject_alt_names = names;
+        let serial = NEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
+        params.serial_number = Some(SerialNumber::from(serial));
         let key = KeyPair::generate().unwrap();
         let issuer = Issuer::new(ca.params.clone(), &ca.key);
         let cert = params.signed_by(&key, &issuer).unwrap();
-        Leaf { cert_pem: cert.pem(), key_pem: key.serialize_pem(), der: cert.der().to_vec() }
+        Leaf { cert_pem: cert.pem(), key_pem: key.serialize_pem(), der: cert.der().to_vec(), serial }
     }
 }
 

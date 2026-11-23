@@ -54,6 +54,8 @@ pub struct WssServerConfig {
     /// PEM file of the CAs whose client certificates are trusted (mTLS, R25); needed when
     /// `client_auth` is set.
     pub client_ca_path: Option<String>,
+    /// PEM file of certificate revocation lists for client certificates (R33); needs `client_auth`.
+    pub client_crl_path: Option<String>,
     /// Ask clients for a certificate: `None` (the default) does not.
     pub client_auth: Option<tls::ClientAuth>,
     /// Maximum concurrent connections
@@ -70,6 +72,7 @@ impl Default for WssServerConfig {
             cert_path: None,
             key_path: None,
             client_ca_path: None,
+            client_crl_path: None,
             client_auth: None,
             max_connections: 1000,
             buffer_size: 65536,
@@ -119,11 +122,15 @@ impl WssServer {
     /// Initialize TLS from certificate and key files
     pub fn initialize_tls(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(cert_path), Some(key_path)) = (&self.config.cert_path, &self.config.key_path) {
+            let crl = self.config.client_crl_path.as_deref().map(std::path::Path::new);
             let tls_config = match (self.config.client_auth, &self.config.client_ca_path) {
+                (None, _) if crl.is_some() => {
+                    return Err("tls_client_crl_path is set but tls_client_auth is not: revocation would not be checked".into());
+                }
                 (None, _) => TlsConfiguration::from_files(cert_path, key_path)?,
                 (Some(mode), Some(ca)) => {
-                    println!("TLS client certificates: {mode:?}, trusted CAs from {ca}");
-                    TlsConfiguration::from_files_with_client_auth(cert_path, key_path, ca, mode)?
+                    println!("TLS client certificates: {mode:?}, trusted CAs from {ca}, revocation lists: {}", crl.map_or("none".to_string(), |p| p.display().to_string()));
+                    TlsConfiguration::from_files_with_client_auth_and_crl(cert_path, key_path, ca, mode, crl)?
                 }
                 (Some(_), None) => {
                     return Err("tls_client_auth is set but tls_client_ca_path is not".into());
@@ -244,6 +251,7 @@ mod tests {
             cert_path: Some("cert.pem".to_string()),
             key_path: Some("key.pem".to_string()),
             client_ca_path: None,
+            client_crl_path: None,
             client_auth: None,
             max_connections: 5000,
             buffer_size: 131072,

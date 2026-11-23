@@ -70,6 +70,13 @@ env = "COMMY_TLS_CLIENT_CA_PATH"
 restart = true
 
 [[value]]
+key = "tls_client_crl_path"
+type = "path"
+description = "PEM file of CRLs (one per trusted client CA) checked against client certificates; read once at start-up"
+env = "COMMY_TLS_CLIENT_CRL_PATH"
+restart = true
+
+[[value]]
 key = "tls_client_auth"
 type = "enum"
 default = "off"
