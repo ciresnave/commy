@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (R33 client certificate revocation; **Breaking**; version for the gate to allocate)
+## 0.30.0 (R33 client certificate revocation; **Breaking**; allocated by pm-assist 2026-11-23)
 - Client certificate revocation (R33): `tls_client_crl_path` (restart-only) hands a PEM file of CRLs to the rustls `WebPkiClientVerifier`; a revoked client certificate fails the handshake in `required` and `optional` mode (test with a revoked and a valid certificate). A bad or missing file, or a CRL path without `tls_client_auth`, stops start-up. **Breaking (library callers):** `WssServerConfig` gains the public field `client_crl_path`; `TlsConfiguration::from_files_with_client_auth_and_crl` is new. Not done: OCSP, CRL reload.
 
 ## 0.29.1 (R26 configuration schema + Release only from a pushed v* tag; additive; allocated by pm-assist)
