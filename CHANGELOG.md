@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.30.1 (CI only: Release workflow portfolio pin moved to coderipper 467fd259, 0.48.1; no code change; not breaking; allocated by pm-assist 2026-11-26)
+- `.github/workflows/ci-release.yml` calls `ciresnave/coderipper/.github/workflows/portfolio.yml` at `467fd259d6d062cba4c5683d310f1a6f2b66e763` (commy#92).
+
 ## 0.30.0 (R33 client certificate revocation; **Breaking**; allocated by pm-assist 2026-11-23)
 - Client certificate revocation (R33): `tls_client_crl_path` (restart-only) hands a PEM file of CRLs to the rustls `WebPkiClientVerifier`; a revoked client certificate fails the handshake in `required` and `optional` mode (test with a revoked and a valid certificate). A bad or missing file, or a CRL path without `tls_client_auth`, stops start-up. **Breaking (library callers):** `WssServerConfig` gains the public field `client_crl_path`; `TlsConfiguration::from_files_with_client_auth_and_crl` is new. Not done: OCSP, CRL reload.
 
